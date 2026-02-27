@@ -3,7 +3,8 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { getCurrentUser, hasPermission } from '@/lib/auth';
+import { getCurrentUser, hasPermission, restoreSession } from '@/lib/auth';
+import { db } from '@/lib/db/indexeddb';
 import { getDashboardStats, getTopPuroksByPopulation, getTopPuroksByVulnerability } from '@/lib/db/queries';
 import { Users, Home, AlertTriangle, Users2, Baby, Accessibility } from 'lucide-react';
 
@@ -20,7 +21,7 @@ interface Stats {
 
 export default function Dashboard() {
   const router = useRouter();
-  const user = getCurrentUser();
+  const [user, setUser] = useState<ReturnType<typeof getCurrentUser>>(null);
   const [stats, setStats] = useState<Stats | null>(null);
   const [topPuroks, setTopPuroks] = useState<Array<{ purok: string; population: number }>>([]);
   const [topVulnerable, setTopVulnerable] = useState<Array<{ purok: string; vulnerable_count: number }>>([]);
@@ -28,18 +29,21 @@ export default function Dashboard() {
   const [error, setError] = useState('');
 
   useEffect(() => {
-    // Check authentication
-    if (!user) {
-      router.push('/login');
-      return;
-    }
-
-    // Load dashboard data
-    async function loadData() {
+    // Restore session and check authentication
+    async function initDashboard() {
       try {
-        setIsLoading(true);
-        const barangay_id = user.barangay_id;
+        await db.init();
+        const restoredUser = restoreSession();
         
+        if (!restoredUser) {
+          router.push('/login');
+          return;
+        }
+
+        setUser(restoredUser);
+
+        // Load dashboard data
+        const barangay_id = restoredUser.barangay_id;
         const [dashStats, purokPop, purokVuln] = await Promise.all([
           getDashboardStats(barangay_id),
           getTopPuroksByPopulation(barangay_id),
@@ -57,8 +61,8 @@ export default function Dashboard() {
       }
     }
 
-    loadData();
-  }, [user, router]);
+    initDashboard();
+  }, [router]);
 
   if (!user) {
     return null;

@@ -2,7 +2,7 @@
 
 import { FormEvent, useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { login } from '@/lib/auth';
+import { login, restoreSession } from '@/lib/auth';
 import { db, seedInitialData } from '@/lib/db/indexeddb';
 
 export default function LoginPage() {
@@ -13,12 +13,19 @@ export default function LoginPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [mounted, setMounted] = useState(false);
 
-  // Set initial values only after hydration to avoid mismatch
+  // Set initial values and check for existing session
   useEffect(() => {
+    // Check if user is already logged in
+    const existingUser = restoreSession();
+    if (existingUser) {
+      router.push('/dashboard');
+      return;
+    }
+
     setEmail('admin@mswdo.local');
     setPassword('admin123');
     setMounted(true);
-  }, []);
+  }, [router]);
 
   async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
