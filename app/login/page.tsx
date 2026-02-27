@@ -7,24 +7,17 @@ import { db, seedInitialData } from '@/lib/db/indexeddb';
 
 export default function LoginPage() {
   const router = useRouter();
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
+  const [email, setEmail] = useState('admin@mswdo.local');
+  const [password, setPassword] = useState('admin123');
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [mounted, setMounted] = useState(false);
 
-  // Set initial values and check for existing session
+  // Check for existing session on mount
   useEffect(() => {
-    // Check if user is already logged in
     const existingUser = restoreSession();
     if (existingUser) {
       router.push('/dashboard');
-      return;
     }
-
-    setEmail('admin@mswdo.local');
-    setPassword('admin123');
-    setMounted(true);
   }, [router]);
 
   async function handleSubmit(e: FormEvent<HTMLFormElement>) {
@@ -59,7 +52,7 @@ export default function LoginPage() {
 
         {/* Login Card */}
         <div className="bg-card border border-border rounded-lg shadow-lg p-8">
-          <form onSubmit={handleSubmit} className="space-y-4">
+          <form onSubmit={handleSubmit} className="space-y-4" suppressHydrationWarning>
             {/* Email Field */}
             <div>
               <label htmlFor="email" className="block text-sm font-medium text-foreground mb-2">
