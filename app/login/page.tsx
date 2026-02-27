@@ -1,16 +1,24 @@
 'use client';
 
-import { FormEvent, useState } from 'react';
+import { FormEvent, useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { login } from '@/lib/auth';
 import { db, seedInitialData } from '@/lib/db/indexeddb';
 
 export default function LoginPage() {
   const router = useRouter();
-  const [email, setEmail] = useState('admin@mswdo.local');
-  const [password, setPassword] = useState('admin123');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [mounted, setMounted] = useState(false);
+
+  // Set initial values only after hydration to avoid mismatch
+  useEffect(() => {
+    setEmail('admin@mswdo.local');
+    setPassword('admin123');
+    setMounted(true);
+  }, []);
 
   async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
