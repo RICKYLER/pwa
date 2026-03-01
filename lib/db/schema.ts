@@ -109,6 +109,8 @@ export interface DistributionEvent {
   type: DistributionType;
   incident_id?: string;
   location: string;
+  gps_lat?: number;
+  gps_lng?: number;
   scheduled_date: string; // ISO format
   status: DistributionStatus;
   created_by: string;

@@ -42,7 +42,7 @@ export async function getResidents(filters?: {
 
     return filtered.sort((a, b) => a.full_name.localeCompare(b.full_name));
   } catch (error) {
-    console.error('[v0] Error fetching residents:', error);
+    console.error('Error fetching residents:', error);
     throw error;
   }
 }
@@ -54,7 +54,7 @@ export async function getResident(id: string): Promise<Resident | undefined> {
   try {
     return await db.get<Resident>(STORE_NAMES.residents, id);
   } catch (error) {
-    console.error('[v0] Error fetching resident:', error);
+    console.error('Error fetching resident:', error);
     throw error;
   }
 }
@@ -91,7 +91,7 @@ export async function createResident(data: Omit<Resident, 'id' | 'createdAt' | '
         ...flags,
       } as VulnerabilityFlags);
 
-      console.log(`[v0] Vulnerability flags created for ${resident.full_name}:`, {
+      console.log(`Vulnerability flags created for ${resident.full_name}:`, {
         is_child: flags.is_child,
         is_adult: flags.is_adult,
         is_senior: flags.is_senior,
@@ -105,10 +105,10 @@ export async function createResident(data: Omit<Resident, 'id' | 'createdAt' | '
       { name: data.full_name, birthdate: data.birthdate }
     );
 
-    console.log('[v0] Resident created:', resident.id);
+    console.log('Resident created:', resident.id);
     return resident;
   } catch (error) {
-    console.error('[v0] Error creating resident:', error);
+    console.error('Error creating resident:', error);
     throw error;
   }
 }
@@ -146,7 +146,7 @@ export async function updateResident(id: string, updates: Partial<Resident>): Pr
         const updated_flags = updateAgeBasedFlags(updated, household, existingFlags);
         if (updated_flags) {
           await db.put(STORE_NAMES.vulnerability_flags, updated_flags);
-          console.log('[v0] Vulnerability flags updated for resident:', id);
+          console.log('Vulnerability flags updated for resident:', id);
         }
       }
     }
@@ -158,10 +158,10 @@ export async function updateResident(id: string, updates: Partial<Resident>): Pr
       { changes: updates }
     );
 
-    console.log('[v0] Resident updated:', id);
+    console.log('Resident updated:', id);
     return updated;
   } catch (error) {
-    console.error('[v0] Error updating resident:', error);
+    console.error('Error updating resident:', error);
     throw error;
   }
 }
@@ -180,9 +180,9 @@ export async function deleteResident(id: string, reason: 'moved_out' | 'deceased
       { status: reason }
     );
 
-    console.log('[v0] Resident deleted (soft):', id);
+    console.log('Resident deleted (soft):', id);
   } catch (error) {
-    console.error('[v0] Error deleting resident:', error);
+    console.error('Error deleting resident:', error);
     throw error;
   }
 }
@@ -197,7 +197,7 @@ export async function getResidentVulnerabilityFlags(resident_id: string): Promis
       `vf_${resident_id}`
     );
   } catch (error) {
-    console.error('[v0] Error fetching vulnerability flags:', error);
+    console.error('Error fetching vulnerability flags:', error);
     throw error;
   }
 }
@@ -237,10 +237,10 @@ export async function updateHealthFlags(
       { health_updates: updates }
     );
 
-    console.log('[v0] Health flags updated for resident:', resident_id);
+    console.log('Health flags updated for resident:', resident_id);
     return updated;
   } catch (error) {
-    console.error('[v0] Error updating health flags:', error);
+    console.error('Error updating health flags:', error);
     throw error;
   }
 }
@@ -283,7 +283,7 @@ export async function countVulnerableResidents(barangay_id: string): Promise<{
 
     return counts;
   } catch (error) {
-    console.error('[v0] Error counting vulnerable residents:', error);
+    console.error('Error counting vulnerable residents:', error);
     throw error;
   }
 }

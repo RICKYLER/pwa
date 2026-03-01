@@ -23,7 +23,7 @@ export async function getInventoryItems(filters?: {
 
     return filtered.sort((a, b) => a.item_name.localeCompare(b.item_name));
   } catch (error) {
-    console.error('[v0] Error fetching inventory items:', error);
+    console.error('Error fetching inventory items:', error);
     throw error;
   }
 }
@@ -35,7 +35,7 @@ export async function getInventoryItem(id: string): Promise<InventoryItem | unde
   try {
     return await db.get<InventoryItem>(STORE_NAMES.inventory_items, id);
   } catch (error) {
-    console.error('[v0] Error fetching inventory item:', error);
+    console.error('Error fetching inventory item:', error);
     throw error;
   }
 }
@@ -62,10 +62,10 @@ export async function createInventoryItem(
       { item_name: data.item_name, category: data.category, quantity: data.quantity_available }
     );
 
-    console.log('[v0] Inventory item created:', item.id);
+    console.log('Inventory item created:', item.id);
     return item;
   } catch (error) {
-    console.error('[v0] Error creating inventory item:', error);
+    console.error('Error creating inventory item:', error);
     throw error;
   }
 }
@@ -99,10 +99,10 @@ export async function updateInventoryItem(
       { changes: updates }
     );
 
-    console.log('[v0] Inventory item updated:', id);
+    console.log('Inventory item updated:', id);
     return updated;
   } catch (error) {
-    console.error('[v0] Error updating inventory item:', error);
+    console.error('Error updating inventory item:', error);
     throw error;
   }
 }
@@ -120,7 +120,7 @@ export async function reduceInventoryQuantity(id: string, quantity: number): Pro
     const newQuantity = Math.max(0, item.quantity_available - quantity);
     return updateInventoryItem(id, { quantity_available: newQuantity });
   } catch (error) {
-    console.error('[v0] Error reducing inventory:', error);
+    console.error('Error reducing inventory:', error);
     throw error;
   }
 }
@@ -133,7 +133,7 @@ export async function getLowStockItems(): Promise<InventoryItem[]> {
     const all = await getInventoryItems();
     return all.filter(item => item.quantity_available < 10).sort((a, b) => a.quantity_available - b.quantity_available);
   } catch (error) {
-    console.error('[v0] Error getting low stock items:', error);
+    console.error('Error getting low stock items:', error);
     throw error;
   }
 }
@@ -152,9 +152,9 @@ export async function deleteInventoryItem(id: string): Promise<void> {
       {}
     );
 
-    console.log('[v0] Inventory item deleted:', id);
+    console.log('Inventory item deleted:', id);
   } catch (error) {
-    console.error('[v0] Error deleting inventory item:', error);
+    console.error('Error deleting inventory item:', error);
     throw error;
   }
 }

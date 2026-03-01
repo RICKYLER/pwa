@@ -16,6 +16,7 @@ const PERMISSIONS = {
     'update_resident',
     'view_vulnerability',
     'view_reports',
+    'manage_inventory',
   ],
   health_worker: [
     'view_residents',
@@ -70,7 +71,7 @@ export function hasPermission(action: string): boolean {
  * In MVP, using simple password matching (production should use bcrypt)
  */
 export async function login(email: string, password: string): Promise<User> {
-  console.log(`[v0] Attempting login for ${email}`);
+  console.log(`Attempting login for ${email}`);
 
   try {
     // Get user from IndexedDB
@@ -88,15 +89,15 @@ export async function login(email: string, password: string): Promise<User> {
 
     // Set current user
     currentUser = user;
-    
+
     // Store in localStorage for persistence
     localStorage.setItem('auth_user', JSON.stringify(user));
     localStorage.setItem('auth_token', `token_${user.id}_${Date.now()}`);
 
-    console.log(`[v0] Login successful for ${user.name} (${user.role})`);
+    console.log(`Login successful for ${user.name} (${user.role})`);
     return user;
   } catch (error) {
-    console.error('[v0] Login failed:', error);
+    console.error('Login failed:', error);
     throw error;
   }
 }
@@ -105,7 +106,7 @@ export async function login(email: string, password: string): Promise<User> {
  * Logout current user
  */
 export function logout(): void {
-  console.log('[v0] Logging out user:', currentUser?.name);
+  console.log('Logging out user:', currentUser?.name);
   currentUser = null;
   localStorage.removeItem('auth_user');
   localStorage.removeItem('auth_token');
@@ -120,11 +121,11 @@ export function restoreSession(): User | null {
     const stored = localStorage.getItem('auth_user');
     if (stored) {
       currentUser = JSON.parse(stored);
-      console.log('[v0] Session restored for:', currentUser.name);
+      console.log('Session restored for:', currentUser.name);
       return currentUser;
     }
   } catch (error) {
-    console.error('[v0] Failed to restore session:', error);
+    console.error('Failed to restore session:', error);
     localStorage.removeItem('auth_user');
     localStorage.removeItem('auth_token');
   }
@@ -169,8 +170,8 @@ export async function createAuditLog(
     };
 
     await db.add(STORE_NAMES.audit_logs, log);
-    console.log('[v0] Audit log created:', action);
+    console.log('Audit log created:', action);
   } catch (error) {
-    console.error('[v0] Failed to create audit log:', error);
+    console.error('Failed to create audit log:', error);
   }
 }

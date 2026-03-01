@@ -40,13 +40,13 @@ export class IndexedDBManager {
 
       request.onsuccess = () => {
         this.db = request.result;
-        console.log('[v0] IndexedDB initialized');
+        console.log('IndexedDB initialized');
         resolve(this.db);
       };
 
       request.onupgradeneeded = (event) => {
         const db = (event.target as IDBOpenDBRequest).result;
-        console.log('[v0] Creating IndexedDB schema v' + DB_VERSION);
+        console.log('Creating IndexedDB schema v' + DB_VERSION);
 
         // Create stores with auto-increment where needed
         const createStore = (name: string) => {
@@ -82,7 +82,7 @@ export class IndexedDBManager {
       const request = store.add(data);
 
       request.onsuccess = () => {
-        console.log(`[v0] Added to ${storeName}:`, data.id);
+        console.log(`Added to ${storeName}:`, data.id);
         resolve(data);
       };
       request.onerror = () => reject(request.error);
@@ -97,7 +97,7 @@ export class IndexedDBManager {
       const request = store.put(data);
 
       request.onsuccess = () => {
-        console.log(`[v0] Updated ${storeName}:`, data.id);
+        console.log(`Updated ${storeName}:`, data.id);
         resolve(data);
       };
       request.onerror = () => reject(request.error);
@@ -136,7 +136,7 @@ export class IndexedDBManager {
       const request = store.delete(key);
 
       request.onsuccess = () => {
-        console.log(`[v0] Deleted from ${storeName}:`, key);
+        console.log(`Deleted from ${storeName}:`, key);
         resolve();
       };
       request.onerror = () => reject(request.error);
@@ -169,13 +169,13 @@ export const db = new IndexedDBManager();
 
 // Seed initial demo data
 export async function seedInitialData() {
-  console.log('[v0] Seeding initial data...');
+  console.log('Seeding initial data...');
 
   try {
     // Check if users already exist
     const users = await db.getAll<User>(STORE_NAMES.users);
     if (users.length > 0) {
-      console.log('[v0] Data already seeded, skipping...');
+      console.log('Data already seeded, skipping...');
       return;
     }
 
@@ -389,8 +389,8 @@ export async function seedInitialData() {
       await db.add(STORE_NAMES.programs, program);
     }
 
-    console.log('[v0] Initial data seeded successfully');
+    console.log('Initial data seeded successfully');
   } catch (error) {
-    console.error('[v0] Error seeding initial data:', error);
+    console.error('Error seeding initial data:', error);
   }
 }

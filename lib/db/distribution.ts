@@ -24,7 +24,7 @@ export async function getDistributionEvents(filters?: {
 
     return filtered.sort((a, b) => new Date(b.scheduled_date).getTime() - new Date(a.scheduled_date).getTime());
   } catch (error) {
-    console.error('[v0] Error fetching distribution events:', error);
+    console.error('Error fetching distribution events:', error);
     throw error;
   }
 }
@@ -36,7 +36,7 @@ export async function getDistributionEvent(id: string): Promise<DistributionEven
   try {
     return await db.get<DistributionEvent>(STORE_NAMES.distribution_events, id);
   } catch (error) {
-    console.error('[v0] Error fetching distribution event:', error);
+    console.error('Error fetching distribution event:', error);
     throw error;
   }
 }
@@ -65,10 +65,10 @@ export async function createDistributionEvent(
       { event_name: data.event_name, type: data.type, location: data.location }
     );
 
-    console.log('[v0] Distribution event created:', event.id);
+    console.log('Distribution event created:', event.id);
     return event;
   } catch (error) {
-    console.error('[v0] Error creating distribution event:', error);
+    console.error('Error creating distribution event:', error);
     throw error;
   }
 }
@@ -102,10 +102,10 @@ export async function updateDistributionEvent(
       { changes: updates }
     );
 
-    console.log('[v0] Distribution event updated:', id);
+    console.log('Distribution event updated:', id);
     return updated;
   } catch (error) {
-    console.error('[v0] Error updating distribution event:', error);
+    console.error('Error updating distribution event:', error);
     throw error;
   }
 }
@@ -137,10 +137,10 @@ export async function getEligibleBeneficiaries(
       return true;
     });
 
-    console.log(`[v0] Found ${eligible.length} eligible beneficiaries for ${eventType}`);
+    console.log(`Found ${eligible.length} eligible beneficiaries for ${eventType}`);
     return eligible;
   } catch (error) {
-    console.error('[v0] Error getting eligible beneficiaries:', error);
+    console.error('Error getting eligible beneficiaries:', error);
     throw error;
   }
 }
@@ -178,10 +178,10 @@ export async function recordDistribution(
       { event_id: data.event_id, resident_id: data.resident_id, items_count: data.items_distributed.length }
     );
 
-    console.log('[v0] Distribution record created:', record.id);
+    console.log('Distribution record created:', record.id);
     return record;
   } catch (error) {
-    console.error('[v0] Error recording distribution:', error);
+    console.error('Error recording distribution:', error);
     throw error;
   }
 }
@@ -194,7 +194,7 @@ export async function getDistributionRecords(eventId: string): Promise<Distribut
     const all = await db.getAll<DistributionRecord>(STORE_NAMES.distribution_records);
     return all.filter(r => r.event_id === eventId).sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
   } catch (error) {
-    console.error('[v0] Error fetching distribution records:', error);
+    console.error('Error fetching distribution records:', error);
     throw error;
   }
 }
@@ -207,7 +207,7 @@ export async function getDistributionCount(eventId: string, residentId: string):
     const records = await getDistributionRecords(eventId);
     return records.filter(r => r.resident_id === residentId).length;
   } catch (error) {
-    console.error('[v0] Error counting distributions:', error);
+    console.error('Error counting distributions:', error);
     throw error;
   }
 }
@@ -229,7 +229,7 @@ export async function getDistributionReport(eventId: string) {
       records,
     };
   } catch (error) {
-    console.error('[v0] Error generating distribution report:', error);
+    console.error('Error generating distribution report:', error);
     throw error;
   }
 }

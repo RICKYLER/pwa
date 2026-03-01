@@ -38,7 +38,7 @@ export async function getDashboardStats(barangay_id: string) {
       low_income_count: low_income,
     };
   } catch (error) {
-    console.error('[v0] Error getting dashboard stats:', error);
+    console.error('Error getting dashboard stats:', error);
     throw error;
   }
 }
@@ -63,7 +63,7 @@ export async function getTopPuroksByPopulation(
       .sort((a, b) => b.population - a.population)
       .slice(0, limit);
   } catch (error) {
-    console.error('[v0] Error getting top puroks by population:', error);
+    console.error('Error getting top puroks by population:', error);
     throw error;
   }
 }
@@ -115,7 +115,7 @@ export async function getTopPuroksByVulnerability(
       .sort((a, b) => b.vulnerable_count - a.vulnerable_count)
       .slice(0, limit);
   } catch (error) {
-    console.error('[v0] Error getting top puroks by vulnerability:', error);
+    console.error('Error getting top puroks by vulnerability:', error);
     throw error;
   }
 }
@@ -171,7 +171,7 @@ export async function getVulnerableResidents(
       a.resident.full_name.localeCompare(b.resident.full_name)
     );
   } catch (error) {
-    console.error('[v0] Error getting vulnerable residents:', error);
+    console.error('Error getting vulnerable residents:', error);
     throw error;
   }
 }
@@ -184,7 +184,7 @@ export async function searchResidents(query: string): Promise<Resident[]> {
     const search = query.toLowerCase();
     return await getResidents({ search });
   } catch (error) {
-    console.error('[v0] Error searching residents:', error);
+    console.error('Error searching residents:', error);
     throw error;
   }
 }
@@ -252,7 +252,7 @@ export async function getHeatmapData(barangay_id: string): Promise<Array<{
       }))
       .sort((a, b) => a.purok.localeCompare(b.purok));
   } catch (error) {
-    console.error('[v0] Error getting heatmap data:', error);
+    console.error('Error getting heatmap data:', error);
     throw error;
   }
 }
@@ -267,7 +267,7 @@ export async function getRecentActivities(limit: number = 10) {
       .sort((a: any, b: any) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
       .slice(0, limit);
   } catch (error) {
-    console.error('[v0] Error getting recent activities:', error);
+    console.error('Error getting recent activities:', error);
     throw error;
   }
 }

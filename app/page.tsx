@@ -23,7 +23,7 @@ export default function Home() {
           router.push('/login');
         }
       } catch (error) {
-        console.error('[v0] Auth check error:', error);
+        console.error('Auth check error:', error);
         router.push('/login');
       }
     }

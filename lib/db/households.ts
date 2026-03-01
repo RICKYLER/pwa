@@ -47,7 +47,7 @@ export async function getHouseholds(filters?: {
     // Sort by creation date (newest first)
     return filtered.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   } catch (error) {
-    console.error('[v0] Error fetching households:', error);
+    console.error('Error fetching households:', error);
     throw error;
   }
 }
@@ -59,7 +59,7 @@ export async function getHousehold(id: string): Promise<Household | undefined> {
   try {
     return await db.get<Household>(STORE_NAMES.households, id);
   } catch (error) {
-    console.error('[v0] Error fetching household:', error);
+    console.error('Error fetching household:', error);
     throw error;
   }
 }
@@ -93,10 +93,10 @@ export async function createHousehold(data: Omit<Household, 'id' | 'createdAt' |
       { household_name: data.head_name, purok: data.purok_sitio }
     );
 
-    console.log('[v0] Household created:', household.id);
+    console.log('Household created:', household.id);
     return household;
   } catch (error) {
-    console.error('[v0] Error creating household:', error);
+    console.error('Error creating household:', error);
     throw error;
   }
 }
@@ -129,10 +129,10 @@ export async function updateHousehold(id: string, updates: Partial<Household>): 
       { changes: updates }
     );
 
-    console.log('[v0] Household updated:', id);
+    console.log('Household updated:', id);
     return updated;
   } catch (error) {
-    console.error('[v0] Error updating household:', error);
+    console.error('Error updating household:', error);
     throw error;
   }
 }
@@ -151,9 +151,9 @@ export async function deleteHousehold(id: string, reason: 'moved_out' | 'decease
       { status: reason }
     );
 
-    console.log('[v0] Household deleted (soft):', id);
+    console.log('Household deleted (soft):', id);
   } catch (error) {
-    console.error('[v0] Error deleting household:', error);
+    console.error('Error deleting household:', error);
     throw error;
   }
 }
@@ -167,7 +167,7 @@ export async function getAllPuroks(barangay_id: string): Promise<string[]> {
     const puroks = new Set(households.map(h => h.purok_sitio));
     return Array.from(puroks).sort();
   } catch (error) {
-    console.error('[v0] Error fetching puroks:', error);
+    console.error('Error fetching puroks:', error);
     throw error;
   }
 }
@@ -190,7 +190,7 @@ export async function countHouseholdsByStatus(barangay_id: string): Promise<Reco
 
     return counts;
   } catch (error) {
-    console.error('[v0] Error counting households:', error);
+    console.error('Error counting households:', error);
     throw error;
   }
 }
