@@ -1,9 +1,10 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { SyncQueueItem, User } from '@/lib/db/schema';
+import { resolveWritableFilePath } from '@/lib/server/runtime-storage';
 
-const DATA_DIR = path.join(process.cwd(), 'data');
-const STORE_PATH = path.join(DATA_DIR, 'field-sync-backup.json');
+const STORE_PATH = resolveWritableFilePath('MSWDO_SYNC_BACKUP_STORE_PATH', 'field-sync-backup.json');
+const DATA_DIR = path.dirname(STORE_PATH);
 const HISTORY_LIMIT = 1000;
 
 interface SyncedBackupRecord {

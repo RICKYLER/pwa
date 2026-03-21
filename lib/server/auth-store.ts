@@ -3,10 +3,11 @@ import path from 'path';
 import { createHash, randomBytes, scrypt as scryptCallback, timingSafeEqual } from 'crypto';
 import { promisify } from 'util';
 import type { User, UserRole } from '@/lib/db/schema';
+import { resolveWritableFilePath } from '@/lib/server/runtime-storage';
 
 const scrypt = promisify(scryptCallback);
 
-const STORE_PATH = process.env.MSWDO_AUTH_STORE_PATH?.trim() || path.join(process.cwd(), 'data', 'auth-store.json');
+const STORE_PATH = resolveWritableFilePath('MSWDO_AUTH_STORE_PATH', 'auth-store.json');
 const STORE_DIR = path.dirname(STORE_PATH);
 const PASSWORD_TOKEN_TTL_MS = 1000 * 60 * 60 * 24 * 3;
 const EMAIL_VERIFICATION_TOKEN_TTL_MS = 1000 * 60 * 60 * 24 * 3;
