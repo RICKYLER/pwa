@@ -2,13 +2,14 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Home, Users, ShieldAlert, FileText, Package, Truck } from 'lucide-react';
+import { Home, Users, ShieldAlert, FileText, Package, Radio } from 'lucide-react';
 import { hasPermission } from '@/lib/auth';
 
 const NAV_ITEMS = [
     { href: '/dashboard', icon: Home, label: 'Home', perm: null },
     { href: '/households', icon: Users, label: 'Households', perm: 'view_households' },
     { href: '/vulnerability', icon: ShieldAlert, label: 'Risks', perm: 'view_vulnerability' },
+    { href: '/responder', icon: Radio, label: 'Field', perm: 'view_incidents' },
     { href: '/reports', icon: FileText, label: 'Reports', perm: 'view_reports' },
     { href: '/inventory', icon: Package, label: 'Inventory', perm: 'view_reports' },
 ] as const;

@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { getCurrentUser, hasPermission, restoreSession } from '@/lib/auth';
+import { getCurrentUser, getDefaultRouteForUser, hasPermission, restoreSession } from '@/lib/auth';
 import { db } from '@/lib/db/indexeddb';
 import { getDashboardStats, getTopPuroksByVulnerability } from '@/lib/db/queries';
 import { Users, Home, Baby, ShieldAlert, Package, FileText, ChevronRight, AlertTriangle, Activity } from 'lucide-react';
@@ -39,6 +39,7 @@ export default function DashboardMobile() {
                 await db.init();
                 const u = restoreSession();
                 if (!u) { router.push('/login'); return; }
+                if (getDefaultRouteForUser(u) !== '/dashboard') { router.push(getDefaultRouteForUser(u)); return; }
                 setUser(u);
                 const s = await getDashboardStats(u.barangay_id);
                 setStats(s);

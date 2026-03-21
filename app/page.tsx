@@ -2,7 +2,7 @@
 
 import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { restoreSession, getCurrentUser } from '@/lib/auth';
+import { getDefaultRouteForUser, restoreSession } from '@/lib/auth';
 import { db } from '@/lib/db/indexeddb';
 
 export default function Home() {
@@ -18,7 +18,7 @@ export default function Home() {
         const user = restoreSession();
 
         if (user) {
-          router.push('/dashboard');
+          router.push(getDefaultRouteForUser(user));
         } else {
           router.push('/login');
         }

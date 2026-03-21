@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Home, Users, ShieldAlert, FileText, Package, Truck, LogOut, TrendingUp, ChevronRight, UserCog } from 'lucide-react';
+import { Home, Users, ShieldAlert, FileText, Package, Truck, LogOut, TrendingUp, ChevronRight, UserCog, Radio, Activity, MapPinned } from 'lucide-react';
 import { getCurrentUser, hasPermission, logout } from '@/lib/auth';
 import { useRouter } from 'next/navigation';
 
@@ -10,6 +10,7 @@ const NAV_ITEMS = [
     { href: '/dashboard', icon: Home, label: 'Dashboard', desc: 'Overview & KPIs', perm: null },
     { href: '/households', icon: Users, label: 'Households', desc: 'Manage households', perm: 'view_households' },
     { href: '/vulnerability', icon: ShieldAlert, label: 'Vulnerability', desc: 'At-risk residents', perm: 'view_vulnerability' },
+    { href: '/responder', icon: Radio, label: 'Field Response', desc: 'Incidents & check-ins', perm: 'view_incidents' },
     { href: '/distribution', icon: Truck, label: 'Distribution', desc: 'Relief events', perm: 'view_reports' },
     { href: '/reports', icon: FileText, label: 'Reports', desc: 'Generate reports', perm: 'view_reports' },
     { href: '/inventory', icon: Package, label: 'Inventory', desc: 'Track supplies', perm: 'view_reports' },
@@ -104,6 +105,26 @@ export default function MobileSidebar({ isOpen, onClose }: MobileSidebarProps) {
                                 <UserCog className={`w-4 h-4 flex-shrink-0 ${pathname.startsWith('/admin/users') ? 'text-violet-600' : 'text-slate-400'}`} strokeWidth={pathname.startsWith('/admin/users') ? 2.5 : 1.8} />
                                 <span className="text-sm font-semibold">User Accounts</span>
                                 {pathname.startsWith('/admin/users') && <div className="ml-auto w-1.5 h-1.5 rounded-full bg-violet-500" />}
+                            </Link>
+                            <Link
+                                href="/admin/location-review"
+                                onClick={onClose}
+                                className={`flex items-center gap-3 px-3 py-3 rounded-xl transition-all ${pathname.startsWith('/admin/location-review') ? 'bg-violet-50 text-violet-700' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
+                                    }`}
+                            >
+                                <MapPinned className={`w-4 h-4 flex-shrink-0 ${pathname.startsWith('/admin/location-review') ? 'text-violet-600' : 'text-slate-400'}`} strokeWidth={pathname.startsWith('/admin/location-review') ? 2.5 : 1.8} />
+                                <span className="text-sm font-semibold">Location Review</span>
+                                {pathname.startsWith('/admin/location-review') && <div className="ml-auto w-1.5 h-1.5 rounded-full bg-violet-500" />}
+                            </Link>
+                            <Link
+                                href="/admin/api-health"
+                                onClick={onClose}
+                                className={`flex items-center gap-3 px-3 py-3 rounded-xl transition-all ${pathname.startsWith('/admin/api-health') ? 'bg-violet-50 text-violet-700' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
+                                    }`}
+                            >
+                                <Activity className={`w-4 h-4 flex-shrink-0 ${pathname.startsWith('/admin/api-health') ? 'text-violet-600' : 'text-slate-400'}`} strokeWidth={pathname.startsWith('/admin/api-health') ? 2.5 : 1.8} />
+                                <span className="text-sm font-semibold">API Health</span>
+                                {pathname.startsWith('/admin/api-health') && <div className="ml-auto w-1.5 h-1.5 rounded-full bg-violet-500" />}
                             </Link>
                         </>
                     )}

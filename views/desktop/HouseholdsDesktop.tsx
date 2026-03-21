@@ -8,6 +8,8 @@ import { getHouseholds, getAllPuroks } from '@/lib/db/households';
 import { getResidentsInHousehold } from '@/lib/db/residents';
 import { Household } from '@/lib/db/schema';
 import { Plus, Search, Users, Home, ChevronRight, MapPin, Activity, X } from 'lucide-react';
+import { formatRegistrationStatusLabel, getHouseholdRegistrationStatus, isHouseholdApproved } from '@/lib/household-registration';
+import { hasHouseholdPin } from '@/lib/map-pins';
 
 const STATUS_CFG = {
     active: { label: 'Active', dot: 'bg-emerald-400', badge: 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-500/20' },
@@ -55,6 +57,7 @@ export default function HouseholdsDesktop() {
 
     const activeCount = households.filter(h => h.status === 'active').length;
     const movedCount = households.filter(h => h.status === 'moved_out').length;
+    const pendingCount = households.filter(h => getHouseholdRegistrationStatus(h) === 'pending').length;
     const hasFilters = search || filterPurok !== 'all' || filterStatus !== 'all';
 
     const tabs = [
@@ -70,21 +73,22 @@ export default function HouseholdsDesktop() {
             <div className="flex items-center justify-between">
                 <div>
                     <h1 className="text-2xl font-bold text-slate-900">Households</h1>
-                    <p className="text-sm text-slate-500 mt-0.5">{isLoading ? 'Loading…' : `${households.length} total · ${activeCount} active`}</p>
+                    <p className="text-sm text-slate-500 mt-0.5">{isLoading ? 'Loading…' : `${households.length} total · ${activeCount} active · ${pendingCount} pending review`}</p>
                 </div>
                 {hasPermission('create_household') && (
-                    <Link href="/households/new" className="inline-flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 text-white text-sm font-semibold rounded-xl hover:opacity-90 transition-all shadow-md shadow-blue-500/25 hover:-translate-y-px">
-                        <Plus className="w-4 h-4" />Add Household
+                    <Link href="/households/register" className="inline-flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 text-white text-sm font-semibold rounded-xl hover:opacity-90 transition-all shadow-md shadow-blue-500/25 hover:-translate-y-px">
+                        <Plus className="w-4 h-4" />New Registration
                     </Link>
                 )}
             </div>
 
             {/* Stats Row */}
-            <div className="grid grid-cols-3 gap-4">
+            <div className="grid grid-cols-4 gap-4">
                 {[
                     { label: 'Total Households', value: households.length, gradient: 'from-blue-600 to-indigo-600', light: 'bg-blue-50 text-blue-600' },
                     { label: 'Active', value: activeCount, gradient: 'from-emerald-500 to-teal-600', light: 'bg-emerald-50 text-emerald-600' },
                     { label: 'Moved Out', value: movedCount, gradient: 'from-amber-500 to-orange-500', light: 'bg-amber-50 text-amber-600' },
+                    { label: 'Pending Review', value: pendingCount, gradient: 'from-violet-500 to-fuchsia-600', light: 'bg-violet-50 text-violet-600' },
                 ].map(s => (
                     <div key={s.label} className="bg-white rounded-2xl border border-slate-200/60 p-5">
                         <div className={`inline-flex w-8 h-8 items-center justify-center rounded-xl ${s.light} mb-3`}><Home className="w-3.5 h-3.5" /></div>
@@ -140,6 +144,7 @@ export default function HouseholdsDesktop() {
                 <div className="grid grid-cols-2 gap-2">
                     {filtered.map(h => {
                         const cfg = STATUS_CFG[h.status as keyof typeof STATUS_CFG] || STATUS_CFG.active;
+                        const registrationStatus = getHouseholdRegistrationStatus(h);
                         return (
                             <Link key={h.id} href={`/households/${h.id}`}
                                 className="group flex items-center justify-between bg-white border border-slate-200/60 rounded-2xl p-4 hover:border-blue-200 hover:shadow-md hover:shadow-blue-500/5 transition-all hover:-translate-y-px">
@@ -149,9 +154,21 @@ export default function HouseholdsDesktop() {
                                     </div>
                                     <div className="min-w-0">
                                         <p className="font-semibold text-slate-900 text-sm truncate">{h.head_name}</p>
-                                        <p className="text-xs text-slate-400 flex items-center gap-1 mt-0.5 truncate">
-                                            <MapPin className="w-2.5 h-2.5 flex-shrink-0" />{h.street_address} · {h.purok_sitio}
-                                        </p>
+                                        <div className="flex items-center gap-2 min-w-0 mt-0.5">
+                                            <p className="text-xs text-slate-400 flex items-center gap-1 truncate">
+                                                <MapPin className="w-2.5 h-2.5 flex-shrink-0" />{h.street_address} · {h.purok_sitio}
+                                            </p>
+                                            {!isHouseholdApproved(h) && (
+                                                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[9px] font-bold bg-violet-50 text-violet-700 border border-violet-200 flex-shrink-0">
+                                                    {formatRegistrationStatusLabel(registrationStatus)}
+                                                </span>
+                                            )}
+                                            {hasHouseholdPin(h) && (
+                                                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[9px] font-bold bg-indigo-50 text-indigo-600 border border-indigo-200 flex-shrink-0">
+                                                    Pinned
+                                                </span>
+                                            )}
+                                        </div>
                                     </div>
                                 </div>
                                 <div className="flex items-center gap-2 flex-shrink-0 ml-3">

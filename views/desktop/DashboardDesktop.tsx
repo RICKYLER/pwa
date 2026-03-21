@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { getCurrentUser, hasPermission, restoreSession } from '@/lib/auth';
+import { getCurrentUser, getDefaultRouteForUser, hasPermission, restoreSession } from '@/lib/auth';
 import { db } from '@/lib/db/indexeddb';
 import { getDashboardStats, getTopPuroksByPopulation, getTopPuroksByVulnerability } from '@/lib/db/queries';
 import { Users, Home, Baby, ShieldAlert, Package, FileText, ChevronRight, AlertTriangle, Activity } from 'lucide-react';
@@ -40,6 +40,7 @@ export default function DashboardDesktop() {
                 await db.init();
                 const u = restoreSession();
                 if (!u) { router.push('/login'); return; }
+                if (getDefaultRouteForUser(u) !== '/dashboard') { router.push(getDefaultRouteForUser(u)); return; }
                 setUser(u);
                 const [s, , vuln] = await Promise.all([
                     getDashboardStats(u.barangay_id),

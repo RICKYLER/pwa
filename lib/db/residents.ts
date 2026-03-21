@@ -1,7 +1,11 @@
 import { db, STORE_NAMES } from './indexeddb';
-import type { Resident, ResidentStatus, VulnerabilityFlags } from './schema';
-import { calculateVulnerabilityFlags, updateAgeBasedFlags } from './vulnerability';
-import { getHousehold } from './households';
+import type { PWDType, Resident, ResidentStatus, VulnerabilityFlags } from './schema';
+import {
+  calculateVulnerabilityFlags,
+  getCurrentVulnerabilityFlagsMapForResidents,
+  updateAgeBasedFlags,
+} from './vulnerability';
+import { getHousehold, getHouseholds } from './households';
 import { createAuditLog } from '../auth';
 
 /**
@@ -192,10 +196,18 @@ export async function deleteResident(id: string, reason: 'moved_out' | 'deceased
  */
 export async function getResidentVulnerabilityFlags(resident_id: string): Promise<VulnerabilityFlags | undefined> {
   try {
-    return await db.get<VulnerabilityFlags>(
-      STORE_NAMES.vulnerability_flags,
-      `vf_${resident_id}`
-    );
+    const resident = await getResident(resident_id);
+    if (!resident) {
+      return undefined;
+    }
+
+    const household = await getHousehold(resident.household_id);
+    if (!household) {
+      return undefined;
+    }
+
+    const flagsByResidentId = await getCurrentVulnerabilityFlagsMapForResidents([resident], [household]);
+    return flagsByResidentId.get(resident_id);
   } catch (error) {
     console.error('Error fetching vulnerability flags:', error);
     throw error;
@@ -210,7 +222,7 @@ export async function updateHealthFlags(
   updates: {
     is_pregnant?: boolean;
     is_pwd?: boolean;
-    pwd_type?: string;
+    pwd_type?: PWDType;
     has_chronic_illness?: boolean;
     chronic_conditions?: string[];
   }
@@ -257,8 +269,15 @@ export async function countVulnerableResidents(barangay_id: string): Promise<{
   low_income: number;
 }> {
   try {
-    const residents = await getResidents({ status: 'active' });
-    const allFlags = await db.getAll<VulnerabilityFlags>(STORE_NAMES.vulnerability_flags);
+    const households = await getHouseholds({
+      barangay_id,
+      status: 'active',
+      registration_status: 'approved',
+    });
+    const householdIds = new Set(households.map((household) => household.id));
+    const residents = (await getResidents({ status: 'active' }))
+      .filter((resident) => householdIds.has(resident.household_id));
+    const currentFlagsByResidentId = await getCurrentVulnerabilityFlagsMapForResidents(residents, households);
 
     const counts = {
       children: 0,
@@ -270,7 +289,7 @@ export async function countVulnerableResidents(barangay_id: string): Promise<{
     };
 
     residents.forEach(resident => {
-      const flags = allFlags.find(f => f.resident_id === resident.id);
+      const flags = currentFlagsByResidentId.get(resident.id);
       if (!flags) return;
 
       if (flags.is_child) counts.children++;

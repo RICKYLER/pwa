@@ -1,21 +1,17 @@
 {
   "name": "MSWDO Household Census PWA",
   "short_name": "MSWDO Census",
+  "id": "/",
   "description": "Municipal household census management system with offline-first support for field staff",
   "start_url": "/",
+  "display_override": ["window-controls-overlay", "standalone"],
   "display": "standalone",
   "background_color": "#ffffff",
   "theme_color": "#264AA8",
   "scope": "/",
   "orientation": "portrait-primary",
+  "lang": "en-PH",
   "categories": ["government", "health"],
-  "screenshots": [
-    {
-      "src": "/icon.svg",
-      "sizes": "192x192",
-      "type": "image/svg+xml"
-    }
-  ],
   "icons": [
     {
       "src": "/icon.svg",
@@ -24,14 +20,27 @@
       "purpose": "any"
     },
     {
-      "src": "/icon-light-32x32.png",
+      "src": "/favicon-32x32.png",
       "sizes": "32x32",
       "type": "image/png"
     },
     {
-      "src": "/icon-dark-32x32.png",
-      "sizes": "32x32",
-      "type": "image/png"
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/maskable-icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
     }
   ],
   "shortcuts": [
@@ -42,8 +51,9 @@
       "url": "/households/new?mode=pwa",
       "icons": [
         {
-          "src": "/icon.svg",
-          "sizes": "96x96"
+          "src": "/icon-192.png",
+          "sizes": "192x192",
+          "type": "image/png"
         }
       ]
     },
@@ -54,10 +64,12 @@
       "url": "/vulnerability?mode=pwa",
       "icons": [
         {
-          "src": "/icon.svg",
-          "sizes": "96x96"
+          "src": "/icon-192.png",
+          "sizes": "192x192",
+          "type": "image/png"
         }
       ]
     }
-  ]
+  ],
+  "prefer_related_applications": false
 }

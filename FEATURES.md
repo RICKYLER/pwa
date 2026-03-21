@@ -1,10 +1,16 @@
-# MSWDO Census PWA - Complete Feature Checklist
+# MSWDO Census PWA — What's Built So Far
 
-## Phase 1: Core MVP ✅ COMPLETE
+This document tracks every feature that's been implemented, what's in progress, and what's still on the roadmap. Use it to understand what the system can do, or as a reference during testing and review.
+
+---
+
+## Phase 1: Core Foundation ✅ Complete
 
 ### Authentication & Access Control
 - [x] Login form with email/password
 - [x] 4 demo user roles (Admin, Encoder, Health Worker, Responder)
+- [x] Resident self-service account registration
+- [x] Resident login routing to a separate resident portal
 - [x] Session persistence with localStorage
 - [x] Logout functionality
 - [x] Protected routes (redirect to login if unauthorized)
@@ -32,6 +38,7 @@
 - [x] Search households by name/address
 - [x] Filter by purok/sitio
 - [x] Filter by status (active/moved_out/deceased)
+- [x] Show registration review status badges in household lists
 - [x] Add new household
   - [x] Head name (required)
   - [x] Street address (required)
@@ -44,6 +51,51 @@
 - [x] Soft delete (mark as moved_out/deceased)
 - [x] Show member count per household
 - [x] Household status badges
+
+### Registration and Approval Workflow
+- [x] Guided 3-step registration wizard
+  - [x] Personal information step
+  - [x] Location verification step
+  - [x] Review and submit step
+- [x] Supporting document upload stored for admin review
+- [x] Use current location or manual map pin during registration
+- [x] Registration status page after submission
+  - [x] Pending Review banner
+  - [x] Submitted / Location Review / Admin Approval timeline
+- [x] Store applicant email and review metadata in household records
+- [x] Pending registrations stay out of approved operational datasets
+  - [x] Reports only use approved households
+  - [x] Distribution targeting only uses approved households
+  - [x] Responder maps only use approved households
+- [x] Resident portal for viewing only your own submitted registrations
+- [x] Residents can open status pages only for their own registration records
+
+### Admin Registration Review
+- [x] Approval dashboard tabs
+  - [x] Pending
+  - [x] Approved
+  - [x] Rejected
+  - [x] Needs Correction
+- [x] Review queue with applicant search and Map Pin QA filter
+- [x] Registration detail panel
+  - [x] Applicant contact info
+  - [x] Supporting document preview
+  - [x] Landmark and review notes
+- [x] Approve, Reject, and Request Update actions
+- [x] Approved master list table
+  - [x] ID
+  - [x] Name
+  - [x] Map Pin QA
+  - [x] Address
+  - [x] Location
+  - [x] Status
+  - [x] Approval date
+- [x] Automatic Map Pin QA
+  - [x] Valid
+  - [x] Duplicate
+  - [x] Needs Verification
+- [x] Duplicate pin proximity warnings for nearby coordinates
+- [x] Admin master list editor for municipality, barangay, and purok names
 
 ### Resident Management
 - [x] Add resident to household
@@ -59,7 +111,7 @@
 - [x] Soft delete (mark as moved_out/deceased)
 - [x] Display vulnerability badges per member
 
-### 🌟 AUTOMATIC VULNERABILITY SYSTEM (KEY INNOVATION)
+### 🌟 Automatic Vulnerability System — The Core Innovation
 - [x] Calculate age from birthdate (no manual entry)
   - [x] Handles leap years correctly
   - [x] Uses current system date
@@ -180,7 +232,7 @@
 
 ---
 
-## Phase 2: Relief Distribution ✅ COMPLETE
+## Phase 2: Relief Distribution ✅ Complete
 
 ### Inventory Management
 - [x] View all inventory items
@@ -213,7 +265,7 @@
 - [x] View event details
 - [x] Display event location and type
 
-### 🌟 AUTO-ELIGIBLE BENEFICIARY SELECTION
+### 🌟 Auto-Eligible Beneficiary Selection — No Manual Picking Required
 - [x] Automatic beneficiary selection based on event type
   - [x] Senior Relief → Select all seniors (60+) automatically
   - [x] PWD Assistance → Select all PWD residents automatically
@@ -257,7 +309,7 @@
 
 ---
 
-## Phase 3: Advanced Features (Not Implemented - Foundation Ready)
+## Phase 3: Coming Next (Foundation Already in Place)
 
 ### Geographic Mapping
 - [ ] Leaflet + OpenStreetMap integration
@@ -302,7 +354,9 @@
 
 ---
 
-## Data Seeding & Demo Setup ✅
+## Seed Data & Demo Setup ✅
+
+So you can open the app and explore immediately without creating anything from scratch:
 
 - [x] Create 4 demo users with different roles
 - [x] Seed sample barangay data
@@ -317,7 +371,7 @@
 
 ---
 
-## Quality Metrics
+## Quality & Reliability
 
 ### Code Quality
 - [x] TypeScript for type safety
@@ -393,7 +447,7 @@
 
 ---
 
-## Capstone Deliverables Checklist
+## Capstone Deliverables
 
 ### Project Scope ✅
 - [x] Household census management
@@ -434,7 +488,7 @@
 
 ---
 
-## Success Criteria Met
+## How We Know It Works
 
 | Criterion | Status | Evidence |
 |-----------|--------|----------|
@@ -449,7 +503,7 @@
 
 ---
 
-**Feature Status**: Phase 1 + Phase 2 Complete ✅
-**MVP Status**: Production-Ready
-**Demo Status**: Ready for Capstone Defense
-**Documentation**: Comprehensive
+**Phase 1 + Phase 2**: Complete ✅  
+**Production Readiness**: Yes — ready to deploy  
+**Demo Readiness**: Fully prepared for capstone defense  
+**Documentation**: README, QUICKSTART, ARCHITECTURE, DEMO_FLOW all up to date

@@ -1,10 +1,102 @@
-import { db, STORE_NAMES } from './indexeddb';
-import type { DistributionEvent, DistributionRecord, Resident, VulnerabilityFlags } from './schema';
-import { getResidents } from './residents';
 import { createAuditLog } from '../auth';
+import { db, STORE_NAMES } from './indexeddb';
+import { getHousehold, getHouseholds } from './households';
+import { getInventoryItem, releaseStock } from './inventory';
+import { getResident, getResidents } from './residents';
+import { getCurrentVulnerabilityFlagsMapForResidents } from './vulnerability';
+import type {
+  DistributedItem,
+  DistributionEvent,
+  DistributionRecord,
+  DistributionTargetGroup,
+  DistributionTargetScope,
+  Household,
+  Resident,
+  VulnerabilityFlags,
+} from './schema';
 
-function generateId(): string {
-  return `dist_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+function generateId(prefix = 'dist'): string {
+  return `${prefix}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+}
+
+function inferTargetConfig(eventName: string): {
+  target_scope: DistributionTargetScope;
+  target_group: DistributionTargetGroup;
+} {
+  const value = eventName.toLowerCase();
+
+  if (value.includes('senior')) return { target_scope: 'resident', target_group: 'senior' };
+  if (value.includes('pwd')) return { target_scope: 'resident', target_group: 'pwd' };
+  if (value.includes('maternal') || value.includes('pregnan')) {
+    return { target_scope: 'resident', target_group: 'pregnant' };
+  }
+  if (value.includes('child') || value.includes('minor')) {
+    return { target_scope: 'resident', target_group: 'minor' };
+  }
+  if (value.includes('low income')) {
+    return { target_scope: 'household', target_group: 'low_income' };
+  }
+
+  return { target_scope: 'household', target_group: 'all' };
+}
+
+function normalizeDistributedItems(items: DistributedItem[] | undefined): DistributedItem[] {
+  if (!Array.isArray(items)) return [];
+
+  return items
+    .map((item) => ({
+      item_id: item.item_id,
+      quantity: Number.isFinite(item.quantity) ? item.quantity : Number(item.quantity) || 0,
+      item_name: item.item_name?.trim() || undefined,
+      unit: item.unit,
+    }))
+    .filter((item) => item.item_id && item.quantity > 0);
+}
+
+function normalizeDistributionEvent(event: DistributionEvent): DistributionEvent {
+  const inferred = inferTargetConfig(event.event_name);
+
+  return {
+    ...event,
+    target_scope: event.target_scope ?? inferred.target_scope,
+    target_group: event.target_group ?? inferred.target_group,
+    package_items: normalizeDistributedItems(event.package_items),
+  };
+}
+
+function normalizeDistributionRecord(record: DistributionRecord): DistributionRecord {
+  return {
+    ...record,
+    items_distributed: normalizeDistributedItems(record.items_distributed),
+    timestamp: record.timestamp instanceof Date ? record.timestamp : new Date(record.timestamp),
+  };
+}
+
+function matchesTargetGroup(
+  resident: Resident,
+  flags: VulnerabilityFlags | undefined,
+  targetGroup: DistributionTargetGroup,
+): boolean {
+  switch (targetGroup) {
+    case 'all':
+      return true;
+    case 'senior':
+      return Boolean(flags?.is_senior);
+    case 'pwd':
+      return Boolean(flags?.is_pwd);
+    case 'pregnant':
+      return Boolean(flags?.is_pregnant);
+    case 'minor':
+      return Boolean(flags?.is_child);
+    case 'low_income':
+      return Boolean(flags?.is_low_income || resident.income_level === 'low');
+    default:
+      return true;
+  }
+}
+
+function countDistributedUnits(items: DistributedItem[]): number {
+  return items.reduce((sum, item) => sum + item.quantity, 0);
 }
 
 /**
@@ -14,15 +106,17 @@ export async function getDistributionEvents(filters?: {
   status?: 'planned' | 'ongoing' | 'completed';
 }): Promise<DistributionEvent[]> {
   try {
-    const all = await db.getAll<DistributionEvent>(STORE_NAMES.distribution_events);
+    const all = (await db.getAll<DistributionEvent>(STORE_NAMES.distribution_events)).map(normalizeDistributionEvent);
 
     let filtered = all;
 
     if (filters?.status) {
-      filtered = filtered.filter(e => e.status === filters.status);
+      filtered = filtered.filter((event) => event.status === filters.status);
     }
 
-    return filtered.sort((a, b) => new Date(b.scheduled_date).getTime() - new Date(a.scheduled_date).getTime());
+    return filtered.sort(
+      (a, b) => new Date(b.scheduled_date).getTime() - new Date(a.scheduled_date).getTime(),
+    );
   } catch (error) {
     console.error('Error fetching distribution events:', error);
     throw error;
@@ -34,7 +128,8 @@ export async function getDistributionEvents(filters?: {
  */
 export async function getDistributionEvent(id: string): Promise<DistributionEvent | undefined> {
   try {
-    return await db.get<DistributionEvent>(STORE_NAMES.distribution_events, id);
+    const event = await db.get<DistributionEvent>(STORE_NAMES.distribution_events, id);
+    return event ? normalizeDistributionEvent(event) : undefined;
   } catch (error) {
     console.error('Error fetching distribution event:', error);
     throw error;
@@ -46,26 +141,31 @@ export async function getDistributionEvent(id: string): Promise<DistributionEven
  */
 export async function createDistributionEvent(
   data: Omit<DistributionEvent, 'id' | 'syncStatus'>,
-  userId: string
+  userId: string,
 ): Promise<DistributionEvent> {
   try {
-    const event: DistributionEvent = {
+    const event = normalizeDistributionEvent({
       ...data,
       id: generateId(),
       created_by: userId,
       syncStatus: 'pending',
-    };
+    });
 
     await db.add(STORE_NAMES.distribution_events, event);
 
-    await createAuditLog(
-      'CREATE',
-      'distribution',
-      event.id,
-      { event_name: data.event_name, type: data.type, location: data.location }
-    );
+    await createAuditLog('CREATE', 'distribution', event.id, {
+      event_name: data.event_name,
+      type: data.type,
+      location: data.location,
+      target_scope: event.target_scope,
+      target_group: event.target_group,
+      package_items: event.package_items.map((item) => ({
+        item_id: item.item_id,
+        quantity: item.quantity,
+        item_name: item.item_name,
+      })),
+    });
 
-    console.log('Distribution event created:', event.id);
     return event;
   } catch (error) {
     console.error('Error creating distribution event:', error);
@@ -78,7 +178,7 @@ export async function createDistributionEvent(
  */
 export async function updateDistributionEvent(
   id: string,
-  updates: Partial<DistributionEvent>
+  updates: Partial<DistributionEvent>,
 ): Promise<DistributionEvent> {
   try {
     const existing = await getDistributionEvent(id);
@@ -86,23 +186,17 @@ export async function updateDistributionEvent(
       throw new Error(`Distribution event ${id} not found`);
     }
 
-    const updated: DistributionEvent = {
+    const updated = normalizeDistributionEvent({
       ...existing,
       ...updates,
       id,
       syncStatus: 'pending',
-    };
+    });
 
     await db.put(STORE_NAMES.distribution_events, updated);
 
-    await createAuditLog(
-      'UPDATE',
-      'distribution',
-      id,
-      { changes: updates }
-    );
+    await createAuditLog('UPDATE', 'distribution', id, { changes: updates });
 
-    console.log('Distribution event updated:', id);
     return updated;
   } catch (error) {
     console.error('Error updating distribution event:', error);
@@ -111,36 +205,61 @@ export async function updateDistributionEvent(
 }
 
 /**
- * Auto-select eligible beneficiaries based on event type
+ * Backwards-compatible helper for older code paths.
  */
-export async function getEligibleBeneficiaries(
-  eventType: string
-): Promise<Resident[]> {
+export async function getEligibleBeneficiaries(eventType: string): Promise<Resident[]> {
+  const inferred = inferTargetConfig(eventType);
+  return getEligibleResidentsForEvent({
+    target_group: inferred.target_group,
+  });
+}
+
+export async function getEligibleResidentsForEvent(config: {
+  target_group: DistributionTargetGroup;
+}): Promise<Resident[]> {
   try {
     const residents = await getResidents({ status: 'active' });
-    const allFlags = await db.getAll<VulnerabilityFlags>(STORE_NAMES.vulnerability_flags);
+    const households = await getHouseholds({ status: 'active', registration_status: 'approved' });
+    const flagsMap = await getCurrentVulnerabilityFlagsMapForResidents(residents, households);
 
-    // Filter residents by event type
-    const eligible = residents.filter(resident => {
-      const flags = allFlags.find(f => f.resident_id === resident.id);
-      if (!flags) return false;
+    return residents.filter((resident) =>
+      matchesTargetGroup(resident, flagsMap.get(resident.id), config.target_group),
+    );
+  } catch (error) {
+    console.error('Error getting eligible residents:', error);
+    throw error;
+  }
+}
 
-      // Match based on event type
-      if (eventType === 'Senior Relief') return flags.is_senior;
-      if (eventType === 'PWD Assistance') return flags.is_pwd;
-      if (eventType === 'Maternal Health') return flags.is_pregnant;
-      if (eventType === 'Child Support') return flags.is_child;
-      if (eventType === 'Chronic Illness Support') return flags.has_chronic_illness;
-      if (eventType === 'General Relief') return flags.is_low_income;
+export async function getEligibleHouseholdsForEvent(config: {
+  target_group: DistributionTargetGroup;
+}): Promise<Household[]> {
+  try {
+    const [households, residents] = await Promise.all([
+      getHouseholds({ status: 'active', registration_status: 'approved' }),
+      getResidents({ status: 'active' }),
+    ]);
+    const flagsMap = await getCurrentVulnerabilityFlagsMapForResidents(residents, households);
 
-      // Default: all active residents
-      return true;
+    if (config.target_group === 'all') {
+      return households;
+    }
+
+    const householdResidentMap = new Map<string, Resident[]>();
+    residents.forEach((resident) => {
+      const entry = householdResidentMap.get(resident.household_id) ?? [];
+      entry.push(resident);
+      householdResidentMap.set(resident.household_id, entry);
     });
 
-    console.log(`Found ${eligible.length} eligible beneficiaries for ${eventType}`);
-    return eligible;
+    return households.filter((household) => {
+      const members = householdResidentMap.get(household.id) ?? [];
+      return members.some((resident) =>
+        matchesTargetGroup(resident, flagsMap.get(resident.id), config.target_group),
+      );
+    });
   } catch (error) {
-    console.error('Error getting eligible beneficiaries:', error);
+    console.error('Error getting eligible households:', error);
     throw error;
   }
 }
@@ -149,41 +268,164 @@ export async function getEligibleBeneficiaries(
  * Record distribution to a beneficiary
  */
 export async function recordDistribution(
-  data: Omit<DistributionRecord, 'id' | 'timestamp' | 'syncStatus'>
+  data: Omit<DistributionRecord, 'id' | 'timestamp' | 'syncStatus'>,
 ): Promise<DistributionRecord> {
   try {
-    const record: DistributionRecord = {
+    const event = await getDistributionEvent(data.event_id);
+    if (!event) {
+      throw new Error('Distribution event not found');
+    }
+
+    if (event.target_scope === 'household' && !data.household_id) {
+      throw new Error('A household is required for this distribution event');
+    }
+
+    if (event.target_scope === 'resident' && !data.resident_id) {
+      throw new Error('A resident is required for this distribution event');
+    }
+
+    const existing = await getDistributionRecords(data.event_id);
+    const isDuplicate =
+      event.target_scope === 'household'
+        ? existing.some((record) => record.household_id === data.household_id)
+        : existing.some((record) => record.resident_id === data.resident_id);
+
+    if (isDuplicate) {
+      throw new Error(
+        event.target_scope === 'household'
+          ? 'This household already received from this distribution event'
+          : 'This resident already received from this distribution event',
+      );
+    }
+
+    const record = normalizeDistributionRecord({
       ...data,
       id: generateId(),
       timestamp: new Date(),
       syncStatus: 'pending',
-    };
-
-    // Check for duplicates
-    const existing = await db.getAll<DistributionRecord>(STORE_NAMES.distribution_records);
-    const isDuplicate = existing.some(
-      r => r.event_id === data.event_id && r.resident_id === data.resident_id
-    );
-
-    if (isDuplicate) {
-      throw new Error('This resident already received from this distribution event');
-    }
+    });
 
     await db.add(STORE_NAMES.distribution_records, record);
 
-    await createAuditLog(
-      'CREATE',
-      'distribution',
-      record.id,
-      { event_id: data.event_id, resident_id: data.resident_id, items_count: data.items_distributed.length }
-    );
+    await createAuditLog('CREATE', 'distribution', record.id, {
+      event_id: data.event_id,
+      household_id: data.household_id,
+      resident_id: data.resident_id,
+      beneficiary_name: data.beneficiary_name,
+      items_count: data.items_distributed.length,
+      units_count: countDistributedUnits(data.items_distributed),
+    });
 
-    console.log('Distribution record created:', record.id);
     return record;
   } catch (error) {
     console.error('Error recording distribution:', error);
     throw error;
   }
+}
+
+export async function releaseDistributionPackage(params: {
+  event_id: string;
+  distributor_id: string;
+  household_id?: string;
+  resident_id?: string;
+  received_by_name?: string;
+  notes?: string;
+}): Promise<DistributionRecord> {
+  const event = await getDistributionEvent(params.event_id);
+  if (!event) {
+    throw new Error('Distribution event not found');
+  }
+
+  if (event.package_items.length === 0) {
+    throw new Error('This event has no package items configured yet');
+  }
+
+  let household: Household | undefined;
+  let resident: Resident | undefined;
+
+  if (event.target_scope === 'household') {
+    if (!params.household_id) {
+      throw new Error('Select a household before releasing items');
+    }
+
+    household = await getHousehold(params.household_id);
+    if (!household || household.status !== 'active') {
+      throw new Error('Selected household is not available for distribution');
+    }
+  } else {
+    if (!params.resident_id) {
+      throw new Error('Select a resident before releasing items');
+    }
+
+    resident = await getResident(params.resident_id);
+    if (!resident || resident.status !== 'active') {
+      throw new Error('Selected resident is not available for distribution');
+    }
+
+    household = await getHousehold(resident.household_id);
+  }
+
+  const existing = await getDistributionRecords(event.id);
+  const duplicate =
+    event.target_scope === 'household'
+      ? existing.some((record) => record.household_id === household?.id)
+      : existing.some((record) => record.resident_id === resident?.id);
+
+  if (duplicate) {
+    throw new Error(
+      event.target_scope === 'household'
+        ? 'This household already claimed this package'
+        : 'This resident already claimed this package',
+    );
+  }
+
+  const inventorySnapshots = await Promise.all(
+    event.package_items.map(async (packageItem) => {
+      const inventoryItem = await getInventoryItem(packageItem.item_id);
+      if (!inventoryItem) {
+        throw new Error(`Inventory item ${packageItem.item_name || packageItem.item_id} was not found`);
+      }
+
+      if (inventoryItem.quantity_available < packageItem.quantity) {
+        throw new Error(
+          `Not enough stock for ${inventoryItem.item_name}. Need ${packageItem.quantity} ${inventoryItem.unit}, only ${inventoryItem.quantity_available} left.`,
+        );
+      }
+
+      return {
+        inventoryItem,
+        distributedItem: {
+          item_id: packageItem.item_id,
+          quantity: packageItem.quantity,
+          item_name: packageItem.item_name || inventoryItem.item_name,
+          unit: packageItem.unit || inventoryItem.unit,
+        } satisfies DistributedItem,
+      };
+    }),
+  );
+
+  await Promise.all(
+    inventorySnapshots.map(({ inventoryItem, distributedItem }) =>
+      releaseStock(inventoryItem.id, distributedItem.quantity, {
+        type: 'distribution_release',
+        notes: `Released for event ${event.event_name}`,
+        reference_id: event.id,
+        reference_type: 'distribution',
+      }),
+    ),
+  );
+
+  return recordDistribution({
+    event_id: event.id,
+    household_id: household?.id,
+    resident_id: resident?.id,
+    beneficiary_name: resident?.full_name || household?.head_name || params.received_by_name?.trim(),
+    items_distributed: inventorySnapshots.map((entry) => entry.distributedItem),
+    received_by_name:
+      params.received_by_name?.trim() || resident?.full_name || household?.head_name,
+    distributor_id: params.distributor_id,
+    notes: params.notes?.trim() || undefined,
+  });
 }
 
 /**
@@ -192,7 +434,10 @@ export async function recordDistribution(
 export async function getDistributionRecords(eventId: string): Promise<DistributionRecord[]> {
   try {
     const all = await db.getAll<DistributionRecord>(STORE_NAMES.distribution_records);
-    return all.filter(r => r.event_id === eventId).sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+    return all
+      .map(normalizeDistributionRecord)
+      .filter((record) => record.event_id === eventId)
+      .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
   } catch (error) {
     console.error('Error fetching distribution records:', error);
     throw error;
@@ -205,7 +450,7 @@ export async function getDistributionRecords(eventId: string): Promise<Distribut
 export async function getDistributionCount(eventId: string, residentId: string): Promise<number> {
   try {
     const records = await getDistributionRecords(eventId);
-    return records.filter(r => r.resident_id === residentId).length;
+    return records.filter((record) => record.resident_id === residentId).length;
   } catch (error) {
     console.error('Error counting distributions:', error);
     throw error;
@@ -221,15 +466,55 @@ export async function getDistributionReport(eventId: string) {
     if (!event) throw new Error('Event not found');
 
     const records = await getDistributionRecords(eventId);
+    const uniqueHouseholds = new Set(records.map((record) => record.household_id).filter(Boolean));
+    const uniqueResidents = new Set(records.map((record) => record.resident_id).filter(Boolean));
+    const remainingStock = await Promise.all(
+      event.package_items.map(async (item) => {
+        const inventoryItem = await getInventoryItem(item.item_id);
+        return {
+          ...item,
+          quantity_available: inventoryItem?.quantity_available ?? 0,
+        };
+      }),
+    );
 
     return {
       event,
       total_beneficiaries: records.length,
-      total_items_distributed: records.reduce((sum, r) => sum + r.items_distributed.length, 0),
+      total_households_served: uniqueHouseholds.size,
+      total_residents_served: uniqueResidents.size,
+      total_items_distributed: records.reduce(
+        (sum, record) => sum + countDistributedUnits(record.items_distributed),
+        0,
+      ),
+      total_packages_released: records.length,
+      remaining_stock: remainingStock,
       records,
     };
   } catch (error) {
     console.error('Error generating distribution report:', error);
+    throw error;
+  }
+}
+
+/**
+ * Delete distribution event and all associated records
+ */
+export async function deleteDistributionEvent(id: string): Promise<void> {
+  try {
+    const event = await getDistributionEvent(id);
+    if (!event) throw new Error(`Distribution event ${id} not found`);
+
+    const records = await getDistributionRecords(id);
+    await Promise.all(records.map((record) => db.delete(STORE_NAMES.distribution_records, record.id)));
+    await db.delete(STORE_NAMES.distribution_events, id);
+
+    await createAuditLog('DELETE', 'distribution', id, {
+      event_name: event.event_name,
+      location: event.location,
+    });
+  } catch (error) {
+    console.error('Error deleting distribution event:', error);
     throw error;
   }
 }

@@ -1,11 +1,12 @@
 import type { 
   User, Household, Resident, VulnerabilityFlags, 
   Program, Beneficiary, InventoryItem, DistributionEvent,
-  DistributionRecord, Incident, AuditLog, SyncQueueItem 
+  DistributionRecord, Incident, AuditLog, SyncQueueItem, LocationMasterList,
+  InventoryMovement, PackageTemplate,
 } from './schema';
 
 const DB_NAME = 'mswdo_census';
-const DB_VERSION = 1;
+const DB_VERSION = 3;
 
 export const STORE_NAMES = {
   users: 'users',
@@ -15,16 +16,90 @@ export const STORE_NAMES = {
   programs: 'programs',
   beneficiaries: 'beneficiaries',
   inventory_items: 'inventory_items',
+  inventory_movements: 'inventory_movements',
+  package_templates: 'package_templates',
   distribution_events: 'distribution_events',
   distribution_records: 'distribution_records',
   incidents: 'incidents',
+  location_master_lists: 'location_master_lists',
   audit_logs: 'audit_logs',
   sync_queue: 'sync_queue',
 } as const;
 
+const SYNC_TRACKED_STORES = new Set<string>([
+  STORE_NAMES.households,
+  STORE_NAMES.residents,
+  STORE_NAMES.vulnerability_flags,
+  STORE_NAMES.programs,
+  STORE_NAMES.beneficiaries,
+  STORE_NAMES.inventory_items,
+  STORE_NAMES.inventory_movements,
+  STORE_NAMES.package_templates,
+  STORE_NAMES.distribution_events,
+  STORE_NAMES.distribution_records,
+  STORE_NAMES.incidents,
+  STORE_NAMES.location_master_lists,
+]);
+
 export class IndexedDBManager {
   private db: IDBDatabase | null = null;
   private initPromise: Promise<IDBDatabase> | null = null;
+
+  private shouldQueueSyncMutation(storeName: string, data?: Record<string, any>) {
+    return (
+      storeName !== STORE_NAMES.sync_queue &&
+      SYNC_TRACKED_STORES.has(storeName) &&
+      Boolean(data?.id) &&
+      data?.syncStatus === 'pending'
+    );
+  }
+
+  private notifySyncQueueChanged() {
+    if (typeof window === 'undefined') return;
+    window.dispatchEvent(new CustomEvent('mswdo-sync-queue-changed'));
+  }
+
+  private async queueSyncMutation(
+    storeName: string,
+    operation: SyncQueueItem['operation'],
+    data: Record<string, any>,
+  ): Promise<void> {
+    if (!this.shouldQueueSyncMutation(storeName, data)) {
+      return;
+    }
+
+    const queueItem: SyncQueueItem = {
+      id: `${storeName}:${data.id}`,
+      operation,
+      entity_type: storeName,
+      entity_id: data.id,
+      data,
+      timestamp: new Date(),
+      attempts: 0,
+    };
+
+    await this.put(STORE_NAMES.sync_queue, queueItem);
+    this.notifySyncQueueChanged();
+  }
+
+  private async queueDeleteMutation(storeName: string, entityId: string): Promise<void> {
+    if (storeName === STORE_NAMES.sync_queue || !SYNC_TRACKED_STORES.has(storeName)) {
+      return;
+    }
+
+    const queueItem: SyncQueueItem = {
+      id: `${storeName}:${entityId}`,
+      operation: 'delete',
+      entity_type: storeName,
+      entity_id: entityId,
+      data: { id: entityId },
+      timestamp: new Date(),
+      attempts: 0,
+    };
+
+    await this.put(STORE_NAMES.sync_queue, queueItem);
+    this.notifySyncQueueChanged();
+  }
 
   async init(): Promise<IDBDatabase> {
     if (this.db) return this.db;
@@ -54,8 +129,6 @@ export class IndexedDBManager {
             db.createObjectStore(name, { keyPath: 'id' });
           }
         };
-
-        // Core stores
         createStore(STORE_NAMES.users);
         createStore(STORE_NAMES.households);
         createStore(STORE_NAMES.residents);
@@ -63,9 +136,12 @@ export class IndexedDBManager {
         createStore(STORE_NAMES.programs);
         createStore(STORE_NAMES.beneficiaries);
         createStore(STORE_NAMES.inventory_items);
+        createStore(STORE_NAMES.inventory_movements);
+        createStore(STORE_NAMES.package_templates);
         createStore(STORE_NAMES.distribution_events);
         createStore(STORE_NAMES.distribution_records);
         createStore(STORE_NAMES.incidents);
+        createStore(STORE_NAMES.location_master_lists);
         createStore(STORE_NAMES.audit_logs);
         createStore(STORE_NAMES.sync_queue);
       };
@@ -83,7 +159,11 @@ export class IndexedDBManager {
 
       request.onsuccess = () => {
         console.log(`Added to ${storeName}:`, data.id);
-        resolve(data);
+        void this.queueSyncMutation(storeName, 'create', data)
+          .catch((error) => {
+            console.error(`Failed to queue create mutation for ${storeName}:`, error);
+          })
+          .finally(() => resolve(data));
       };
       request.onerror = () => reject(request.error);
     });
@@ -98,7 +178,11 @@ export class IndexedDBManager {
 
       request.onsuccess = () => {
         console.log(`Updated ${storeName}:`, data.id);
-        resolve(data);
+        void this.queueSyncMutation(storeName, 'update', data)
+          .catch((error) => {
+            console.error(`Failed to queue update mutation for ${storeName}:`, error);
+          })
+          .finally(() => resolve(data));
       };
       request.onerror = () => reject(request.error);
     });
@@ -137,7 +221,11 @@ export class IndexedDBManager {
 
       request.onsuccess = () => {
         console.log(`Deleted from ${storeName}:`, key);
-        resolve();
+        void this.queueDeleteMutation(storeName, key)
+          .catch((error) => {
+            console.error(`Failed to queue delete mutation for ${storeName}:`, error);
+          })
+          .finally(() => resolve());
       };
       request.onerror = () => reject(request.error);
     });
@@ -172,59 +260,11 @@ export async function seedInitialData() {
   console.log('Seeding initial data...');
 
   try {
-    // Check if users already exist
-    const users = await db.getAll<User>(STORE_NAMES.users);
-    if (users.length > 0) {
+    // Check if census data already exists
+    const existingHouseholds = await db.getAll<Household>(STORE_NAMES.households);
+    if (existingHouseholds.length > 0) {
       console.log('Data already seeded, skipping...');
       return;
-    }
-
-    // Demo users (passwords should be hashed in production)
-    const demoUsers: User[] = [
-      {
-        id: 'user-admin-1',
-        email: 'admin@mswdo.local',
-        password_hash: 'admin123', // TODO: hash this in production
-        name: 'Maria Santos',
-        role: 'admin',
-        barangay_id: 'barangay-1',
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      },
-      {
-        id: 'user-encoder-1',
-        email: 'encoder@barangay.local',
-        password_hash: 'encoder123',
-        name: 'Juan dela Cruz',
-        role: 'encoder',
-        barangay_id: 'barangay-1',
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      },
-      {
-        id: 'user-health-1',
-        email: 'health@barangay.local',
-        password_hash: 'health123',
-        name: 'Dr. Rosa Garcia',
-        role: 'health_worker',
-        barangay_id: 'barangay-1',
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      },
-      {
-        id: 'user-responder-1',
-        email: 'responder@drrmo.local',
-        password_hash: 'responder123',
-        name: 'Pedro Reyes',
-        role: 'responder',
-        barangay_id: 'barangay-1',
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      },
-    ];
-
-    for (const user of demoUsers) {
-      await db.add(STORE_NAMES.users, user);
     }
 
     // Sample households
@@ -233,10 +273,15 @@ export async function seedInitialData() {
         id: 'hh-1',
         head_name: 'Miguel Santos',
         barangay_id: 'barangay-1',
+        barangay_name: 'Barangay 1',
+        municipality: 'Mabini',
         purok_sitio: 'Purok 1',
         street_address: '123 Main Street',
+        landmark_directions: 'Near the barangay hall',
         contact_number: '09171234567',
         status: 'active',
+        location_confidence: 'medium',
+        location_verified: false,
         createdAt: new Date(),
         updatedAt: new Date(),
         syncStatus: 'synced',
@@ -245,10 +290,15 @@ export async function seedInitialData() {
         id: 'hh-2',
         head_name: 'Rosa Fernandez',
         barangay_id: 'barangay-1',
+        barangay_name: 'Barangay 1',
+        municipality: 'Mabini',
         purok_sitio: 'Purok 2',
         street_address: '456 Oak Avenue',
+        landmark_directions: 'Across the chapel',
         contact_number: '09187654321',
         status: 'active',
+        location_confidence: 'medium',
+        location_verified: false,
         createdAt: new Date(),
         updatedAt: new Date(),
         syncStatus: 'synced',
@@ -257,6 +307,22 @@ export async function seedInitialData() {
 
     for (const household of households) {
       await db.add(STORE_NAMES.households, household);
+    }
+
+    const masterLists: LocationMasterList[] = [
+      {
+        id: 'barangay-1',
+        barangay_id: 'barangay-1',
+        municipality: 'Mabini',
+        barangay_name: 'Barangay 1',
+        puroks: ['Purok 1', 'Purok 2', 'Purok 3', 'Purok 4', 'Purok 5', 'Purok 6', 'Purok 7'],
+        updatedAt: new Date(),
+        updatedBy: 'user-admin-1',
+      },
+    ];
+
+    for (const masterList of masterLists) {
+      await db.add(STORE_NAMES.location_master_lists, masterList);
     }
 
     // Sample residents with varied ages

@@ -1,166 +1,105 @@
-# MSWDO Household Census PWA - Capstone Project
+# MSWDO Household Census PWA
 
-A comprehensive Progressive Web Application (PWA) for municipal household census management with **automatic vulnerability categorization**, offline-first support, and relief distribution tracking.
+> A capstone project built to help local government workers serve their communities better — through smarter data, not more paperwork.
 
-## Project Overview
+---
 
-This capstone demonstrates a production-ready system for MSWDO (Municipal Social Welfare and Development Office) staff to:
-- **Maintain household census** with real-time vulnerability detection
-- **Automatically categorize** residents (Child/Adult/Senior) based on birthdate
-- **Track vulnerable groups** (PWD, pregnant women, chronic illness, low-income)
-- **Manage relief distribution** with auto-eligible beneficiary selection
-- **Generate official reports** for municipality administration
-- **Work offline** with automatic sync when online
+## What This Is
 
-## Key Innovation: Automatic Age-Based Vulnerability Categorization
+This is a **Progressive Web Application (PWA)** built for the **Municipal Social Welfare and Development Office (MSWDO)**. It helps frontline staff — encoders, health workers, and responders — manage their household census data, automatically track vulnerable residents, and coordinate relief distributions, all without needing a stable internet connection.
 
-The system computes age from birthdate dynamically without manual editing:
-- **Child**: 0-17 years
-- **Adult**: 18-59 years  
-- **Senior**: 60+ years
+The app was designed with a simple philosophy: **the system should do the hard work, not the people using it.**
 
-**Demo Proof**: A resident born 1964-02-28 is automatically tagged as "Senior" on 2026-02-28 (age 62) without any manual data entry.
+Instead of asking staff to manually pick an age category or check a checkbox every time someone's birthday passes, the app figures it out automatically. You enter a birthdate once, and the system handles everything else — for life.
+
+---
+
+## The Core Innovation: Automatic Vulnerability Detection
+
+Here's the problem we solved: MSWDO staff used to manually mark residents as "child," "adult," or "senior" — and those labels would go stale the moment someone had a birthday. People would be miscategorized for months, and relief distributions would sometimes miss the right beneficiaries.
+
+Our solution was simple but powerful: **compute age and category directly from the birthdate, every single time.**
+
+- **Child**: 0–17 years old
+- **Adult**: 18–59 years old
+- **Senior**: 60 years and above
+
+There's no forms to re-fill. No categories to manually update. A resident born on **February 28, 1964** is automatically recognized as a **Senior (age 62)** on **February 28, 2026** — without anyone touching the record.
+
+---
+
+## Who Uses This App
+
+| Role | What They Do |
+|------|-------------|
+| **Admin** | Manages users, has full access to everything |
+| **Encoder** | Adds and updates households and resident records |
+| **Health Worker** | Updates health flags (pregnancy, PWD, chronic illness) |
+| **Responder** | Views vulnerable residents and incident reports |
+
+Each role sees only what they need. Permissions are enforced throughout the app — no workarounds, no accidental deletions.
+
+---
+
+## What's Already Built
+
+### 🏠 Household & Resident Management
+- Register households with address, purok/sitio, contact number, and GPS coordinates
+- Add family members with full biographical details
+- Soft-delete records (residents who've moved out or passed away are preserved, not erased)
+- Search and filter households by name, location, or status
+
+### 🤖 Automatic Vulnerability System
+- Age computed from birthdate using JavaScript's `Date` API — handles leap years correctly
+- Residents are automatically tagged: child, adult, senior
+- Health workers can also flag: PWD, pregnant, chronic illness, low-income
+- All flags update the dashboard in real time
+
+### 📊 Dashboard & Reporting
+- Live KPI cards: total households, population, children, adults, seniors
+- Breakdown of vulnerability types across puroks
+- Monthly demographic reports — printable and export-ready
+- Household listing by purok, vulnerable groups summary
+
+### 🎁 Relief Distribution
+- Create distribution events (regular, emergency, disaster relief)
+- The system automatically selects eligible beneficiaries based on event type:
+  - *Senior Relief* → all seniors 60+
+  - *PWD Assistance* → all PWD-flagged residents
+  - *Maternal Health* → all pregnant women
+  - *General Relief* → all low-income families
+- Prevents duplicate distributions within the same event
+- Full distribution logs with timestamps and distributor info
+
+### 📦 Inventory Management
+- Track food, medicine, hygiene kits, clothing, and blankets
+- Low-stock alerts when quantities drop below 10 units
+- Expiration date tracking
+
+### 📶 Offline-First
+- All data lives in **IndexedDB** — the app works completely offline
+- Service worker is registered and ready
+- A sync queue is already in place for future Supabase integration
+
+---
 
 ## Tech Stack
 
-- **Framework**: Next.js 16 with App Router
-- **Database**: IndexedDB (offline-first) + optional Supabase backend
-- **Styling**: Tailwind CSS with semantic design tokens
-- **Icons**: Lucide React
-- **Auth**: Role-based access control (Admin, Encoder, Health Worker, Responder)
-- **PWA**: Service Worker + Web App Manifest
+| Layer | Technology |
+|-------|-----------|
+| Framework | Next.js 16 (App Router) |
+| Language | TypeScript |
+| Styling | Tailwind CSS |
+| Icons | Lucide React |
+| Storage | IndexedDB (offline-first) |
+| Auth | Custom RBAC (localStorage session) |
+| PWA | Web App Manifest + Service Worker |
 
-## Features Implemented
-
-### Phase 1: Core MVP ✅
-
-**Authentication & RBAC**
-- Login with 4 demo user roles
-- Role-based permission matrix
-- Session persistence with localStorage
-- Audit logging for all changes
-
-**Household Management**
-- Add/edit/delete households
-- Track household head, address, purok/sitio
-- Contact number storage
-- Status tracking (active/moved_out/deceased)
-- Search and filter by multiple criteria
-
-**Resident Management**
-- Add family members with birthdate, gender, relationship
-- Automatic age calculation
-- Civil status, occupation, income tracking
-- Real-time vulnerability flag computation
-- Health worker role for updating medical flags
-
-**Automatic Vulnerability System (KEY INNOVATION)**
-- Computes age from birthdate using JavaScript Date API
-- Auto-tags children (0-17), adults (18-59), seniors (60+)
-- Triggered when resident is loaded or birthdate changes
-- No manual editing required for age categories
-- Example: Feb 28, 1964 resident automatically becomes Senior on 2026-02-28
-
-**Dashboard**
-- Real-time KPI cards (households, population, children, seniors)
-- Vulnerability breakdown (PWD, pregnant, chronic, low-income)
-- Top puroks by population and vulnerability
-- Quick action links to household and reports sections
-
-**Vulnerability Dashboard**
-- Filter vulnerable residents by type, purok, status
-- Color-coded vulnerability badges
-- Top puroks by vulnerability count
-- Export-ready list view
-
-**Reports Center**
-- Monthly demographic summary with age distribution
-- Vulnerable groups summary
-- Household listing by purok
-- Print-ready PDF formatting
-- CSV export support (framework ready)
-
-### Phase 2: Relief Distribution ✅
-
-**Inventory Management**
-- Add inventory items by category (food, medicine, hygiene, clothing, blankets)
-- Track quantity and expiration dates
-- Low-stock alerts (< 10 units)
-- Edit/delete functionality
-
-**Relief Distribution Events**
-- Create distribution events (regular/emergency/disaster relief)
-- Auto-select eligible beneficiaries based on event type:
-  - Senior Relief → all residents 60+
-  - PWD Assistance → all PWD residents
-  - Maternal Health → all pregnant women
-  - General Relief → all low-income families
-- Record distribution with timestamp
-- **Prevent duplicates**: System prevents same resident from receiving twice in same event
-
-**Distribution Tracking**
-- Track all distributions with beneficiary info
-- Distribution logs with items distributed
-- Distributor name and timestamp
-- Report generation for distribution events
-
-### Phase 3: Foundation Ready (Optional)
-
-**PWA Features**
-- Service worker registration ready
-- Web app manifest configured
-- Offline cache strategy implemented
-- IndexedDB persists all data offline
-- Sync queue structure in place (ready for Supabase integration)
-
-**Mapping Ready**
-- Heatmap data generation by purok
-- Vulnerability intensity calculations
-- Ready for Leaflet + OpenStreetMap integration
-
-## File Structure
-
-```
-/app
-├── page.tsx                      # Root redirect to login/dashboard
-├── layout.tsx                    # PWA metadata + root layout
-├── login/page.tsx                # Login form with demo credentials
-├── dashboard/page.tsx            # Main dashboard with KPI cards
-├── households/
-│   ├── page.tsx                  # Household list with filters
-│   ├── new/page.tsx              # Add new household
-│   └── [id]/page.tsx             # Household details + members
-├── vulnerability/page.tsx        # Vulnerability dashboard + filters
-├── reports/
-│   ├── page.tsx                  # Reports menu
-│   └── monthly/page.tsx          # Monthly demographic report
-├── inventory/page.tsx            # Inventory management
-└── distribution/page.tsx         # Distribution events list
-
-/lib
-├── auth.ts                       # Authentication utilities
-├── db/
-│   ├── schema.ts                 # TypeScript type definitions
-│   ├── indexeddb.ts              # IndexedDB manager
-│   ├── households.ts             # Household CRUD
-│   ├── residents.ts              # Resident CRUD
-│   ├── vulnerability.ts          # Vulnerability calculation engine
-│   ├── inventory.ts              # Inventory CRUD
-│   ├── distribution.ts           # Distribution event operations
-│   └── queries.ts                # Complex queries for reports
-
-/components
-└── forms/
-    ├── household-form.tsx        # Reusable household form
-
-/public
-├── manifest.json                 # PWA manifest
-├── service-worker.js (ready)     # Service worker implementation
-```
+---
 
 ## Getting Started
 
-### Demo Credentials
+### Demo Login Credentials
 
 | Role | Email | Password |
 |------|-------|----------|
@@ -169,168 +108,201 @@ The system computes age from birthdate dynamically without manual editing:
 | Health Worker | health@barangay.local | health123 |
 | Responder | responder@drrmo.local | responder123 |
 
-### Installation
+### Running Locally
 
 ```bash
 # Install dependencies
 npm install
-# or
-pnpm install
 
-# Start development server
+# Start the dev server
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) in browser.
+Then open [http://localhost:3000](http://localhost:3000) in your browser.
 
-### First Time Setup
+The first time you log in, the database is automatically seeded with sample households and residents — so you can start exploring right away, no manual setup needed.
 
-1. Navigate to login page
-2. Use any demo credential above
-3. Database initializes with seed data (sample households, residents)
-4. Dashboard loads with vulnerability statistics
+## System Flowchart
 
-## Capstone Defense Demo Flow (10-15 minutes)
+The full architecture and data-flow diagram lives in [SYSTEM_FLOWCHART.md](./SYSTEM_FLOWCHART.md).
 
-### 1. Login (30s)
-```
-→ Show: Login page with role selection
-→ Demonstrate: Different roles have different permissions
-```
+---
 
-### 2. Add Household + Members (2 min)
-```
-→ Dashboard → "Add Household" button
-→ Create household "Garcia Family" at Purok 1
-→ Add members:
-   - Parent 1: Born 1978-03-15 (48 years, Adult)
-   - Parent 2: Born 1980-07-22 (46 years, Adult)
-   - Child: Born 2015-11-10 (10 years, Child) ← AUTO-CATEGORIZED
-   - Senior: Born 1950-01-28 (74 years, Senior) ← AUTO-CATEGORIZED
-→ Show: Zero manual age entry required
-```
+## Project File Structure
 
-### 3. View Vulnerability Dashboard (1 min)
 ```
-→ Click "Vulnerability Dashboard"
-→ Show: Auto-calculated totals updated instantly
-→ Highlight: Child badge on 10-year-old
-→ Highlight: Senior badge on 74-year-old
-→ Filter by "Children (0-17)" → Show new residents
-```
+/app
+├── page.tsx                      ← Root redirect
+├── layout.tsx                    ← PWA metadata + layout
+├── login/page.tsx                ← Login form
+├── dashboard/page.tsx            ← Main dashboard
+├── households/
+│   ├── page.tsx                  ← Household list
+│   ├── new/page.tsx              ← Add household
+│   └── [id]/page.tsx            ← Household detail + members
+├── vulnerability/page.tsx        ← Vulnerability dashboard
+├── reports/
+│   ├── page.tsx                  ← Reports menu
+│   └── monthly/page.tsx         ← Monthly demographic report
+├── inventory/page.tsx            ← Inventory management
+└── distribution/page.tsx         ← Distribution events
 
-### 4. Generate Report (1 min)
-```
-→ Reports → "Monthly Demographic Summary"
-→ Show: Updated population counts
-→ Demonstrate: Print or export to PDF
-```
+/lib
+├── auth.ts                       ← Auth utilities
+└── db/
+    ├── schema.ts                 ← TypeScript type definitions
+    ├── indexeddb.ts              ← IndexedDB setup
+    ├── households.ts             ← Household CRUD
+    ├── residents.ts              ← Resident CRUD
+    ← vulnerability.ts           ← Age + vulnerability engine
+    ├── inventory.ts              ← Inventory CRUD
+    ├── distribution.ts           ← Distribution operations
+    └── queries.ts                ← Complex report queries
 
-### 5. Relief Distribution (2 min)
-```
-→ Distribution → "New Event"
-→ Create "Senior Relief Event"
-→ System auto-selects: Seniors (60+) as eligible
-→ Show: 1 beneficiary automatically eligible
-→ Record distribution for Garcia Senior
+/components
+└── forms/
+    └── household-form.tsx        ← Reusable household form
+
+/public
+├── manifest.json                 ← PWA manifest
+└── service-worker.js             ← Service worker (ready)
 ```
 
-### 6. Optional: Show Offline (1-2 min)
-```
-→ DevTools → Application → Service Worker (registered)
-→ DevTools → Network → Offline mode
-→ View: All household data still visible
-→ Try add: Queued for sync when online
-→ Return to online → Show automatic sync
-```
+---
 
-## Database Schema
+## Capstone Defense Demo Script (10–15 minutes)
 
-### Core Tables in IndexedDB
+### 1. Login — 30 seconds
+Log in using any of the demo credentials. Switch roles to show that each one has a different view and different permissions.
 
-**users**: Admin, encoders, health workers, responders
+### 2. Add a Household — 2 minutes
+- Go to **Dashboard → Add Household**
+- Create "Garcia Family" at Purok 1
+- Add family members:
+  - Parent 1: born 1978-03-15 → auto-tagged **Adult**
+  - Parent 2: born 1980-07-22 → auto-tagged **Adult**
+  - Child: born 2015-11-10 → auto-tagged **Child** ✨
+  - Senior: born 1950-01-28 → auto-tagged **Senior** ✨
+- Emphasize: **no age dropdowns. No manual category selection. Zero.**
 
-**households**: Head name, address, purok, contact
+### 3. Vulnerability Dashboard — 1 minute
+- Click "Vulnerability Dashboard"
+- Show the live tally updating with the new residents
+- Filter by "Children (0–17)" to show the newly added child
 
-**residents**: Full name, birthdate (key for age calc), gender, relationship
+### 4. Generate a Report — 1 minute
+- Go to **Reports → Monthly Demographic Summary**
+- Show the updated counts and age breakdown
+- Click Print — demonstrate the PDF-ready layout
 
-**vulnerability_flags**: Computed age categories + manual health flags
-- is_child (age 0-17)
-- is_adult (age 18-59)
-- is_senior (age 60+)
-- is_pregnant, is_pwd, has_chronic_illness (manual)
+### 5. Relief Distribution — 2 minutes
+- Go to **Distribution → New Event**
+- Create a "Senior Relief Event"
+- The system automatically picks all seniors as eligible beneficiaries
+- Record a distribution and show the duplicate-prevention in action
 
-**inventory_items**: Stock management
+### 6. Offline Mode (Optional) — 1–2 minutes
+- Open DevTools → Network → set to Offline
+- Show that all household data is still visible and usable
+- Add something while offline — it queues for sync
+- Go back online — the queue is ready to sync
 
-**distribution_events**: Relief events with type and status
+---
 
-**distribution_records**: Beneficiary distributions (prevents duplicates)
+## Database Schema (IndexedDB)
 
-**audit_logs**: Action tracking for all changes
+| Store | Purpose |
+|-------|---------|
+| `users` | Admin, encoders, health workers, responders |
+| `households` | Head name, address, purok, contact details |
+| `residents` | Full name, birthdate, gender, relationship |
+| `vulnerability_flags` | Computed (child/adult/senior) + manual (PWD, pregnant, chronic) |
+| `inventory_items` | Stock management with expiry tracking |
+| `distribution_events` | Relief events with type and status |
+| `distribution_records` | Per-beneficiary records, duplicate prevention |
+| `audit_logs` | Full change history for every action |
+| `sync_queue` | Offline operations queued for cloud sync |
 
-## Key Design Decisions
+---
 
-1. **IndexedDB First**: All data persists offline, ready for Supabase sync
-2. **Auto-Computation**: Age categories computed from birthdate, eliminating manual errors
-3. **Soft Deletes**: Status field (moved_out/deceased) preserves data
-4. **Role-Based**: Permissions matrix prevents unauthorized actions
-5. **No External API**: MVP functions entirely offline with seed data
-6. **Type-Safe**: Full TypeScript for enterprise reliability
+## Design Decisions Worth Knowing
 
-## Known Limitations & Next Steps
+**Why IndexedDB?**
+Because internet connectivity in barangay areas can be unreliable. The app needed to work offline, first — syncing to the cloud later.
 
-### Phase 3 (Not Implemented)
-- [ ] Leaflet map integration with OpenStreetMap
-- [ ] Incident reporting for disaster response
-- [ ] Background sync with service worker
-- [ ] Push notifications
-- [ ] Supabase backend integration
-- [ ] Edit/delete actions for residents and items
+**Why soft deletes?**
+Residents who move out or pass away are marked with a status field (`moved_out`, `deceased`) rather than deleted. This keeps the audit trail intact and preserves historical data.
 
-### Future Enhancements
-- Multi-barangay support with admin filtering
-- Barcode scanning for inventory
-- Photo capture for incidents
+**Why auto-compute age categories?**
+Manual entry is error-prone. Staff forget to update records. Automatic computation from birthdate means the data is always correct — forever.
+
+**Why Role-Based Access Control?**
+Different roles have genuinely different needs. Health workers shouldn't be able to delete households. Responders shouldn't edit medical flags. The permission matrix enforces these boundaries quietly, in the background.
+
+---
+
+## What's Not Built Yet (Phase 3)
+
+These features are foundation-ready — the database structures and data generators are in place. They just need a UI and integration:
+
+- [ ] **Leaflet + OpenStreetMap** — map pins and heatmap by vulnerability per purok
+- [ ] **Incident Reporting** — disaster response with photo upload and responder assignment
+- [ ] **Background Sync** — service worker auto-syncing offline queue to Supabase
+- [ ] **Push Notifications** — relief schedule reminders, evacuation alerts
+- [ ] **Multi-Barangay Support** — filter and aggregate across multiple areas
+- [ ] **Edit/Delete actions** — for existing residents and inventory items (UI only)
+
+### Future Wishlist
+- Barcode scanning for inventory check-in/out
 - Bulk import/export via CSV
 - SMS notifications for relief events
-- Real-time data sync via WebSocket
+- Real-time sync via WebSocket
+
+---
 
 ## Security Notes
 
-- Password hashing (bcrypt) should be added for production
-- HTTPS required for PWA deployment
-- Row-level security (RLS) to implement with Supabase
-- Input validation and sanitization in place
-- Audit logs track all user actions
+- **Passwords**: Currently plain-text for demo. Production should use `bcrypt` hashing.
+- **HTTPS**: Required for PWA installation and service worker registration.
+- **Row-Level Security**: Ready to enable once Supabase is integrated.
+- **Input Validation**: Implemented on all forms — sanitized before storage.
+- **Audit Logs**: Every create, update, and delete is logged with user ID and timestamp.
+
+---
 
 ## Deployment
 
-### To Vercel
+### Deploy to Vercel
 ```bash
 npm install -g vercel
 vercel
-# Follow prompts to deploy
 ```
 
 ### Production Checklist
 - [ ] Enable HTTPS
-- [ ] Configure environment variables
-- [ ] Set up Supabase backend (optional)
-- [ ] Test offline functionality
-- [ ] Verify PWA installation on mobile
-- [ ] Enable RLS on database
-- [ ] Hash passwords with bcrypt
-- [ ] Monitor audit logs
-
-## Support
-
-For issues or questions about the capstone implementation, refer to:
-- `/v0_plans/creative-guide.md` - Full technical specification
-- `/lib/db/vulnerability.ts` - Vulnerability calculation engine
-- `/lib/db/queries.ts` - Complex query examples
+- [ ] Set environment variables
+- [ ] Connect Supabase backend (optional but recommended for multi-device)
+- [ ] Test offline mode end-to-end
+- [ ] Verify PWA installs on Android and iOS
+- [ ] Enable Row-Level Security on Supabase
+- [ ] Hash all passwords with bcrypt
+- [ ] Review and monitor audit logs
 
 ---
 
-**Capstone Project**: MSWDO Household Census PWA
-**Built with**: Next.js 16, TypeScript, Tailwind CSS, IndexedDB
-**Status**: Production-Ready MVP (Phase 1 + Phase 2 Complete)
+## Where to Look If Something's Unclear
+
+| Question | File to Check |
+|----------|--------------|
+| How is age calculated? | `/lib/db/vulnerability.ts` |
+| How does login work? | `/lib/auth.ts` |
+| Where's the IndexedDB schema? | `/lib/db/schema.ts` |
+| How do complex queries work? | `/lib/db/queries.ts` |
+| Full technical spec | `/v0_plans/creative-guide.md` |
+
+---
+
+*Built as part of a capstone project for MSWDO. Designed to make the lives of social workers a little bit easier, one household at a time.*
+
+**Stack**: Next.js 16 · TypeScript · Tailwind CSS · IndexedDB  
+**Status**: Production-Ready MVP — Phase 1 & Phase 2 Complete ✅

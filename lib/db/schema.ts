@@ -1,6 +1,6 @@
 // Core type definitions for MSWDO Census PWA
 
-export type UserRole = 'admin' | 'encoder' | 'health_worker' | 'responder';
+export type UserRole = 'admin' | 'encoder' | 'health_worker' | 'responder' | 'resident';
 export type HouseholdStatus = 'active' | 'moved_out' | 'deceased';
 export type ResidentStatus = 'active' | 'moved_out' | 'deceased';
 export type CivilStatus = 'single' | 'married' | 'widowed' | 'separated';
@@ -10,17 +10,32 @@ export type PWDType = 'physical' | 'visual' | 'hearing' | 'intellectual' | 'psyc
 export type SyncStatus = 'pending' | 'synced';
 export type DistributionType = 'regular' | 'emergency' | 'disaster_relief';
 export type DistributionStatus = 'planned' | 'ongoing' | 'completed';
+export type DistributionTargetScope = 'household' | 'resident';
+export type DistributionTargetGroup = 'all' | 'senior' | 'pwd' | 'pregnant' | 'minor' | 'low_income';
+export type InventoryMovementType =
+  | 'stock_in'
+  | 'stock_out'
+  | 'adjustment'
+  | 'distribution_release'
+  | 'transfer';
 export type IncidentType = 'flood' | 'fire' | 'medical' | 'landslide' | 'typhoon' | 'other';
 export type IncidentSeverity = 'low' | 'medium' | 'high' | 'critical';
 export type IncidentStatus = 'reported' | 'verified' | 'responding' | 'resolved';
+export type LocationSource = 'address_search' | 'manual_pin' | 'current_gps' | 'admin_review';
+export type LocationConfidence = 'low' | 'medium' | 'high';
+export type HouseholdRegistrationStatus = 'pending' | 'approved' | 'rejected' | 'needs_correction';
+export type PinQaStatus = 'valid' | 'duplicate' | 'needs_verification';
 
 export interface User {
   id: string;
   email: string;
-  password_hash: string;
+  password_hash?: string;
   name: string;
   role: UserRole;
   barangay_id: string;
+  must_change_password?: boolean;
+  email_verification_required?: boolean;
+  email_verified_at?: Date;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -30,15 +45,45 @@ export interface Household {
   head_name: string;
   head_id?: string; // FK to residents
   barangay_id: string;
+  applicant_user_id?: string;
+  applicant_email?: string;
+  barangay_name?: string;
+  municipality?: string;
   purok_sitio: string;
   street_address: string;
+  landmark_directions?: string;
   contact_number?: string;
+  supporting_document_name?: string;
+  supporting_document_type?: string;
+  supporting_document_data?: string;
   status: HouseholdStatus;
   gps_lat?: number;
   gps_long?: number;
+  location_source?: LocationSource;
+  location_confidence?: LocationConfidence;
+  location_verified?: boolean;
+  location_verified_at?: Date;
+  location_verified_by?: string;
+  registration_status?: HouseholdRegistrationStatus;
+  registration_submitted_at?: Date;
+  registration_reviewed_at?: Date;
+  registration_reviewed_by?: string;
+  registration_review_notes?: string;
+  pin_qa_status?: PinQaStatus;
+  pin_qa_notes?: string;
   createdAt: Date;
   updatedAt: Date;
   syncStatus: SyncStatus;
+}
+
+export interface LocationMasterList {
+  id: string;
+  barangay_id: string;
+  municipality: string;
+  barangay_name: string;
+  puroks: string[];
+  updatedAt: Date;
+  updatedBy?: string;
 }
 
 export interface Resident {
@@ -95,11 +140,42 @@ export interface Beneficiary {
 export interface InventoryItem {
   id: string;
   item_name: string;
+  item_code?: string;
   category: 'food' | 'medicine' | 'hygiene' | 'clothing' | 'blankets' | 'other';
   quantity_available: number;
   unit: 'pcs' | 'kg' | 'box' | 'pack' | 'bundle';
+  reorder_level?: number;
+  storage_location?: string;
   expiration_date?: string; // ISO format
   notes?: string;
+  syncStatus: SyncStatus;
+}
+
+export interface InventoryMovement {
+  id: string;
+  item_id: string;
+  item_name: string;
+  type: InventoryMovementType;
+  quantity: number;
+  previous_quantity: number;
+  new_quantity: number;
+  unit: InventoryItem['unit'];
+  performed_by?: string;
+  performed_by_name?: string;
+  reference_id?: string;
+  reference_type?: 'inventory' | 'distribution' | 'manual' | 'transfer';
+  notes?: string;
+  timestamp: Date;
+  syncStatus: SyncStatus;
+}
+
+export interface PackageTemplate {
+  id: string;
+  name: string;
+  description?: string;
+  items: DistributedItem[];
+  createdAt: Date;
+  updatedAt: Date;
   syncStatus: SyncStatus;
 }
 
@@ -108,6 +184,9 @@ export interface DistributionEvent {
   event_name: string;
   type: DistributionType;
   incident_id?: string;
+  target_scope: DistributionTargetScope;
+  target_group: DistributionTargetGroup;
+  package_items: DistributedItem[];
   location: string;
   gps_lat?: number;
   gps_lng?: number;
@@ -121,12 +200,16 @@ export interface DistributionEvent {
 export interface DistributedItem {
   item_id: string;
   quantity: number;
+  item_name?: string;
+  unit?: InventoryItem['unit'];
 }
 
 export interface DistributionRecord {
   id: string;
   event_id: string;
-  resident_id: string;
+  household_id?: string;
+  resident_id?: string;
+  beneficiary_name?: string;
   items_distributed: DistributedItem[];
   received_by_name?: string;
   timestamp: Date;
@@ -139,6 +222,8 @@ export interface Incident {
   id: string;
   type: IncidentType;
   location: string;
+  gps_lat?: number;
+  gps_lng?: number;
   severity: IncidentSeverity;
   status: IncidentStatus;
   reported_by: string;
@@ -152,7 +237,7 @@ export interface AuditLog {
   id: string;
   user_id: string;
   action: string;
-  entity_type: 'household' | 'resident' | 'distribution' | 'incident' | 'inventory' | 'user';
+  entity_type: 'household' | 'resident' | 'distribution' | 'incident' | 'inventory' | 'user' | 'location_master';
   entity_id: string;
   changes?: Record<string, any>;
   timestamp: Date;

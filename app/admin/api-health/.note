@@ -1,0 +1,15 @@
+heck the full API health
+
+curl -sS "http://localhost:3000/api/api-health?format=table"
+
+
+
+curl -sS "http://localhost:3000/api/api-health" | jq
+
+
+weather API 
+curl -sS "http://localhost:3000/api/weather?lat=7.2186&lng=125.6208" | jq
+
+
+specific map location
+curl -sS "http://localhost:3000/api/health?lat=7.2186&lng=125.6208" | jq

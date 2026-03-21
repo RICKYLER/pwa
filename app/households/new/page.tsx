@@ -4,7 +4,7 @@ import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { getCurrentUser, hasPermission } from '@/lib/auth';
 import { createHousehold } from '@/lib/db/households';
-import { createResident } from '@/lib/db/residents';
+import { createResident, updateHealthFlags } from '@/lib/db/residents';
 import { HouseholdForm, MemberDraft } from '@/components/forms/household-form';
 import { ArrowLeft } from 'lucide-react';
 import Link from 'next/link';
@@ -36,7 +36,7 @@ export default function AddHouseholdPage() {
 
       // 2. Create each member linked to the new household
       for (const member of members) {
-        await createResident({
+        const resident = await createResident({
           household_id: household.id,
           full_name: member.full_name,
           birthdate: member.birthdate,
@@ -47,6 +47,14 @@ export default function AddHouseholdPage() {
           income_level: member.income_level,
           status: 'active',
         });
+
+        if (member.is_pregnant || member.is_pwd) {
+          await updateHealthFlags(resident.id, {
+            is_pregnant: member.is_pregnant,
+            is_pwd: member.is_pwd,
+            pwd_type: member.is_pwd ? member.pwd_type || undefined : undefined,
+          });
+        }
       }
 
       router.push('/households');

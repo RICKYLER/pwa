@@ -34,7 +34,7 @@ export default function HouseholdCensusPage() {
         async function load() {
             setIsLoading(true);
             const [households, residents] = await Promise.all([
-                getHouseholds({ barangay_id: u.barangay_id }),
+                getHouseholds({ barangay_id: u.barangay_id, registration_status: 'approved' }),
                 getResidents({ status: 'active' }),
             ]);
             const data: HouseholdRow[] = households.map(h => ({

@@ -1,342 +1,204 @@
-# MSWDO Census PWA - Quick Start Guide
+# Quick Start Guide — MSWDO Census PWA
 
-## 🚀 Get Started in 60 Seconds
+You should be up and running in under a minute. Here's everything you need.
 
-### 1. Start the Development Server
+---
+
+## Start the App
+
 ```bash
 npm run dev
 ```
-Open [http://localhost:3000](http://localhost:3000) in your browser.
 
-### 2. Login with Demo Account
-**Email**: `encoder@barangay.local`  
-**Password**: `encoder123`
+Open [http://localhost:3000](http://localhost:3000) in your browser. That's it.
 
-(or try any of the 4 demo roles below)
-
-### 3. Explore Dashboard
-Dashboard loads immediately with pre-seeded data:
-- 2 households
-- 7 residents (varied ages)
-- Auto-calculated statistics
+The first time you log in, the app automatically seeds itself with sample data — two households, seven residents with varied ages, and pre-calculated vulnerability stats — so you don't have to set anything up manually before you can explore.
 
 ---
 
-## 🔐 Demo User Accounts
+## Demo Accounts
 
-| Role | Email | Password | Access |
-|------|-------|----------|--------|
-| **Admin** | admin@mswdo.local | admin123 | Full system access, user management |
-| **Encoder** | encoder@barangay.local | encoder123 | Add households, manage residents ← **Best for demo** |
-| **Health Worker** | health@barangay.local | health123 | Update health flags (pregnant, PWD) |
-| **Responder** | responder@drrmo.local | responder123 | View vulnerable residents, incidents |
+Pick whichever role you want to test. Each one has a different level of access.
 
----
-
-## 🎯 Quick Demo Flow (5-10 minutes)
-
-### Step 1: See Automatic Age Categorization
-```
-Login → Dashboard → "Add Household" 
-  ├─ Name: "Test Family"
-  ├─ Address: "456 Oak Avenue"
-  ├─ Purok: "Purok 2"
-  └─ Save
-
-Click "Add Member":
-  ├─ Name: "Test Child"
-  ├─ Birthdate: 2015-11-10 (10 years old) ← ENTER DATE
-  └─ Save
-  
-💡 Notice: System automatically shows "Child" badge
-   (No dropdown selection needed!)
-```
-
-### Step 2: View Vulnerability Dashboard
-```
-Click: "Vulnerability Dashboard" (left menu)
-  └─ See: New child automatically counted
-  └─ Filter: "Children (0-17)" → Shows new resident
-  └─ See: Auto-calculated statistics
-```
-
-### Step 3: Generate Official Report
-```
-Click: "Reports" → "Monthly Summary"
-  └─ Shows: Updated population counts
-  └─ Shows: Age distribution breakdown
-  └─ Print: Click "Print" button
-```
-
-### Step 4: Create Relief Distribution
-```
-Click: "Relief Distribution" → "New Event"
-  ├─ Event Name: "Child Aid"
-  ├─ Type: "Child Support" ← SELECT THIS
-  ├─ Location: "Community Center"
-  └─ Save
-  
-Result: System shows all children as automatic beneficiaries!
-```
+| Role | Email | Password | What They Can Do |
+|------|-------|----------|------------------|
+| **Admin** | admin@mswdo.local | admin123 | Everything — user management, full access |
+| **Encoder** | encoder@barangay.local | encoder123 | Add and edit households and residents ← *Best for demos* |
+| **Health Worker** | health@barangay.local | health123 | Update health flags (PWD, pregnancy, chronic illness) |
+| **Responder** | responder@drrmo.local | responder123 | View vulnerable residents and incidents |
 
 ---
 
-## 📁 Key Files to Explore
+## Quick 5-Minute Demo Flow
 
-### Understanding the Innovation
+### Step 1 — See Automatic Age Categorization in Action
+
+This is the heart of the app. Go to **Dashboard → Add Household**, and create a test family. Then add a member with this birthdate: `2015-11-10`.
+
+Don't select any age category or vulnerability flag. Just save.
+
+You'll see a **"Child"** badge appear automatically. The system computed the age from the birthdate and tagged the resident without you doing a thing. That's the innovation.
+
+### Step 2 — Check the Vulnerability Dashboard
+
+Click **"Vulnerability Dashboard"** in the left menu. Your new resident is already counted. Filter by "Children (0–17)" and they appear instantly.
+
+### Step 3 — Generate an Official Report
+
+Go to **Reports → Monthly Summary**. The updated counts are there. Hit **Print** for a PDF-ready layout.
+
+### Step 4 — Create a Relief Distribution Event
+
+Go to **Relief Distribution → New Event**. Create a "Child Aid" event, set the type to **"Child Support"**, and save.
+
+Without you selecting a single beneficiary manually, the system already has your child listed as eligible.
+
+---
+
+## Key Files (If You Want to Dig Deeper)
+
+### The Innovation Engine
 ```
 /lib/db/vulnerability.ts
-  ├─ calculateAge() - Computes age from birthdate
-  ├─ getAgeCategory() - Returns child/adult/senior
-  └─ calculateVulnerabilityFlags() - Auto-tags residents
+  ├── calculateAge()             ← Computes age from birthdate
+  ├── getAgeCategory()           ← Returns "child", "adult", or "senior"
+  └── calculateVulnerabilityFlags() ← Builds the full vulnerability profile
 ```
 
 ### Database Layer
 ```
-/lib/db/indexeddb.ts - IndexedDB initialization
-/lib/db/schema.ts - TypeScript type definitions
-/lib/db/households.ts - Household CRUD
-/lib/db/residents.ts - Resident CRUD
-/lib/db/distribution.ts - Relief event operations
+/lib/db/indexeddb.ts    ← IndexedDB initialization
+/lib/db/schema.ts       ← TypeScript type definitions
+/lib/db/households.ts   ← Household CRUD operations
+/lib/db/residents.ts    ← Resident CRUD operations
+/lib/db/distribution.ts ← Relief event operations
+/lib/db/queries.ts      ← Complex queries used in reports
 ```
 
-### Pages to Visit
+### Pages
 ```
-/app/households/new - Add household form
-/app/vulnerability - View vulnerable residents
-/app/reports - Generate official reports
-/app/distribution - Relief distribution events
+/app/households/new     ← Add a new household
+/app/vulnerability      ← Vulnerability dashboard with filters
+/app/reports            ← Report menu
+/app/distribution       ← Relief distribution events
 ```
 
 ---
 
-## 🧪 Test Scenarios
+## Test Scenarios
 
-### Test 1: Auto-Age Calculation
-1. Add resident born in 2015
-2. System shows age as ~11 years
-3. System auto-tags as "Child"
-4. ✅ No manual category selection required
+### ✅ Auto-Age Calculation
+1. Add a resident born in 2015
+2. System shows their current age
+3. System auto-tags them as "Child"
+4. No dropdown. No manual selection. It just works.
 
-### Test 2: Vulnerability Filtering
-1. Go to Vulnerability Dashboard
+### ✅ Vulnerability Filtering
+1. Open the Vulnerability Dashboard
 2. Filter by "Seniors (60+)"
-3. Pre-seeded senior (born 1950) appears
-4. ✅ Filter works, counts accurate
+3. The pre-seeded senior (born 1950) appears
+4. Counts are accurate and live
 
-### Test 3: Auto-Beneficiary Selection
-1. Create distribution event
-2. Type: "Senior Relief"
-3. System auto-selects all seniors
-4. ✅ No manual selection needed
+### ✅ Auto-Beneficiary Selection
+1. Create a distribution event
+2. Set type to "Senior Relief"
+3. All seniors in the system are automatically listed as eligible
+4. No clicking through a list to select them one by one
 
-### Test 4: Report Generation
-1. Add/edit a household
+### ✅ Report Generation
+1. Add a new household with members
 2. Go to Reports → Monthly Summary
-3. Updated population counts shown
-4. ✅ Click "Print" → PDF preview works
+3. Updated counts appear immediately
+4. Click Print — you get a clean, formatted PDF preview
 
-### Test 5: Duplicate Prevention
-1. Create distribution event
-2. Select a beneficiary
-3. Try to select same beneficiary again
-4. ✅ System prevents duplicate
-
----
-
-## 🔍 Troubleshooting
-
-### "Database not initialized" error
-```
-→ Refresh page
-→ First login triggers auto-initialization
-→ Seed data loads automatically
-```
-
-### "No households found"
-```
-→ You're logged in but no data yet
-→ Click "Add Household" to create first one
-→ OR: Seed data may not have loaded
-→ Solution: Logout → Login again
-```
-
-### "Can't access some pages"
-```
-→ Your role might not have permission
-→ Try logging in as Admin (admin@mswdo.local)
-→ Or check /lib/auth.ts for permission matrix
-```
-
-### Performance slow with large dataset
-```
-→ IndexedDB handles ~1000 records fine
-→ For production: Use Supabase backend
-→ See ARCHITECTURE.md for scaling info
-```
+### ✅ Duplicate Prevention
+1. Create a distribution event
+2. Record a distribution for a beneficiary
+3. Try to record another distribution for the same person in the same event
+4. The system blocks it with a clear error message
 
 ---
 
-## 💻 Development Commands
+## Troubleshooting
+
+**"Database not initialized" error**
+Just refresh the page. The database initializes on your first login and seeds itself automatically.
+
+**"No households found"**
+This usually means the seed data hasn't loaded yet. Try logging out and logging back in.
+
+**"Can't access certain pages"**
+Check your current role. Some pages are restricted. Log in as Admin for full access.
+
+**App feels slow with a lot of data**
+IndexedDB handles around 1,000 records comfortably. If you're building for production scale, check `ARCHITECTURE.md` for Supabase integration details.
+
+---
+
+## Development Commands
 
 ```bash
-# Start development server
-npm run dev
+npm run dev       # Start the dev server
+npm run build     # Build the production bundle
+npm run start     # Serve the production build
+npm run lint      # Run ESLint checks
+```
 
-# Build for production
-npm run build
-
-# Start production server
-npm run start
-
-# Run linting
-npm run lint
-
-# View database (in browser DevTools)
-F12 → Application → IndexedDB → mswdo_census
+To inspect the database directly:
+```
+Open DevTools → Application tab → IndexedDB → mswdo_census
 ```
 
 ---
 
-## 📱 Testing on Mobile
+## Installing as a Mobile App
 
-### iOS
-1. Open in Safari on iPhone
-2. Tap Share → Add to Home Screen
-3. Works as native app
+**On iOS (Safari)**
+1. Open the app in Safari on your iPhone
+2. Tap the Share button → "Add to Home Screen"
+3. The app installs and behaves like a native app
 
-### Android
-1. Open in Chrome on Android
-2. Menu → Install app
-3. Works as native app
-
----
-
-## 🎓 Learning Path
-
-### For Understanding the Innovation
-1. Read: `/lib/db/vulnerability.ts` - See age calculation
-2. Read: `/lib/db/residents.ts` - See how flags are created
-3. Try: Add resident with birthdate → See auto-tags appear
-
-### For Understanding Architecture
-1. Read: `ARCHITECTURE.md` - System design overview
-2. Read: `DEMO_FLOW.md` - Detailed demo walkthrough
-3. Explore: `/lib/db/` folder - All CRUD operations
-
-### For Understanding Features
-1. Read: `FEATURES.md` - Complete feature checklist
-2. Read: `README.md` - Project overview
-3. Explore: `/app/` folder - All pages and routes
+**On Android (Chrome)**
+1. Open the app in Chrome on your Android device
+2. Tap the three-dot menu → "Install app"
+3. Done — works standalone without a browser bar
 
 ---
 
-## 🎬 Demo Highlights to Show
+## The Key Things to Show in a Demo
 
-✨ **The Main Innovation**
-```
-Birthdate: 1964-02-28 (Born)
-Today: 2026-02-28 (Age 62)
-Result: AUTOMATICALLY tagged as "Senior" 🎉
+If you have 10 minutes for a defense or presentation, this is the suggested order:
 
-No manual age dropdown!
-No manual category selection!
-100% automatic!
-```
+1. **Login (30s)** — Show different roles have different views
+2. **Add Household + Members (2m)** — THE MAIN MOMENT. No age dropdowns. No category selection.
+3. **Vulnerability Dashboard (1m)** — Filter, see live counts
+4. **Generate Report (1m)** — Print-ready monthly summary
+5. **Relief Distribution (2m)** — Auto-beneficiaries, duplicate prevention
+6. **Offline Mode (optional, 1–2m)** — DevTools → Network → Offline. Data still works.
 
-📊 **Real-Time Dashboard**
-```
-Add household → Dashboard updates instantly
-Add resident → Vulnerability count increases
-Change status → Report statistics change
-All automatic, no manual refresh!
-```
-
-🎁 **Auto-Beneficiary Selection**
-```
-Create "Senior Relief" event
-System: "Found 3 eligible seniors"
-All seniors automatically selected
-No manual clicking through lists!
-```
+**Total: ~8–12 minutes**
 
 ---
 
-## ❓ FAQ
+## Common Questions
 
-**Q: Is my data saved?**
-A: Yes, all data persists in IndexedDB (offline storage). Data survives page refresh and browser restart.
+**Is my data saved if I refresh?**
+Yes. Everything is stored in IndexedDB, which persists across page reloads and even browser restarts.
 
-**Q: How does offline work?**
-A: All data is stored locally in IndexedDB. When offline, you can still view and add data. Sync happens automatically when online (future feature with Supabase).
+**Can I use this offline?**
+Yes. All data is stored locally. You can view, add, and edit while offline. Syncing to a cloud backend will be possible once Supabase is connected (the groundwork is already there).
 
-**Q: Can I export data?**
-A: Yes, reports can be printed or exported. Full CSV export ready in Phase 2.
+**Can I export data?**
+Reports can be printed or saved as PDFs. CSV export is ready to wire up in the reports section.
 
-**Q: Why is there demo data?**
-A: Pre-seeded households and residents let you test immediately without manual data entry. Perfect for capstone demo!
+**Why is there already sample data?**
+So you don't have to manually create households before you can demo the features. The seed data is automatically loaded on first login.
 
-**Q: What happens if I delete something?**
-A: Deletions are "soft deletes" - records marked as "moved_out" or "deceased" rather than permanently removed. This preserves audit trail.
-
-**Q: Can I use this in production?**
-A: Yes! Phase 1 is production-ready. For scaling, connect Supabase backend (ready in ARCHITECTURE.md).
+**What happens if I "delete" something?**
+Records are soft-deleted — they're marked as "moved_out" or "deceased" and hidden from main views, but they're preserved in the database for audit purposes.
 
 ---
 
-## 📞 Need Help?
+Good luck with your defense! 🎓
 
-### Check These Files First
-- `README.md` - Overview
-- `ARCHITECTURE.md` - Technical details
-- `DEMO_FLOW.md` - Detailed demo walkthrough
-- `FEATURES.md` - What's implemented
-
-### Check the Code
-- `/lib/db/` - Database operations
-- `/lib/auth.ts` - Authentication logic
-- `/app/` - All pages
-
-### Common Issues
-- "Authentication failed" → Check localStorage is enabled
-- "No data showing" → Page might still loading, wait 2s
-- "Button not working" → Check your role permissions
-
----
-
-## 🎯 What to Demonstrate
-
-**For a 10-minute defense demo, show:**
-
-1. ✅ Login (30s) - Show role-based access
-2. ✅ Add Household (1m) - Create a test family
-3. ✅ Add Members with Auto-Categorization (2m) - THE STAR
-   - Add child (auto-tagged "Child")
-   - Add senior (auto-tagged "Senior")
-4. ✅ Dashboard Updates (1m) - See real-time statistics
-5. ✅ Vulnerability Dashboard (1m) - Filter and view
-6. ✅ Generate Report (1m) - Show official output
-7. ✅ Relief Distribution (1m) - Show auto-beneficiaries
-8. ✅ Optional: Offline mode (1m) - DevTools offline
-
-**Total: 10-12 minutes**
-
----
-
-## 🚀 Ready to Go!
-
-Your MSWDO Census PWA is ready to demonstrate!
-
-```
-npm run dev
-# Open http://localhost:3000
-# Login with encoder@barangay.local / encoder123
-# Follow the demo flow above
-# Show the innovation: Automatic age-based categorization
-```
-
-Good luck with your capstone defense! 🎓
-
----
-
-**Happy Demoing!** 🎉
+The system is ready. Just run `npm run dev` and start exploring.

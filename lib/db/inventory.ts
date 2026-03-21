@@ -1,9 +1,161 @@
+import { createAuditLog, getCurrentUser } from '../auth';
 import { db, STORE_NAMES } from './indexeddb';
-import type { InventoryItem } from './schema';
-import { createAuditLog } from '../auth';
+import type {
+  DistributedItem,
+  InventoryItem,
+  InventoryMovement,
+  InventoryMovementType,
+  PackageTemplate,
+} from './schema';
 
-function generateId(): string {
-  return `inv_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+function generateId(prefix: string): string {
+  return `${prefix}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+}
+
+function normalizeQuantity(value: unknown): number {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return Math.max(0, value);
+  }
+
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? Math.max(0, parsed) : 0;
+  }
+
+  return 0;
+}
+
+function normalizeInventoryItem(item: InventoryItem): InventoryItem {
+  return {
+    ...item,
+    item_name: item.item_name.trim(),
+    item_code: item.item_code?.trim() || undefined,
+    quantity_available: normalizeQuantity(item.quantity_available),
+    reorder_level: Math.max(0, normalizeQuantity(item.reorder_level ?? 10)),
+    storage_location: item.storage_location?.trim() || undefined,
+    expiration_date: item.expiration_date?.trim() || undefined,
+    notes: item.notes?.trim() || undefined,
+  };
+}
+
+function normalizeDistributedItems(items: DistributedItem[] | undefined): DistributedItem[] {
+  if (!Array.isArray(items)) return [];
+
+  return items
+    .map((item) => ({
+      item_id: item.item_id,
+      item_name: item.item_name?.trim() || undefined,
+      quantity: normalizeQuantity(item.quantity),
+      unit: item.unit,
+    }))
+    .filter((item) => item.item_id && item.quantity > 0);
+}
+
+function normalizePackageTemplate(template: PackageTemplate): PackageTemplate {
+  return {
+    ...template,
+    name: template.name.trim(),
+    description: template.description?.trim() || undefined,
+    items: normalizeDistributedItems(template.items),
+    createdAt: template.createdAt instanceof Date ? template.createdAt : new Date(template.createdAt),
+    updatedAt: template.updatedAt instanceof Date ? template.updatedAt : new Date(template.updatedAt),
+  };
+}
+
+function normalizeInventoryMovement(movement: InventoryMovement): InventoryMovement {
+  return {
+    ...movement,
+    quantity: normalizeQuantity(movement.quantity),
+    previous_quantity: normalizeQuantity(movement.previous_quantity),
+    new_quantity: normalizeQuantity(movement.new_quantity),
+    notes: movement.notes?.trim() || undefined,
+    timestamp: movement.timestamp instanceof Date ? movement.timestamp : new Date(movement.timestamp),
+  };
+}
+
+function isExpiringSoon(item: InventoryItem, days = 30): boolean {
+  if (!item.expiration_date) return false;
+  const expiration = new Date(item.expiration_date);
+  if (Number.isNaN(expiration.getTime())) return false;
+
+  const today = new Date();
+  const diff = expiration.getTime() - today.getTime();
+  const diffDays = Math.ceil(diff / (1000 * 60 * 60 * 24));
+  return diffDays >= 0 && diffDays <= days;
+}
+
+export function getItemStockState(item: InventoryItem): 'out' | 'low' | 'healthy' {
+  if (item.quantity_available <= 0) return 'out';
+  if (item.quantity_available <= (item.reorder_level ?? 10)) return 'low';
+  return 'healthy';
+}
+
+async function createInventoryMovementEntry(
+  data: Omit<InventoryMovement, 'id' | 'timestamp' | 'syncStatus'>,
+): Promise<InventoryMovement> {
+  const currentUser = getCurrentUser();
+  const movement: InventoryMovement = normalizeInventoryMovement({
+    ...data,
+    id: generateId('mov'),
+    performed_by: data.performed_by || currentUser?.id,
+    performed_by_name: data.performed_by_name || currentUser?.name,
+    timestamp: new Date(),
+    syncStatus: 'pending',
+  });
+
+  await db.add(STORE_NAMES.inventory_movements, movement);
+  return movement;
+}
+
+async function applyInventoryTransaction(params: {
+  item_id: string;
+  type: InventoryMovementType;
+  quantity: number;
+  next_quantity?: number;
+  notes?: string;
+  reference_id?: string;
+  reference_type?: 'inventory' | 'distribution' | 'manual' | 'transfer';
+  performed_by?: string;
+  performed_by_name?: string;
+}): Promise<InventoryItem> {
+  const item = await getInventoryItem(params.item_id);
+  if (!item) {
+    throw new Error(`Inventory item ${params.item_id} not found`);
+  }
+
+  const quantity = normalizeQuantity(params.quantity);
+  if (quantity <= 0 && params.type !== 'adjustment') {
+    throw new Error('Transaction quantity must be greater than zero');
+  }
+
+  const previousQuantity = item.quantity_available;
+  const nextQuantity =
+    typeof params.next_quantity === 'number'
+      ? Math.max(0, normalizeQuantity(params.next_quantity))
+      : params.type === 'stock_in'
+        ? previousQuantity + quantity
+        : Math.max(0, previousQuantity - quantity);
+
+  const updatedItem = await updateInventoryItem(item.id, {
+    quantity_available: nextQuantity,
+  });
+
+  await createInventoryMovementEntry({
+    item_id: item.id,
+    item_name: item.item_name,
+    type: params.type,
+    quantity: params.type === 'adjustment' ? Math.abs(nextQuantity - previousQuantity) : quantity,
+    previous_quantity: previousQuantity,
+    new_quantity: nextQuantity,
+    unit: item.unit,
+    performed_by: params.performed_by,
+    performed_by_name: params.performed_by_name,
+    reference_id: params.reference_id,
+    reference_type: params.reference_type,
+    notes: params.notes,
+  });
+
+  return updatedItem;
 }
 
 /**
@@ -11,14 +163,31 @@ function generateId(): string {
  */
 export async function getInventoryItems(filters?: {
   category?: string;
+  stockState?: 'out' | 'low' | 'healthy';
+  search?: string;
 }): Promise<InventoryItem[]> {
   try {
-    const all = await db.getAll<InventoryItem>(STORE_NAMES.inventory_items);
+    const all = (await db.getAll<InventoryItem>(STORE_NAMES.inventory_items)).map(normalizeInventoryItem);
 
     let filtered = all;
 
     if (filters?.category) {
-      filtered = filtered.filter(i => i.category === filters.category);
+      filtered = filtered.filter((item) => item.category === filters.category);
+    }
+
+    if (filters?.stockState) {
+      filtered = filtered.filter((item) => getItemStockState(item) === filters.stockState);
+    }
+
+    if (filters?.search) {
+      const search = filters.search.toLowerCase();
+      filtered = filtered.filter((item) =>
+        [item.item_name, item.item_code, item.storage_location, item.notes]
+          .filter(Boolean)
+          .join(' ')
+          .toLowerCase()
+          .includes(search),
+      );
     }
 
     return filtered.sort((a, b) => a.item_name.localeCompare(b.item_name));
@@ -33,7 +202,8 @@ export async function getInventoryItems(filters?: {
  */
 export async function getInventoryItem(id: string): Promise<InventoryItem | undefined> {
   try {
-    return await db.get<InventoryItem>(STORE_NAMES.inventory_items, id);
+    const item = await db.get<InventoryItem>(STORE_NAMES.inventory_items, id);
+    return item ? normalizeInventoryItem(item) : undefined;
   } catch (error) {
     console.error('Error fetching inventory item:', error);
     throw error;
@@ -44,25 +214,40 @@ export async function getInventoryItem(id: string): Promise<InventoryItem | unde
  * Create inventory item
  */
 export async function createInventoryItem(
-  data: Omit<InventoryItem, 'id' | 'syncStatus'>
+  data: Omit<InventoryItem, 'id' | 'syncStatus'>,
 ): Promise<InventoryItem> {
   try {
-    const item: InventoryItem = {
+    const item = normalizeInventoryItem({
       ...data,
-      id: generateId(),
+      id: generateId('inv'),
       syncStatus: 'pending',
-    };
+    });
 
     await db.add(STORE_NAMES.inventory_items, item);
 
-    await createAuditLog(
-      'CREATE',
-      'inventory',
-      item.id,
-      { item_name: data.item_name, category: data.category, quantity: data.quantity_available }
-    );
+    if (item.quantity_available > 0) {
+      await createInventoryMovementEntry({
+        item_id: item.id,
+        item_name: item.item_name,
+        type: 'stock_in',
+        quantity: item.quantity_available,
+        previous_quantity: 0,
+        new_quantity: item.quantity_available,
+        unit: item.unit,
+        reference_id: item.id,
+        reference_type: 'inventory',
+        notes: 'Opening stock',
+      });
+    }
 
-    console.log('Inventory item created:', item.id);
+    await createAuditLog('CREATE', 'inventory', item.id, {
+      item_name: item.item_name,
+      category: item.category,
+      quantity: item.quantity_available,
+      reorder_level: item.reorder_level,
+      storage_location: item.storage_location,
+    });
+
     return item;
   } catch (error) {
     console.error('Error creating inventory item:', error);
@@ -71,11 +256,11 @@ export async function createInventoryItem(
 }
 
 /**
- * Update inventory item
+ * Update inventory item metadata
  */
 export async function updateInventoryItem(
   id: string,
-  updates: Partial<InventoryItem>
+  updates: Partial<InventoryItem>,
 ): Promise<InventoryItem> {
   try {
     const existing = await getInventoryItem(id);
@@ -83,23 +268,17 @@ export async function updateInventoryItem(
       throw new Error(`Inventory item ${id} not found`);
     }
 
-    const updated: InventoryItem = {
+    const updated = normalizeInventoryItem({
       ...existing,
       ...updates,
       id,
       syncStatus: 'pending',
-    };
+    });
 
     await db.put(STORE_NAMES.inventory_items, updated);
 
-    await createAuditLog(
-      'UPDATE',
-      'inventory',
-      id,
-      { changes: updates }
-    );
+    await createAuditLog('UPDATE', 'inventory', id, { changes: updates });
 
-    console.log('Inventory item updated:', id);
     return updated;
   } catch (error) {
     console.error('Error updating inventory item:', error);
@@ -107,33 +286,178 @@ export async function updateInventoryItem(
   }
 }
 
+export async function addStock(
+  id: string,
+  quantity: number,
+  notes?: string,
+): Promise<InventoryItem> {
+  return applyInventoryTransaction({
+    item_id: id,
+    type: 'stock_in',
+    quantity,
+    notes,
+    reference_id: id,
+    reference_type: 'inventory',
+  });
+}
+
+export async function releaseStock(
+  id: string,
+  quantity: number,
+  options?: {
+    type?: Extract<InventoryMovementType, 'stock_out' | 'distribution_release' | 'transfer'>;
+    notes?: string;
+    reference_id?: string;
+    reference_type?: 'inventory' | 'distribution' | 'manual' | 'transfer';
+  },
+): Promise<InventoryItem> {
+  return applyInventoryTransaction({
+    item_id: id,
+    type: options?.type ?? 'stock_out',
+    quantity,
+    notes: options?.notes,
+    reference_id: options?.reference_id,
+    reference_type: options?.reference_type,
+  });
+}
+
+export async function adjustInventoryCount(
+  id: string,
+  nextQuantity: number,
+  notes?: string,
+): Promise<InventoryItem> {
+  return applyInventoryTransaction({
+    item_id: id,
+    type: 'adjustment',
+    quantity: Math.abs(nextQuantity),
+    next_quantity: nextQuantity,
+    notes,
+    reference_id: id,
+    reference_type: 'manual',
+  });
+}
+
 /**
  * Reduce inventory quantity
  */
 export async function reduceInventoryQuantity(id: string, quantity: number): Promise<InventoryItem> {
-  try {
-    const item = await getInventoryItem(id);
-    if (!item) {
-      throw new Error(`Inventory item ${id} not found`);
-    }
+  return releaseStock(id, quantity, { type: 'stock_out', reference_id: id, reference_type: 'inventory' });
+}
 
-    const newQuantity = Math.max(0, item.quantity_available - quantity);
-    return updateInventoryItem(id, { quantity_available: newQuantity });
+export async function getInventoryMovements(filters?: {
+  item_id?: string;
+  limit?: number;
+}): Promise<InventoryMovement[]> {
+  try {
+    const all = (await db.getAll<InventoryMovement>(STORE_NAMES.inventory_movements))
+      .map(normalizeInventoryMovement)
+      .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+
+    const filtered = filters?.item_id ? all.filter((entry) => entry.item_id === filters.item_id) : all;
+    return typeof filters?.limit === 'number' ? filtered.slice(0, filters.limit) : filtered;
   } catch (error) {
-    console.error('Error reducing inventory:', error);
+    console.error('Error fetching inventory movements:', error);
     throw error;
   }
 }
 
-/**
- * Get low stock items (quantity < 10)
- */
 export async function getLowStockItems(): Promise<InventoryItem[]> {
   try {
     const all = await getInventoryItems();
-    return all.filter(item => item.quantity_available < 10).sort((a, b) => a.quantity_available - b.quantity_available);
+    return all
+      .filter((item) => item.quantity_available > 0 && item.quantity_available <= (item.reorder_level ?? 10))
+      .sort((a, b) => a.quantity_available - b.quantity_available);
   } catch (error) {
     console.error('Error getting low stock items:', error);
+    throw error;
+  }
+}
+
+export async function getOutOfStockItems(): Promise<InventoryItem[]> {
+  try {
+    const all = await getInventoryItems();
+    return all.filter((item) => item.quantity_available <= 0);
+  } catch (error) {
+    console.error('Error getting out of stock items:', error);
+    throw error;
+  }
+}
+
+export async function getExpiringSoonItems(days = 30): Promise<InventoryItem[]> {
+  try {
+    const all = await getInventoryItems();
+    return all.filter((item) => isExpiringSoon(item, days));
+  } catch (error) {
+    console.error('Error getting expiring soon items:', error);
+    throw error;
+  }
+}
+
+export async function getInventoryStatusSummary() {
+  const [items, lowStock, outOfStock, expiringSoon] = await Promise.all([
+    getInventoryItems(),
+    getLowStockItems(),
+    getOutOfStockItems(),
+    getExpiringSoonItems(),
+  ]);
+
+  return {
+    totalItemTypes: items.length,
+    totalUnits: items.reduce((sum, item) => sum + item.quantity_available, 0),
+    lowStockCount: lowStock.length,
+    outOfStockCount: outOfStock.length,
+    expiringSoonCount: expiringSoon.length,
+  };
+}
+
+export async function getPackageTemplates(): Promise<PackageTemplate[]> {
+  try {
+    const all = await db.getAll<PackageTemplate>(STORE_NAMES.package_templates);
+    return all
+      .map(normalizePackageTemplate)
+      .sort((a, b) => a.name.localeCompare(b.name));
+  } catch (error) {
+    console.error('Error fetching package templates:', error);
+    throw error;
+  }
+}
+
+export async function createPackageTemplate(data: {
+  name: string;
+  description?: string;
+  items: DistributedItem[];
+}): Promise<PackageTemplate> {
+  try {
+    const template = normalizePackageTemplate({
+      id: generateId('pkg'),
+      name: data.name,
+      description: data.description,
+      items: data.items,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      syncStatus: 'pending',
+    });
+
+    await db.add(STORE_NAMES.package_templates, template);
+
+    await createAuditLog('CREATE', 'inventory', template.id, {
+      template_name: template.name,
+      items_count: template.items.length,
+    });
+
+    return template;
+  } catch (error) {
+    console.error('Error creating package template:', error);
+    throw error;
+  }
+}
+
+export async function deletePackageTemplate(id: string): Promise<void> {
+  try {
+    await db.delete(STORE_NAMES.package_templates, id);
+    await createAuditLog('DELETE', 'inventory', id, { entity: 'package_template' });
+  } catch (error) {
+    console.error('Error deleting package template:', error);
     throw error;
   }
 }
@@ -143,16 +467,8 @@ export async function getLowStockItems(): Promise<InventoryItem[]> {
  */
 export async function deleteInventoryItem(id: string): Promise<void> {
   try {
-    await updateInventoryItem(id, { quantity_available: 0 });
-
-    await createAuditLog(
-      'DELETE',
-      'inventory',
-      id,
-      {}
-    );
-
-    console.log('Inventory item deleted:', id);
+    await adjustInventoryCount(id, 0, 'Marked as inactive');
+    await createAuditLog('DELETE', 'inventory', id, {});
   } catch (error) {
     console.error('Error deleting inventory item:', error);
     throw error;

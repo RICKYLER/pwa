@@ -42,9 +42,9 @@ function MobileShell({ children, title }: AppShellProps) {
 // ─── Desktop Shell ───────────────────────────────────────────────────────────
 function DesktopShell({ children }: AppShellProps) {
     return (
-        <div className="flex min-h-screen bg-slate-50">
+        <div className="flex h-screen overflow-hidden bg-slate-50">
             <DesktopSidebar />
-            <main className="flex-1 ml-64 pb-8">
+            <main className="flex-1 ml-64 overflow-y-auto">
                 {children}
             </main>
         </div>

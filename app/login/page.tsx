@@ -1,8 +1,9 @@
 'use client';
 
 import { FormEvent, useState, useEffect } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { login, restoreSession } from '@/lib/auth';
+import { getDefaultRouteForUser, login, restoreSession } from '@/lib/auth';
 import { db, seedInitialData } from '@/lib/db/indexeddb';
 import { Eye, EyeOff, ShieldCheck, Cpu, Lock } from 'lucide-react';
 
@@ -20,11 +21,17 @@ export default function LoginPage() {
   const [showPass, setShowPass] = useState(false);
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [isMounted, setIsMounted] = useState(false);
 
   useEffect(() => {
+    setIsMounted(true);
+  }, []);
+
+  useEffect(() => {
+    if (!isMounted) return;
     const existingUser = restoreSession();
-    if (existingUser) router.push('/dashboard');
-  }, [router]);
+    if (existingUser) router.push(getDefaultRouteForUser(existingUser));
+  }, [isMounted, router]);
 
   async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -33,8 +40,8 @@ export default function LoginPage() {
     try {
       await db.init();
       await seedInitialData();
-      await login(email, password);
-      router.push('/dashboard');
+      const user = await login(email, password);
+      router.push(getDefaultRouteForUser(user));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Login failed');
     } finally {
@@ -99,80 +106,111 @@ export default function LoginPage() {
 
           <div className="mb-8">
             <h2 className="text-3xl font-bold text-slate-900 mb-1">Welcome back</h2>
-            <p className="text-slate-500">Sign in to your account to continue</p>
+            <p className="text-slate-500">Staff and residents can sign in here to continue</p>
           </div>
 
-          <form onSubmit={handleSubmit} className="space-y-5" suppressHydrationWarning>
-            {/* Email */}
-            <div>
-              <label htmlFor="email" className="block text-sm font-semibold text-slate-700 mb-1.5">
-                Email Address
-              </label>
-              <input
-                id="email"
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className="w-full px-4 py-3 border border-slate-200 rounded-xl bg-slate-50 text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-400 focus:bg-white transition-all text-sm"
-                placeholder="your@email.com"
-                required
-                disabled={isLoading}
-              />
-            </div>
-
-            {/* Password */}
-            <div>
-              <label htmlFor="password" className="block text-sm font-semibold text-slate-700 mb-1.5">
-                Password
-              </label>
-              <div className="relative">
+          {isMounted ? (
+            <form onSubmit={handleSubmit} className="space-y-5">
+              {/* Email */}
+              <div>
+                <label htmlFor="email" className="block text-sm font-semibold text-slate-700 mb-1.5">
+                  Email Address
+                </label>
                 <input
-                  id="password"
-                  type={showPass ? 'text' : 'password'}
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  className="w-full px-4 py-3 pr-12 border border-slate-200 rounded-xl bg-slate-50 text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-400 focus:bg-white transition-all text-sm"
-                  placeholder="••••••••"
+                  id="email"
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className="w-full px-4 py-3 border border-slate-200 rounded-xl bg-slate-50 text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-400 focus:bg-white transition-all text-sm"
+                  placeholder="your@email.com"
+                  autoComplete="username"
                   required
                   disabled={isLoading}
+                  suppressHydrationWarning
                 />
-                <button
-                  type="button"
-                  onClick={() => setShowPass(!showPass)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-slate-600 transition-colors"
-                >
-                  {showPass ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                </button>
               </div>
-            </div>
 
-            {/* Error */}
-            {error && (
-              <div className="p-3.5 bg-red-50 border border-red-200 rounded-xl text-red-700 text-sm flex items-start gap-2">
-                <span className="w-4 h-4 text-red-500 flex-shrink-0 mt-0.5">⚠</span>
-                {error}
+              {/* Password */}
+              <div>
+                <label htmlFor="password" className="block text-sm font-semibold text-slate-700 mb-1.5">
+                  Password
+                </label>
+                <div className="relative">
+                  <input
+                    id="password"
+                    type={showPass ? 'text' : 'password'}
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    className="w-full px-4 py-3 pr-12 border border-slate-200 rounded-xl bg-slate-50 text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-400 focus:bg-white transition-all text-sm"
+                    placeholder="••••••••"
+                    autoComplete="current-password"
+                    required
+                    disabled={isLoading}
+                    suppressHydrationWarning
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPass(!showPass)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-slate-600 transition-colors"
+                  >
+                    {showPass ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
               </div>
-            )}
 
-            {/* Submit */}
-            <button
-              type="submit"
-              disabled={isLoading}
-              className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-gradient-to-r from-indigo-600 to-violet-600 text-white font-semibold rounded-xl hover:opacity-90 disabled:opacity-60 transition-all shadow-lg shadow-indigo-500/30 hover:shadow-xl hover:shadow-indigo-500/30 hover:-translate-y-0.5 text-sm"
-            >
-              {isLoading ? (
-                <>
-                  <div className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />
-                  Signing in…
-                </>
-              ) : (
-                <>
-                  <Lock className="w-4 h-4" />
-                  Sign In
-                </>
+              {/* Error */}
+              {error && (
+                <div className="p-3.5 bg-red-50 border border-red-200 rounded-xl text-red-700 text-sm flex items-start gap-2">
+                  <span className="w-4 h-4 text-red-500 flex-shrink-0 mt-0.5">⚠</span>
+                  {error}
+                </div>
               )}
-            </button>
-          </form>
+
+              {/* Submit */}
+              <button
+                type="submit"
+                disabled={isLoading}
+                className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-gradient-to-r from-indigo-600 to-violet-600 text-white font-semibold rounded-xl hover:opacity-90 disabled:opacity-60 transition-all shadow-lg shadow-indigo-500/30 hover:shadow-xl hover:shadow-indigo-500/30 hover:-translate-y-0.5 text-sm"
+              >
+                {isLoading ? (
+                  <>
+                    <div className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+                    Signing in…
+                  </>
+                ) : (
+                  <>
+                    <Lock className="w-4 h-4" />
+                    Sign In
+                  </>
+                )}
+              </button>
+
+              <div className="rounded-2xl border border-indigo-100 bg-indigo-50 p-4 text-sm text-indigo-900">
+                <p className="font-semibold">Resident access</p>
+                <p className="mt-1 text-indigo-800">
+                  Need your own login to submit and track a household registration?
+                </p>
+                <Link
+                  href="/resident/register"
+                  className="mt-3 inline-flex items-center rounded-xl bg-indigo-600 px-4 py-2 font-semibold text-white transition hover:bg-indigo-700"
+                >
+                  Create resident account
+                </Link>
+              </div>
+            </form>
+          ) : (
+            <div className="space-y-5">
+              <div>
+                <div className="mb-1.5 h-5 w-28 rounded bg-slate-100" />
+                <div className="h-[50px] animate-pulse rounded-xl border border-slate-200 bg-slate-50" />
+              </div>
+              <div>
+                <div className="mb-1.5 h-5 w-24 rounded bg-slate-100" />
+                <div className="h-[50px] animate-pulse rounded-xl border border-slate-200 bg-slate-50" />
+              </div>
+              <div className="h-[50px] animate-pulse rounded-xl bg-slate-200" />
+            </div>
+          )}
 
           {/* Demo credentials */}
           <div className="mt-8 pt-6 border-t border-slate-100">
@@ -200,7 +238,7 @@ export default function LoginPage() {
           </div>
 
           <p className="text-center text-xs text-slate-400 mt-6">
-            Offline-first PWA · Data stays on your device
+            Secure cookie session · Staff land on the dashboard, residents land on their portal
           </p>
         </div>
       </div>

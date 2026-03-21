@@ -13,8 +13,9 @@ import { calculateAge } from '@/lib/db/vulnerability';
 import { Household, Resident, VulnerabilityFlags } from '@/lib/db/schema';
 import {
   ArrowLeft, Plus, Edit2, Trash2, Save, X, User, MapPin,
-  Phone, Home, CheckCircle2, AlertTriangle, ChevronDown,
+  Phone, Home, CheckCircle2, AlertTriangle, ChevronDown, Navigation,
 } from 'lucide-react';
+import { LocationPicker } from '@/components/LocationPicker';
 
 interface ResidentWithFlags { resident: Resident; flags: VulnerabilityFlags | undefined; }
 
@@ -40,7 +41,15 @@ export default function HouseholdDetailsPage() {
 
   // Household edit state
   const [isEditingHH, setIsEditingHH] = useState(false);
-  const [hhForm, setHhForm] = useState({ head_name: '', street_address: '', purok_sitio: '', contact_number: '', status: 'active' as typeof HOUSEHOLD_STATUSES[number] });
+  const [hhForm, setHhForm] = useState({
+    head_name: '',
+    street_address: '',
+    purok_sitio: '',
+    contact_number: '',
+    status: 'active' as typeof HOUSEHOLD_STATUSES[number],
+    gps_lat: undefined as number | undefined,
+    gps_long: undefined as number | undefined,
+  });
   const [isSavingHH, setIsSavingHH] = useState(false);
 
   // Resident add / edit state
@@ -78,6 +87,8 @@ export default function HouseholdDetailsPage() {
         purok_sitio: hh.purok_sitio,
         contact_number: hh.contact_number ?? '',
         status: hh.status as typeof HOUSEHOLD_STATUSES[number],
+        gps_lat: hh.gps_lat,
+        gps_long: hh.gps_long,
       });
       const list = await getResidentsInHousehold(householdId);
       const withFlags = await Promise.all(list.map(async r => ({ resident: r, flags: await getResidentVulnerabilityFlags(r.id) })));
@@ -99,6 +110,8 @@ export default function HouseholdDetailsPage() {
         purok_sitio: hhForm.purok_sitio,
         contact_number: hhForm.contact_number.trim(),
         status: hhForm.status,
+        gps_lat: hhForm.gps_lat,
+        gps_long: hhForm.gps_long,
       });
       setHousehold(prev => prev ? { ...prev, ...hhForm } : prev);
       setIsEditingHH(false);
@@ -331,13 +344,35 @@ export default function HouseholdDetailsPage() {
                   </div>
                 </div>
 
+                <div>
+                  <label className="block text-xs font-semibold text-slate-500 mb-1.5 uppercase tracking-wide">
+                    Household GPS Pin
+                  </label>
+                  <LocationPicker
+                    lat={hhForm.gps_lat}
+                    lng={hhForm.gps_long}
+                    onChange={(lat, lng) => setHhForm(f => ({ ...f, gps_lat: lat, gps_long: lng }))}
+                  />
+                </div>
+
                 {/* Action buttons */}
                 <div className="flex gap-3 pt-1">
                   <button onClick={handleSaveHousehold} disabled={isSavingHH}
                     className="flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-indigo-600 to-violet-600 text-white rounded-xl text-sm font-semibold hover:opacity-90 transition-all shadow-md shadow-indigo-500/25 disabled:opacity-60">
                     {isSavingHH ? <><span className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />Saving…</> : <><Save className="w-4 h-4" />Save Changes</>}
                   </button>
-                  <button onClick={() => { setIsEditingHH(false); setHhForm({ head_name: household.head_name, street_address: household.street_address ?? '', purok_sitio: household.purok_sitio, contact_number: household.contact_number ?? '', status: household.status as any }); }}
+                  <button onClick={() => {
+                    setIsEditingHH(false);
+                    setHhForm({
+                      head_name: household.head_name,
+                      street_address: household.street_address ?? '',
+                      purok_sitio: household.purok_sitio,
+                      contact_number: household.contact_number ?? '',
+                      status: household.status as any,
+                      gps_lat: household.gps_lat,
+                      gps_long: household.gps_long,
+                    });
+                  }}
                     className="flex items-center gap-2 px-5 py-2.5 border border-slate-200 text-slate-600 rounded-xl text-sm font-medium hover:bg-slate-50 transition-colors">
                     <X className="w-4 h-4" />Cancel
                   </button>
@@ -378,6 +413,27 @@ export default function HouseholdDetailsPage() {
                     </span>
                   </div>
                 </div>
+                {household.gps_lat !== undefined && household.gps_long !== undefined && (
+                  <div className="sm:col-span-2 space-y-3">
+                    <div>
+                      <p className="text-xs text-slate-400 font-medium mb-2">Pinned Household Location</p>
+                      <LocationPicker
+                        readonly
+                        height="200px"
+                        lat={household.gps_lat}
+                        lng={household.gps_long}
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => window.open(`https://maps.google.com/?q=${household.gps_lat},${household.gps_long}`, '_blank')}
+                      className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold bg-indigo-600 text-white hover:bg-indigo-700 transition-colors"
+                    >
+                      <Navigation className="w-3.5 h-3.5" />
+                      Navigate Here
+                    </button>
+                  </div>
+                )}
               </div>
             )}
           </div>

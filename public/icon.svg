@@ -1,0 +1,27 @@
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="64" y1="48" x2="448" y2="464" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#163579"/>
+      <stop offset="1" stop-color="#2E63D3"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="128" y1="112" x2="384" y2="400" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#F7D774"/>
+      <stop offset="1" stop-color="#F1B93E"/>
+    </linearGradient>
+  </defs>
+  <rect x="24" y="24" width="464" height="464" rx="112" fill="url(#bg)"/>
+  <path d="M120 136C120 123.85 129.85 114 142 114H370C382.15 114 392 123.85 392 136V204C392 216.15 382.15 226 370 226H142C129.85 226 120 216.15 120 204V136Z" fill="white" fill-opacity="0.08"/>
+  <path d="M144 162H368" stroke="white" stroke-opacity="0.16" stroke-width="14" stroke-linecap="round"/>
+  <path d="M144 190H300" stroke="white" stroke-opacity="0.12" stroke-width="14" stroke-linecap="round"/>
+  <path d="M256 140C211.53 140 176 175.53 176 220V250.46C176 309.66 216.34 363.74 273.49 379.51L281.53 381.67C286.85 383.11 292.44 383.11 297.76 381.67L305.8 379.51C362.96 363.74 403.29 309.66 403.29 250.46V220C403.29 175.53 367.77 140 323.29 140H256Z" fill="white"/>
+  <path d="M289.64 182C260.75 182 237 205.75 237 234.64C237 271.33 275.93 308.85 286.07 318.17C288.59 320.48 292.43 320.48 294.95 318.17C305.09 308.85 344.02 271.33 344.02 234.64C344.02 205.75 320.27 182 291.39 182H289.64Z" fill="url(#accent)"/>
+  <circle cx="290.5" cy="233.5" r="18.5" fill="#183B89"/>
+  <rect x="222" y="256" width="26" height="26" rx="9" fill="#173B8A"/>
+  <rect x="265" y="256" width="26" height="26" rx="9" fill="#173B8A"/>
+  <rect x="308" y="256" width="26" height="26" rx="9" fill="#173B8A"/>
+  <rect x="222" y="299" width="26" height="26" rx="9" fill="#173B8A"/>
+  <rect x="265" y="299" width="26" height="26" rx="9" fill="#173B8A"/>
+  <rect x="308" y="299" width="26" height="26" rx="9" fill="#173B8A"/>
+  <path d="M144 378C144 365.85 153.85 356 166 356H228C240.15 356 250 365.85 250 378V384C250 396.15 240.15 406 228 406H166C153.85 406 144 396.15 144 384V378Z" fill="white" fill-opacity="0.08"/>
+  <path d="M282 378C282 365.85 291.85 356 304 356H366C378.15 356 388 365.85 388 378V384C388 396.15 378.15 406 366 406H304C291.85 406 282 396.15 282 384V378Z" fill="white" fill-opacity="0.08"/>
+</svg>

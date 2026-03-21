@@ -78,7 +78,6 @@ export default function VulnerableReportPage() {
     };
     const totalVuln = Object.values(counts).reduce((a, b) => a + b, 0);
 
-
     return (
         <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-rose-50/30 print:bg-white">
             {/* Header */}
