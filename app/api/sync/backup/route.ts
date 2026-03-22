@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import type { SyncQueueItem } from '@/lib/db/schema';
 import { requireAuthenticatedUser } from '@/lib/server/auth-guards';
 import { applySyncedQueueItems } from '@/lib/server/sync-backup-store';
+import { syncQueueItemsToSupabase } from '@/lib/server/supabase-sync';
 
 export const runtime = 'nodejs';
 
@@ -56,6 +57,7 @@ export async function POST(request: NextRequest) {
       {
         appliedCount: 0,
         syncedItems: [],
+        failedItems: [],
       },
       {
         headers: {
@@ -65,8 +67,16 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const result = await applySyncedQueueItems(items, authResult.user);
-  return NextResponse.json(result, {
+  const syncResult = await syncQueueItemsToSupabase(items, authResult.user);
+
+  if (syncResult.appliedCount > 0) {
+    await applySyncedQueueItems(
+      items.filter((item) => syncResult.syncedItems.some((syncedItem) => syncedItem.id === item.id)),
+      authResult.user,
+    );
+  }
+
+  return NextResponse.json(syncResult, {
     headers: {
       'Cache-Control': 'no-store',
     },

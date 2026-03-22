@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { requireAdminUser } from '@/lib/server/auth-guards';
+import { resolveAppUrl } from '@/lib/server/app-url';
 import {
   createPasswordSetupToken,
   createUserAccount,
@@ -54,7 +55,7 @@ export async function POST(request: NextRequest) {
   try {
     const user = await createUserAccount(payload);
     const token = await createPasswordSetupToken(user.id);
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL || new URL(request.url).origin;
+    const appUrl = resolveAppUrl(request.url);
     const setupLink = `${appUrl}/setup-password?token=${encodeURIComponent(token)}`;
 
     let inviteEmailSent = false;

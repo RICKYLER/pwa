@@ -139,20 +139,21 @@ function renderTable(payload: HealthPayload) {
 
 async function checkAppUrl(): Promise<HealthCheckResult> {
   const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? '';
+  const serverAppUrl = process.env.APP_URL ?? '';
 
-  if (!appUrl) {
+  if (!appUrl && !serverAppUrl) {
     return result(
       'app_url',
       'App URL',
       'warning',
       false,
-      'NEXT_PUBLIC_APP_URL is missing',
-      'Welcome emails will fall back to localhost login links.',
+      'APP_URL / NEXT_PUBLIC_APP_URL is missing',
+      'Welcome emails will use the Vercel domain when available, otherwise they may fall back to localhost.',
     );
   }
 
   try {
-    const parsed = new URL(appUrl);
+    const parsed = new URL(serverAppUrl || appUrl);
     return result(
       'app_url',
       'App URL',
@@ -167,7 +168,7 @@ async function checkAppUrl(): Promise<HealthCheckResult> {
       'App URL',
       'error',
       true,
-      'NEXT_PUBLIC_APP_URL is invalid',
+      'APP_URL / NEXT_PUBLIC_APP_URL is invalid',
       'Please use a full URL such as http://localhost:3000.',
     );
   }

@@ -3,8 +3,19 @@
 import { ReactNode, useEffect, useState } from 'react';
 import { hydrateSession } from '@/lib/auth';
 
+declare global {
+  interface WindowEventMap {
+    'mswdo-data-changed': CustomEvent<{
+      source: 'supabase';
+      table: string;
+      mode: 'hydrate' | 'change';
+    }>;
+  }
+}
+
 export default function AuthBootstrap({ children }: { children: ReactNode }) {
   const [isReady, setIsReady] = useState(false);
+  const [dataVersion, setDataVersion] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -22,6 +33,18 @@ export default function AuthBootstrap({ children }: { children: ReactNode }) {
     };
   }, []);
 
+  useEffect(() => {
+    function handleRealtimeDataChanged() {
+      setDataVersion((value) => value + 1);
+    }
+
+    window.addEventListener('mswdo-data-changed', handleRealtimeDataChanged);
+
+    return () => {
+      window.removeEventListener('mswdo-data-changed', handleRealtimeDataChanged);
+    };
+  }, []);
+
   if (!isReady) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-slate-50">
@@ -33,5 +56,5 @@ export default function AuthBootstrap({ children }: { children: ReactNode }) {
     );
   }
 
-  return <>{children}</>;
+  return <div key={dataVersion}>{children}</div>;
 }

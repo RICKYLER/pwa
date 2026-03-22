@@ -255,8 +255,24 @@ async function flushSyncQueue() {
       throw new Error(`Sync backup failed with status ${response.status}`);
     }
 
+    const payload = await response.json().catch(() => null);
+    const syncedItemIds = new Set(
+      Array.isArray(payload?.syncedItems)
+        ? payload.syncedItems
+            .map((entry) => entry?.id)
+            .filter((value) => typeof value === 'string')
+        : items.map((item) => item.id),
+    );
+
     for (const item of items) {
+      if (!syncedItemIds.has(item.id)) {
+        continue;
+      }
       await finalizeSyncedItem(item);
+    }
+
+    if (Array.isArray(payload?.failedItems) && payload.failedItems.length > 0) {
+      await recordDetailedSyncFailures(payload.failedItems);
     }
   } catch (error) {
     await recordSyncFailure(items, error instanceof Error ? error.message : 'Sync backup failed');
@@ -307,6 +323,25 @@ async function recordSyncFailure(items, message) {
       ...latest,
       attempts: typeof latest.attempts === 'number' ? latest.attempts + 1 : 1,
       last_error: message,
+    });
+  }
+}
+
+async function recordDetailedSyncFailures(failedItems) {
+  for (const failedItem of failedItems) {
+    if (!failedItem || typeof failedItem.id !== 'string') {
+      continue;
+    }
+
+    const latest = await getFromStore(SYNC_QUEUE_STORE, failedItem.id).catch(() => null);
+    if (!latest) {
+      continue;
+    }
+
+    await putInStore(SYNC_QUEUE_STORE, {
+      ...latest,
+      attempts: typeof latest.attempts === 'number' ? latest.attempts + 1 : 1,
+      last_error: typeof failedItem.error === 'string' ? failedItem.error : 'Sync failed',
     });
   }
 }

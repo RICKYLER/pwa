@@ -3,6 +3,7 @@ import { Analytics } from '@vercel/analytics/next'
 import AuthBootstrap from '@/components/AuthBootstrap'
 import GoogleMapsProvider from '@/components/GoogleMapsProvider'
 import PwaBootstrap from '@/components/PwaBootstrap'
+import SupabaseRealtimeBridge from '@/components/SupabaseRealtimeBridge'
 import './globals.css'
 
 export const metadata: Metadata = {
@@ -71,6 +72,7 @@ export default function RootLayout({
       </head>
       <body className="font-sans antialiased">
         <PwaBootstrap />
+        <SupabaseRealtimeBridge />
         <AuthBootstrap>
           <GoogleMapsProvider>
             {children}

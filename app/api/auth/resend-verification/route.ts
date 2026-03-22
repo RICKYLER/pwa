@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { sendResidentVerificationEmail } from '@/lib/server/auth-email';
+import { resolveAppUrl } from '@/lib/server/app-url';
 import { createEmailVerificationToken, getStoredUserByEmail } from '@/lib/server/auth-store';
 
 export const runtime = 'nodejs';
@@ -37,7 +38,7 @@ export async function POST(request: NextRequest) {
 
   try {
     const token = await createEmailVerificationToken(user.id);
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL || new URL(request.url).origin;
+    const appUrl = resolveAppUrl(request.url);
     const verifyParams = new URLSearchParams({
       token,
       email: user.email,

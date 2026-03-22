@@ -231,6 +231,18 @@ export class IndexedDBManager {
     });
   }
 
+  async deleteSilently(storeName: string, key: string): Promise<void> {
+    const db = await this.init();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(storeName, 'readwrite');
+      const store = tx.objectStore(storeName);
+      const request = store.delete(key);
+
+      request.onsuccess = () => resolve();
+      request.onerror = () => reject(request.error);
+    });
+  }
+
   async clear(storeName: string): Promise<void> {
     const db = await this.init();
     return new Promise((resolve, reject) => {
