@@ -80,6 +80,24 @@ function stripUndefined<T extends Record<string, unknown>>(value: T) {
   );
 }
 
+function isMissingRpcFunctionError(
+  error: { code?: string | null; message?: string | null } | null | undefined,
+  functionName: string,
+) {
+  if (!error) {
+    return false;
+  }
+
+  const message = error.message ?? '';
+  return (
+    error.code === 'PGRST202'
+    || (
+      message.includes(functionName)
+      && message.toLowerCase().includes('schema cache')
+    )
+  );
+}
+
 async function getRemoteActorId(user: User) {
   const remoteActorId = await mirrorAppUserToSupabase(user, {
     emailConfirmed: Boolean(user.email_verified_at || !user.email_verification_required),
@@ -129,6 +147,92 @@ async function createAuditLogEntry(params: {
   if (error) {
     throw new Error(`Failed to create audit log: ${error.message}`);
   }
+}
+
+async function createInventoryItemWithoutRpc(
+  user: User,
+  item: Omit<InventoryItem, 'syncStatus'> & { id: string },
+  remoteActorId: string,
+) {
+  if (!['admin', 'encoder'].includes(user.role)) {
+    throw new Error('You are not allowed to manage inventory.');
+  }
+
+  const supabase = getSupabaseAdminClient();
+  const quantityAvailable =
+    typeof item.quantity_available === 'number' && Number.isFinite(item.quantity_available)
+      ? Math.max(0, item.quantity_available)
+      : 0;
+  const reorderLevel =
+    typeof item.reorder_level === 'number' && Number.isFinite(item.reorder_level)
+      ? Math.max(0, item.reorder_level)
+      : 10;
+
+  const { data: createdItem, error: createItemError } = await supabase
+    .from('inventory_items')
+    .insert({
+      id: item.id,
+      item_name: item.item_name.trim(),
+      item_code: toOptionalString(item.item_code),
+      category: item.category,
+      quantity_available: quantityAvailable,
+      unit: item.unit,
+      reorder_level: reorderLevel,
+      storage_location: toOptionalString(item.storage_location),
+      expiration_date: toOptionalString(item.expiration_date),
+      notes: toOptionalString(item.notes),
+      sync_status: 'synced',
+    })
+    .select('*')
+    .single();
+
+  if (createItemError) {
+    throw new Error(createItemError.message);
+  }
+
+  const movements: Array<Record<string, unknown>> = [];
+  if (createdItem && quantityAvailable > 0) {
+    const { data: createdMovement, error: createMovementError } = await supabase
+      .from('inventory_movements')
+      .insert({
+        id: `mov_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`,
+        item_id: createdItem.id,
+        item_name: createdItem.item_name,
+        type: 'stock_in',
+        quantity: quantityAvailable,
+        previous_quantity: 0,
+        new_quantity: quantityAvailable,
+        unit: createdItem.unit,
+        performed_by: remoteActorId,
+        performed_by_name: toOptionalString(user.name),
+        reference_id: createdItem.id,
+        reference_type: 'inventory',
+        notes: 'Opening stock',
+        timestamp: new Date().toISOString(),
+        sync_status: 'synced',
+      })
+      .select('*')
+      .single();
+
+    if (createMovementError) {
+      await supabase
+        .from('inventory_items')
+        .delete()
+        .eq('id', createdItem.id);
+
+      throw new Error(createMovementError.message);
+    }
+
+    if (createdMovement) {
+      movements.push(createdMovement);
+    }
+  }
+
+  return {
+    inventory_item: createdItem,
+    inventory_item_id: createdItem?.id ?? item.id,
+    inventory_movements: movements,
+  };
 }
 
 export async function createAuditLogOnServer(params: {
@@ -351,14 +455,21 @@ export async function createInventoryItemOnServer(
 ) {
   const supabase = getSupabaseAdminClient();
   const remoteActorId = await getRemoteActorId(user);
-  const { data, error } = await supabase.rpc('create_inventory_item_bundle', {
+  let data: unknown = null;
+  const { data: rpcData, error } = await supabase.rpc('create_inventory_item_bundle', {
     p_item: item,
     p_actor_role: user.role,
     p_actor_user_id: remoteActorId,
   });
 
   if (error) {
-    throw new Error(error.message);
+    if (isMissingRpcFunctionError(error, 'create_inventory_item_bundle')) {
+      data = await createInventoryItemWithoutRpc(user, item, remoteActorId);
+    } else {
+      throw new Error(error.message);
+    }
+  } else {
+    data = rpcData;
   }
 
   await createAuditLogEntry({
