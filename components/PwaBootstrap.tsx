@@ -1,8 +1,8 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Cloud, CloudCheck, Download, WifiOff } from 'lucide-react';
-import { db, STORE_NAMES } from '@/lib/db/indexeddb';
+import { flushSyncQueueNow, getPendingSyncCount } from '@/lib/db/client-sync';
 
 const SYNC_TAG = 'mswdo-sync-queue';
 const DISMISS_INSTALL_KEY = 'mswdo.pwa.install-dismissed';
@@ -34,16 +34,6 @@ function isStandaloneMode() {
   return window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
 }
 
-async function getPendingSyncCount(): Promise<number> {
-  try {
-    await db.init();
-    const items = await db.getAll(STORE_NAMES.sync_queue);
-    return items.length;
-  } catch {
-    return 0;
-  }
-}
-
 async function triggerBackgroundSync(): Promise<boolean> {
   if (typeof window === 'undefined' || !('serviceWorker' in navigator)) {
     return false;
@@ -69,6 +59,7 @@ export default function PwaBootstrap() {
   const [installPromptEvent, setInstallPromptEvent] = useState<BeforeInstallPromptEvent | null>(null);
   const [installDismissed, setInstallDismissed] = useState(true);
   const [isStandalone, setIsStandalone] = useState(false);
+  const isSyncingRef = useRef(false);
 
   const showSyncBanner = !isOnline || pendingSyncCount > 0 || isSyncing;
   const showInstallCard = Boolean(installPromptEvent) && !installDismissed && !isStandalone;
@@ -101,6 +92,41 @@ export default function PwaBootstrap() {
       const count = await getPendingSyncCount();
       if (!cancelled) {
         setPendingSyncCount(count);
+      }
+    }
+
+    async function runSync(options?: { preferDirect?: boolean }) {
+      if (isSyncingRef.current) {
+        return;
+      }
+
+      isSyncingRef.current = true;
+      if (!cancelled) {
+        setIsSyncing(true);
+      }
+
+      try {
+        if (navigator.onLine && options?.preferDirect !== false) {
+          const pendingCount = await flushSyncQueueNow();
+          if (!cancelled) {
+            setPendingSyncCount(pendingCount);
+          }
+
+          if (pendingCount > 0) {
+            await triggerBackgroundSync();
+          }
+          return;
+        }
+
+        const started = await triggerBackgroundSync();
+        if (!started) {
+          await refreshPendingCount();
+        }
+      } finally {
+        isSyncingRef.current = false;
+        if (!cancelled) {
+          setIsSyncing(false);
+        }
       }
     }
 
@@ -143,18 +169,13 @@ export default function PwaBootstrap() {
     async function handleQueueChange() {
       await refreshPendingCount();
       if (navigator.onLine) {
-        setIsSyncing(true);
-        const started = await triggerBackgroundSync();
-        if (!started) {
-          setIsSyncing(false);
-        }
+        await runSync();
       }
     }
 
     function handleOnline() {
       setIsOnline(true);
-      setIsSyncing(true);
-      void handleQueueChange();
+      void runSync();
     }
 
     function handleOffline() {
@@ -165,7 +186,7 @@ export default function PwaBootstrap() {
     void registerServiceWorker();
     void refreshPendingCount();
     if (navigator.onLine) {
-      void handleQueueChange();
+      void runSync();
     }
 
     window.addEventListener('online', handleOnline);
@@ -208,9 +229,22 @@ export default function PwaBootstrap() {
   }
 
   async function handleSyncNow() {
+    if (isSyncingRef.current) {
+      return;
+    }
+
+    isSyncingRef.current = true;
     setIsSyncing(true);
-    const started = await triggerBackgroundSync();
-    if (!started) {
+
+    try {
+      const pendingCount = await flushSyncQueueNow();
+      setPendingSyncCount(pendingCount);
+
+      if (pendingCount > 0) {
+        await triggerBackgroundSync();
+      }
+    } finally {
+      isSyncingRef.current = false;
       setIsSyncing(false);
     }
   }

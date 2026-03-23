@@ -248,14 +248,21 @@ async function flushSyncQueue() {
         'Content-Type': 'application/json',
         Accept: 'application/json',
       },
+      credentials: 'same-origin',
+      cache: 'no-store',
       body: JSON.stringify({ items }),
     });
 
+    const payload = await response.json().catch(() => null);
+
     if (!response.ok) {
-      throw new Error(`Sync backup failed with status ${response.status}`);
+      throw new Error(
+        typeof payload?.error === 'string'
+          ? payload.error
+          : `Sync backup failed with status ${response.status}`,
+      );
     }
 
-    const payload = await response.json().catch(() => null);
     const syncedItemIds = new Set(
       Array.isArray(payload?.syncedItems)
         ? payload.syncedItems
