@@ -31,6 +31,8 @@ export default function InventoryMobile() {
     const [search, setSearch] = useState('');
     const [showForm, setShowForm] = useState(false);
     const [isLoading, setIsLoading] = useState(true);
+    const [isAddingItem, setIsAddingItem] = useState(false);
+    const [addItemError, setAddItemError] = useState('');
     const [form, setForm] = useState({ item_name: '', category: 'food' as const, quantity_available: 0, unit: 'pcs' as const, expiration_date: '', notes: '' });
 
     useEffect(() => {
@@ -47,10 +49,30 @@ export default function InventoryMobile() {
 
     async function handleAdd(e: React.FormEvent) {
         e.preventDefault();
-        await createInventoryItem({ ...form, quantity_available: parseInt(form.quantity_available.toString()) });
-        setForm({ item_name: '', category: 'food', quantity_available: 0, unit: 'pcs', expiration_date: '', notes: '' });
-        setShowForm(false);
-        await load();
+        const quantity = parseInt(form.quantity_available.toString(), 10);
+
+        if (!form.item_name.trim()) {
+            setAddItemError('Item name is required.');
+            return;
+        }
+
+        if (!Number.isFinite(quantity) || quantity < 0) {
+            setAddItemError('Quantity must be zero or greater.');
+            return;
+        }
+
+        try {
+            setIsAddingItem(true);
+            setAddItemError('');
+            await createInventoryItem({ ...form, item_name: form.item_name.trim(), quantity_available: quantity });
+            setForm({ item_name: '', category: 'food', quantity_available: 0, unit: 'pcs', expiration_date: '', notes: '' });
+            setShowForm(false);
+            await load();
+        } catch (error) {
+            setAddItemError(error instanceof Error ? error.message : 'Failed to add inventory item.');
+        } finally {
+            setIsAddingItem(false);
+        }
     }
 
     if (!user) return null;
@@ -70,7 +92,10 @@ export default function InventoryMobile() {
                     <p className="text-xs text-slate-400">{items.length} item types</p>
                 </div>
                 {hasPermission('manage_inventory') && (
-                    <button onClick={() => setShowForm(!showForm)}
+                    <button onClick={() => {
+                        setAddItemError('');
+                        setShowForm(!showForm);
+                    }}
                         className={`w-9 h-9 rounded-xl flex items-center justify-center shadow-md transition-all
               ${showForm ? 'bg-slate-200 text-slate-700' : 'bg-gradient-to-r from-amber-500 to-orange-600 text-white shadow-amber-500/25'}`}>
                         {showForm ? <X className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
@@ -91,7 +116,7 @@ export default function InventoryMobile() {
 
             {/* Add form */}
             {showForm && (
-                <form onSubmit={handleAdd} className="bg-white border border-slate-200/60 rounded-2xl shadow-lg p-4 space-y-3">
+                <form onSubmit={handleAdd} noValidate className="bg-white border border-slate-200/60 rounded-2xl shadow-lg p-4 space-y-3">
                     <p className="font-bold text-slate-800 text-sm mb-1">Add New Item</p>
                     <input type="text" required placeholder="Item name *" value={form.item_name}
                         onChange={e => setForm({ ...form, item_name: e.target.value })}
@@ -105,8 +130,9 @@ export default function InventoryMobile() {
                             onChange={e => setForm({ ...form, quantity_available: parseInt(e.target.value) || 0 })}
                             className="px-3 py-2.5 text-sm border border-slate-200 rounded-xl bg-slate-50 focus:outline-none focus:ring-2 focus:ring-amber-500/30" />
                     </div>
-                    <button type="submit" className="w-full py-2.5 bg-gradient-to-r from-amber-500 to-orange-600 text-white text-sm font-semibold rounded-xl">
-                        Add to Inventory
+                    {addItemError ? <div className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{addItemError}</div> : null}
+                    <button type="submit" disabled={isAddingItem} className="w-full py-2.5 bg-gradient-to-r from-amber-500 to-orange-600 text-white text-sm font-semibold rounded-xl disabled:cursor-not-allowed disabled:opacity-60">
+                        {isAddingItem ? 'Adding...' : 'Add to Inventory'}
                     </button>
                 </form>
             )}

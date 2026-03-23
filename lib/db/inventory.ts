@@ -15,6 +15,12 @@ type InventorySnapshotPayload = {
   package_templates?: Array<Record<string, unknown>>;
 };
 
+type CreateInventoryMutationPayload = {
+  inventory_item?: Record<string, unknown>;
+  inventory_item_id?: string;
+  inventory_movements?: Array<Record<string, unknown>>;
+};
+
 let inventoryBootstrapPromise: Promise<void> | null = null;
 
 function generateId(prefix: string): string {
@@ -40,6 +46,46 @@ function normalizeQuantity(value: unknown): number {
   return 0;
 }
 
+function normalizeDateOnly(value: unknown): string | undefined {
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+    return trimmed;
+  }
+
+  const slashMatch = trimmed.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (slashMatch) {
+    const [, monthText, dayText, yearText] = slashMatch;
+    const month = Number(monthText);
+    const day = Number(dayText);
+    const year = Number(yearText);
+    const parsed = new Date(Date.UTC(year, month - 1, day));
+
+    if (
+      !Number.isNaN(parsed.getTime())
+      && parsed.getUTCFullYear() === year
+      && parsed.getUTCMonth() === month - 1
+      && parsed.getUTCDate() === day
+    ) {
+      return parsed.toISOString().slice(0, 10);
+    }
+  }
+
+  const parsed = new Date(trimmed);
+  if (Number.isNaN(parsed.getTime())) {
+    return undefined;
+  }
+
+  return parsed.toISOString().slice(0, 10);
+}
+
 function normalizeInventoryItem(item: InventoryItem): InventoryItem {
   return {
     ...item,
@@ -48,7 +94,7 @@ function normalizeInventoryItem(item: InventoryItem): InventoryItem {
     quantity_available: normalizeQuantity(item.quantity_available),
     reorder_level: Math.max(0, normalizeQuantity(item.reorder_level ?? 10)),
     storage_location: item.storage_location?.trim() || undefined,
-    expiration_date: item.expiration_date?.trim() || undefined,
+    expiration_date: normalizeDateOnly(item.expiration_date),
     notes: item.notes?.trim() || undefined,
   };
 }
@@ -373,7 +419,7 @@ export async function createInventoryItem(
       syncStatus: 'synced',
     });
 
-    await runServerMutation({
+    const payload = await runServerMutation<CreateInventoryMutationPayload>({
       action: 'create_inventory_item',
       item: {
         id: item.id,
@@ -389,14 +435,40 @@ export async function createInventoryItem(
       },
     });
 
-    await bootstrapInventoryFromSupabase(true);
+    let fallbackCreatedItem: InventoryItem | undefined;
 
-    const createdItem = await getInventoryItem(item.id);
-    if (!createdItem) {
-      throw new Error('Inventory item was created in Supabase, but it did not rehydrate locally.');
+    if (payload.inventory_item && typeof payload.inventory_item === 'object') {
+      fallbackCreatedItem = mapSnapshotInventoryItem(payload.inventory_item);
+      await hydrateSyncedRecord(STORE_NAMES.inventory_items, fallbackCreatedItem);
     }
 
-    return createdItem;
+    if (Array.isArray(payload.inventory_movements)) {
+      await Promise.all(
+        payload.inventory_movements
+          .filter((row): row is Record<string, unknown> => Boolean(row && typeof row === 'object'))
+          .map((row) =>
+            hydrateSyncedRecord(
+              STORE_NAMES.inventory_movements,
+              mapSnapshotInventoryMovement(row),
+            ),
+          ),
+      );
+    }
+
+    await bootstrapInventoryFromSupabase(true).catch((error) => {
+      console.warn('Inventory snapshot refresh after create failed:', error);
+    });
+
+    const createdItem = await getInventoryItem(item.id);
+    if (createdItem) {
+      return createdItem;
+    }
+
+    if (fallbackCreatedItem) {
+      return fallbackCreatedItem;
+    }
+
+    throw new Error('Inventory item was saved, but the page could not refresh the latest inventory snapshot yet.');
   } catch (error) {
     console.error('Error creating inventory item:', error);
     throw error;

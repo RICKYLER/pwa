@@ -129,6 +129,8 @@ export default function InventoryDesktop() {
   const [search, setSearch] = useState('');
   const [showForm, setShowForm] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const [isAddingItem, setIsAddingItem] = useState(false);
+  const [addItemError, setAddItemError] = useState('');
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
   const [movementScope, setMovementScope] = useState<MovementScope>('all');
   const [transactionItem, setTransactionItem] = useState<InventoryItem | null>(null);
@@ -248,26 +250,63 @@ export default function InventoryDesktop() {
 
   async function handleAdd(event: React.FormEvent) {
     event.preventDefault();
+    const itemName = form.item_name.trim();
+    const quantity = Number(form.quantity_available);
+    const reorderLevel = Number(form.reorder_level);
+    const expirationValue = form.expiration_date.trim();
 
-    await createInventoryItem({
-      ...form,
-      quantity_available: Number(form.quantity_available) || 0,
-      reorder_level: Number(form.reorder_level) || 0,
-    });
+    if (!itemName) {
+      setAddItemError('Item name is required.');
+      return;
+    }
 
-    setForm({
-      item_name: '',
-      item_code: '',
-      category: 'food',
-      quantity_available: 0,
-      unit: 'pcs',
-      reorder_level: 10,
-      storage_location: '',
-      expiration_date: '',
-      notes: '',
-    });
-    setShowForm(false);
-    await load();
+    if (!Number.isFinite(quantity) || quantity < 0) {
+      setAddItemError('Opening stock must be zero or greater.');
+      return;
+    }
+
+    if (!Number.isFinite(reorderLevel) || reorderLevel < 0) {
+      setAddItemError('Reorder level must be zero or greater.');
+      return;
+    }
+
+    if (expirationValue && Number.isNaN(new Date(expirationValue).getTime())) {
+      setAddItemError('Expiration date is invalid. Use the calendar picker or YYYY-MM-DD format.');
+      return;
+    }
+
+    try {
+      setIsAddingItem(true);
+      setAddItemError('');
+
+      await createInventoryItem({
+        ...form,
+        item_name: itemName,
+        quantity_available: quantity,
+        reorder_level: reorderLevel,
+        expiration_date: expirationValue || undefined,
+      });
+
+      setForm({
+        item_name: '',
+        item_code: '',
+        category: 'food',
+        quantity_available: 0,
+        unit: 'pcs',
+        reorder_level: 10,
+        storage_location: '',
+        expiration_date: '',
+        notes: '',
+      });
+      setShowForm(false);
+      await load();
+    } catch (error) {
+      setAddItemError(
+        error instanceof Error ? error.message : 'Failed to add inventory item.',
+      );
+    } finally {
+      setIsAddingItem(false);
+    }
   }
 
   function openTransaction(item: InventoryItem, mode: TransactionMode) {
@@ -479,7 +518,10 @@ export default function InventoryDesktop() {
         </div>
         {hasPermission('manage_inventory') ? (
           <button
-            onClick={() => setShowForm((value) => !value)}
+            onClick={() => {
+              setAddItemError('');
+              setShowForm((value) => !value);
+            }}
             className={`inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold transition-all shadow-md hover:-translate-y-px ${
               showForm
                 ? 'bg-slate-200 text-slate-700 shadow-slate-200/50'
@@ -591,7 +633,7 @@ export default function InventoryDesktop() {
             </button>
           </div>
 
-          <form onSubmit={handleAdd} className="space-y-4 p-6">
+          <form onSubmit={handleAdd} noValidate className="space-y-4 p-6">
             <div className="grid grid-cols-4 gap-4">
               <div className="col-span-2">
                 <label className="mb-1.5 block text-xs font-semibold text-slate-500">Item Name *</label>
@@ -707,15 +749,24 @@ export default function InventoryDesktop() {
 	            </div>
 
             <div className="flex gap-3">
+              {addItemError ? (
+                <div className="flex-1 rounded-xl border border-rose-200 bg-rose-50 px-4 py-2.5 text-sm text-rose-700">
+                  {addItemError}
+                </div>
+              ) : null}
               <button
                 type="submit"
-                className="rounded-xl bg-gradient-to-r from-amber-500 to-orange-600 px-5 py-2.5 text-sm font-semibold text-white shadow-md shadow-amber-500/20 transition-all hover:-translate-y-px hover:opacity-90"
+                disabled={isAddingItem}
+                className="rounded-xl bg-gradient-to-r from-amber-500 to-orange-600 px-5 py-2.5 text-sm font-semibold text-white shadow-md shadow-amber-500/20 transition-all hover:-translate-y-px hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
               >
-                Add To Inventory
+                {isAddingItem ? 'Adding...' : 'Add To Inventory'}
               </button>
               <button
                 type="button"
-                onClick={() => setShowForm(false)}
+                onClick={() => {
+                  setAddItemError('');
+                  setShowForm(false);
+                }}
                 className="rounded-xl border border-slate-200 px-5 py-2.5 text-sm font-medium text-slate-600 transition-all hover:bg-slate-50 hover:text-slate-800"
               >
                 Cancel
