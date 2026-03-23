@@ -39,6 +39,7 @@ const SYNC_TRACKED_STORES = new Set<string>([
   STORE_NAMES.distribution_records,
   STORE_NAMES.incidents,
   STORE_NAMES.location_master_lists,
+  STORE_NAMES.audit_logs,
 ]);
 
 export class IndexedDBManager {

@@ -2,6 +2,7 @@ import 'server-only';
 
 import { randomUUID } from 'node:crypto';
 import type { SyncQueueItem, User } from '@/lib/db/schema';
+import { mirrorStoredUserIdToSupabase } from '@/lib/server/supabase-user-mirror';
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
 
 const SYNC_AGENT_EMAIL = 'sync-agent@mswdo.local';
@@ -21,6 +22,7 @@ const SUPPORTED_ENTITY_TYPES = [
   'distribution_records',
   'incidents',
   'location_master_lists',
+  'audit_logs',
 ] as const;
 
 type SupportedEntityType = (typeof SUPPORTED_ENTITY_TYPES)[number];
@@ -55,6 +57,7 @@ const UPSERT_ORDER: SupportedEntityType[] = [
   'incidents',
   'distribution_events',
   'distribution_records',
+  'audit_logs',
 ];
 
 let syncActorIdPromise: Promise<string> | null = null;
@@ -167,7 +170,17 @@ function normalizeJsonValue(value: unknown) {
   return value;
 }
 
-function mapQueueItemToSupabaseRow(item: SyncQueueItem, syncActorId: string) {
+async function resolveAuditLogUserId(value: unknown, syncActorId: string) {
+  const localUserId = toOptionalString(value);
+  if (!localUserId) {
+    return syncActorId;
+  }
+
+  const mirroredUserId = await mirrorStoredUserIdToSupabase(localUserId);
+  return mirroredUserId ?? syncActorId;
+}
+
+async function mapQueueItemToSupabaseRow(item: SyncQueueItem, syncActorId: string) {
   if (!item.data || typeof item.data !== 'object') {
     throw new Error('Queued item data is missing.');
   }
@@ -362,6 +375,16 @@ function mapQueueItemToSupabaseRow(item: SyncQueueItem, syncActorId: string) {
         updated_at: toTimestamp(data.updatedAt),
         updated_by: toOptionalUuid(data.updatedBy),
       };
+    case 'audit_logs':
+      return {
+        id: toRequiredString(data.id, 'audit_log.id'),
+        user_id: await resolveAuditLogUserId(data.user_id, syncActorId),
+        action: toRequiredString(data.action, 'audit_log.action'),
+        entity_type: toRequiredString(data.entity_type, 'audit_log.entity_type'),
+        entity_id: toRequiredString(data.entity_id, 'audit_log.entity_id'),
+        changes: normalizeJsonValue(data.changes),
+        timestamp: toTimestamp(data.timestamp),
+      };
     default:
       throw new Error(`Unsupported sync entity type: ${item.entity_type}`);
   }
@@ -488,7 +511,7 @@ async function applySyncItem(item: SyncQueueItem, syncActorId: string) {
     return;
   }
 
-  const payload = mapQueueItemToSupabaseRow(item, syncActorId);
+  const payload = await mapQueueItemToSupabaseRow(item, syncActorId);
   const { error } = await supabase
     .from(item.entity_type)
     .upsert(payload, {

@@ -294,6 +294,7 @@ export async function createAuditLog(
       entity_id,
       changes,
       timestamp: new Date(),
+      syncStatus: 'pending' as const,
     };
 
     await db.add(STORE_NAMES.audit_logs, log);

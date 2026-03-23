@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { sendResidentVerificationEmail } from '@/lib/server/auth-email';
 import { resolveAppUrl } from '@/lib/server/app-url';
+import { writeServerAuditLog } from '@/lib/server/supabase-audit';
+import { mirrorAppUserToSupabase } from '@/lib/server/supabase-user-mirror';
 import {
   createEmailVerificationToken,
   createResidentSelfServiceAccount,
@@ -31,6 +33,27 @@ export async function POST(request: NextRequest) {
 
   try {
     const user = await createResidentSelfServiceAccount(payload);
+    let remoteUserId: string | null = null;
+
+    try {
+      remoteUserId = await mirrorAppUserToSupabase(user, {
+        password: payload.password,
+        emailConfirmed: false,
+      });
+      await writeServerAuditLog({
+        actor: user,
+        action: 'CREATE',
+        entity_type: 'user',
+        entity_id: remoteUserId ?? user.id,
+        changes: {
+          role: user.role,
+          source: 'resident_register',
+        },
+      });
+    } catch (error) {
+      console.error('[Supabase Mirror] Failed to sync resident registration:', error);
+    }
+
     const token = await createEmailVerificationToken(user.id);
     const appUrl = resolveAppUrl(request.url);
     const verifyParams = new URLSearchParams({
@@ -56,6 +79,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(
       {
         user,
+        remoteUserId,
         verificationRequired: true,
         verificationEmailSent,
         verificationEmailError,

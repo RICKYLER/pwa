@@ -9,6 +9,8 @@ import {
   completePasswordSetup,
   validatePasswordSetupToken,
 } from '@/lib/server/auth-store';
+import { writeServerAuditLog } from '@/lib/server/supabase-audit';
+import { mirrorAppUserToSupabase } from '@/lib/server/supabase-user-mirror';
 
 export const runtime = 'nodejs';
 
@@ -54,6 +56,24 @@ export async function POST(request: NextRequest) {
 
   try {
     const user = await completePasswordSetup(payload.token, payload.password);
+    try {
+      const remoteUserId = await mirrorAppUserToSupabase(user, {
+        password: payload.password,
+        emailConfirmed: Boolean(user.email_verified_at || !user.email_verification_required),
+      });
+      await writeServerAuditLog({
+        actor: user,
+        action: 'SET_PASSWORD',
+        entity_type: 'user',
+        entity_id: remoteUserId ?? user.id,
+        changes: {
+          source: 'setup_password',
+        },
+      });
+    } catch (error) {
+      console.error('[Supabase Mirror] Failed to sync password setup:', error);
+    }
+
     const sessionToken = createSessionToken({
       userId: user.id,
       role: user.role,

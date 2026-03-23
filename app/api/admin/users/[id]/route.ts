@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { requireAdminUser } from '@/lib/server/auth-guards';
-import { deleteUserAccount, updateUserAccount } from '@/lib/server/auth-store';
+import { deleteUserAccount, getStoredUserById, updateUserAccount } from '@/lib/server/auth-store';
+import { writeServerAuditLog } from '@/lib/server/supabase-audit';
+import { deleteMirroredUserFromSupabase, mirrorAppUserToSupabase } from '@/lib/server/supabase-user-mirror';
 
 export const runtime = 'nodejs';
 
@@ -35,6 +37,24 @@ export async function PATCH(
 
   try {
     const user = await updateUserAccount(id, payload);
+    try {
+      const remoteUserId = await mirrorAppUserToSupabase(user, {
+        emailConfirmed: Boolean(user.email_verified_at || !user.email_verification_required),
+      });
+      await writeServerAuditLog({
+        actor: guard.user,
+        action: 'UPDATE',
+        entity_type: 'user',
+        entity_id: remoteUserId ?? user.id,
+        changes: {
+          ...payload,
+          source: 'admin_update_user',
+        },
+      });
+    } catch (error) {
+      console.error('[Supabase Mirror] Failed to sync updated user:', error);
+    }
+
     return NextResponse.json({ user });
   } catch (error) {
     return NextResponse.json(
@@ -62,7 +82,27 @@ export async function DELETE(
   }
 
   try {
+    const existingUser = await getStoredUserById(id);
     await deleteUserAccount(id);
+
+    if (existingUser?.email) {
+      try {
+        await deleteMirroredUserFromSupabase(existingUser.email);
+        await writeServerAuditLog({
+          actor: guard.user,
+          action: 'DELETE',
+          entity_type: 'user',
+          entity_id: id,
+          changes: {
+            deleted_user_email: existingUser.email,
+            source: 'admin_delete_user',
+          },
+        });
+      } catch (error) {
+        console.error('[Supabase Mirror] Failed to sync deleted user:', error);
+      }
+    }
+
     return NextResponse.json({ success: true });
   } catch (error) {
     return NextResponse.json(

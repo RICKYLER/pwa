@@ -25,6 +25,7 @@ const TABLE_CONFIGS: TableConfig[] = [
   { table: 'location_master_lists', storeName: STORE_NAMES.location_master_lists },
   { table: 'programs', storeName: STORE_NAMES.programs },
   { table: 'beneficiaries', storeName: STORE_NAMES.beneficiaries },
+  { table: 'audit_logs', storeName: STORE_NAMES.audit_logs },
 ];
 
 declare global {

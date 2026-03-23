@@ -241,6 +241,7 @@ export interface AuditLog {
   entity_id: string;
   changes?: Record<string, any>;
   timestamp: Date;
+  syncStatus: SyncStatus;
 }
 
 export interface SyncQueueItem {
