@@ -590,7 +590,7 @@ export function HouseholdForm({ initialData, onSubmit, isLoading = false }: Hous
         ? (payload.location_verified_at instanceof Date ? payload.location_verified_at : new Date())
         : undefined;
       payload.location_verified_by = payload.location_verified
-        ? (payload.location_verified_by || currentUser?.name || currentUser?.id)
+        ? (payload.location_verified_by || currentUser?.id)
         : undefined;
 
       await onSubmit(payload, members);
@@ -1127,7 +1127,7 @@ export function HouseholdForm({ initialData, onSubmit, isLoading = false }: Hous
                       ...prev,
                       location_verified: checked,
                       location_verified_at: checked ? new Date() : undefined,
-                      location_verified_by: checked ? (currentUser?.name || currentUser?.id) : undefined,
+                      location_verified_by: checked ? currentUser?.id : undefined,
                     }));
                   }}
                   className="mt-0.5 h-4 w-4 rounded border-input"

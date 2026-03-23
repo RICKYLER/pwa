@@ -411,23 +411,33 @@ export async function updateInventoryItem(
   updates: Partial<InventoryItem>,
 ): Promise<InventoryItem> {
   try {
-    const existing = await getInventoryItem(id);
-    if (!existing) {
-      throw new Error(`Inventory item ${id} not found`);
-    }
-
-    const updated = normalizeInventoryItem({
-      ...existing,
-      ...updates,
-      id,
-      syncStatus: 'pending',
+    await runServerMutation({
+      action: 'update_inventory_item',
+      itemId: id,
+      updates: {
+        ...updates,
+        item_name: typeof updates.item_name === 'string' ? updates.item_name.trim() : updates.item_name,
+        item_code: typeof updates.item_code === 'string' ? (updates.item_code.trim() || null) : updates.item_code,
+        storage_location:
+          typeof updates.storage_location === 'string'
+            ? (updates.storage_location.trim() || null)
+            : updates.storage_location,
+        expiration_date:
+          typeof updates.expiration_date === 'string'
+            ? (updates.expiration_date.trim() || null)
+            : updates.expiration_date,
+        notes: typeof updates.notes === 'string' ? (updates.notes.trim() || null) : updates.notes,
+      },
     });
 
-    await db.put(STORE_NAMES.inventory_items, updated);
+    await bootstrapInventoryFromSupabase(true);
 
-    await createAuditLog('UPDATE', 'inventory', id, { changes: updates });
+    const updatedItem = await getInventoryItem(id);
+    if (!updatedItem) {
+      throw new Error('Inventory item was updated in Supabase, but it did not rehydrate locally.');
+    }
 
-    return updated;
+    return updatedItem;
   } catch (error) {
     console.error('Error updating inventory item:', error);
     throw error;
@@ -583,17 +593,26 @@ export async function createPackageTemplate(data: {
       items: data.items,
       createdAt: new Date(),
       updatedAt: new Date(),
-      syncStatus: 'pending',
+      syncStatus: 'synced',
     });
 
-    await db.add(STORE_NAMES.package_templates, template);
-
-    await createAuditLog('CREATE', 'inventory', template.id, {
-      template_name: template.name,
-      items_count: template.items.length,
+    await runServerMutation({
+      action: 'create_package_template',
+      template: {
+        ...template,
+        name: template.name.trim(),
+        description: template.description?.trim() || undefined,
+      },
     });
 
-    return template;
+    await bootstrapInventoryFromSupabase(true);
+
+    const createdTemplate = (await getPackageTemplates()).find((entry) => entry.id === template.id);
+    if (!createdTemplate) {
+      throw new Error('Package template was created in Supabase, but it did not rehydrate locally.');
+    }
+
+    return createdTemplate;
   } catch (error) {
     console.error('Error creating package template:', error);
     throw error;
@@ -602,8 +621,11 @@ export async function createPackageTemplate(data: {
 
 export async function deletePackageTemplate(id: string): Promise<void> {
   try {
-    await db.delete(STORE_NAMES.package_templates, id);
-    await createAuditLog('DELETE', 'inventory', id, { entity: 'package_template' });
+    await runServerMutation({
+      action: 'delete_package_template',
+      templateId: id,
+    });
+    await bootstrapInventoryFromSupabase(true);
   } catch (error) {
     console.error('Error deleting package template:', error);
     throw error;

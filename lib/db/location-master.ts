@@ -1,6 +1,7 @@
 import { db, STORE_NAMES } from './indexeddb';
 import type { LocationMasterList } from './schema';
-import { createAuditLog, getCurrentUser } from '../auth';
+import { runServerMutation } from '@/lib/mutations';
+import { bootstrapAllDataFromSupabase } from '@/lib/supabase/bootstrap';
 import {
   normalizeBarangayName,
   normalizeMunicipalityName,
@@ -42,7 +43,6 @@ export async function saveLocationMasterList(input: {
   barangay_name: string;
   puroks: string[];
 }): Promise<LocationMasterList> {
-  const currentUser = getCurrentUser();
   const masterList = normalizeMasterList({
     id: input.barangay_id,
     barangay_id: input.barangay_id,
@@ -50,15 +50,24 @@ export async function saveLocationMasterList(input: {
     barangay_name: input.barangay_name,
     puroks: input.puroks,
     updatedAt: new Date(),
-    updatedBy: currentUser?.name || currentUser?.id,
   });
 
-  await db.put(STORE_NAMES.location_master_lists, masterList);
-  await createAuditLog('UPSERT', 'location_master', masterList.id, {
-    municipality: masterList.municipality,
-    barangay_name: masterList.barangay_name,
-    puroks: masterList.puroks,
+  await runServerMutation({
+    action: 'save_location_master_list',
+    input: {
+      barangay_id: masterList.barangay_id,
+      municipality: masterList.municipality,
+      barangay_name: masterList.barangay_name,
+      puroks: masterList.puroks,
+    },
   });
 
-  return masterList;
+  await bootstrapAllDataFromSupabase(true);
+
+  const updatedMasterList = await getLocationMasterList(input.barangay_id);
+  if (!updatedMasterList) {
+    throw new Error('Master list was saved in Supabase, but it did not rehydrate locally.');
+  }
+
+  return updatedMasterList;
 }

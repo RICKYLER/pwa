@@ -216,27 +216,14 @@ export async function updateHealthFlags(
   }
 ): Promise<VulnerabilityFlags | undefined> {
   try {
-    const existing = await getResidentVulnerabilityFlags(resident_id);
-    if (!existing) {
-      throw new Error(`Vulnerability flags not found for resident ${resident_id}`);
-    }
+    await runServerMutation({
+      action: 'update_resident_health_flags',
+      residentId: resident_id,
+      updates,
+    });
 
-    const updated: VulnerabilityFlags = {
-      ...existing,
-      ...updates,
-      updatedAt: new Date(),
-      syncStatus: 'pending',
-    };
-
-    await db.put(STORE_NAMES.vulnerability_flags, updated);
-
-    await createAuditLog(
-      'UPDATE',
-      'resident',
-      resident_id,
-      { health_updates: updates }
-    );
-
+    await bootstrapAllDataFromSupabase(true);
+    const updated = await getResidentVulnerabilityFlags(resident_id);
     console.log('Health flags updated for resident:', resident_id);
     return updated;
   } catch (error) {

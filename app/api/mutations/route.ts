@@ -1,13 +1,33 @@
 import { NextRequest, NextResponse } from 'next/server';
-import type { Household, InventoryItem, InventoryMovementType, Resident } from '@/lib/db/schema';
+import type {
+  DistributionEvent,
+  Household,
+  Incident,
+  InventoryItem,
+  InventoryMovementType,
+  LocationMasterList,
+  PackageTemplate,
+  Resident,
+} from '@/lib/db/schema';
 import { requireAuthenticatedUser } from '@/lib/server/auth-guards';
 import {
   applyInventoryTransactionOnServer,
+  createAuditLogOnServer,
+  createDistributionEventOnServer,
   createHouseholdBundleOnServer,
+  createIncidentOnServer,
   createInventoryItemOnServer,
+  createPackageTemplateOnServer,
   createResidentOnServer,
+  deletePackageTemplateOnServer,
   deleteDistributionEventOnServer,
   releaseDistributionPackageOnServer,
+  saveLocationMasterListOnServer,
+  updateDistributionEventOnServer,
+  updateHouseholdOnServer,
+  updateResidentHealthFlagsOnServer,
+  updateIncidentStatusOnServer,
+  updateInventoryItemOnServer,
   updateResidentOnServer,
 } from '@/lib/server/supabase-mutations';
 
@@ -94,6 +114,93 @@ export async function POST(request: NextRequest) {
           headers: { 'Cache-Control': 'no-store' },
         });
       }
+      case 'update_resident_health_flags': {
+        const residentId = typeof body.residentId === 'string' ? body.residentId : '';
+        const updates = body.updates;
+        if (!residentId || !updates || typeof updates !== 'object') {
+          return badRequest('residentId and updates are required.');
+        }
+
+        const data = await updateResidentHealthFlagsOnServer(
+          authResult.user,
+          residentId,
+          updates as {
+            is_pregnant?: boolean;
+            is_pwd?: boolean;
+            pwd_type?: string;
+            has_chronic_illness?: boolean;
+            chronic_conditions?: string[];
+          },
+        );
+
+        return NextResponse.json(data, {
+          headers: { 'Cache-Control': 'no-store' },
+        });
+      }
+      case 'update_household': {
+        const householdId = typeof body.householdId === 'string' ? body.householdId : '';
+        const updates = body.updates;
+        if (!householdId || !updates || typeof updates !== 'object') {
+          return badRequest('householdId and updates are required.');
+        }
+
+        const data = await updateHouseholdOnServer(
+          authResult.user,
+          householdId,
+          updates as Partial<Household>,
+        );
+
+        return NextResponse.json(data, {
+          headers: { 'Cache-Control': 'no-store' },
+        });
+      }
+      case 'save_location_master_list': {
+        const input = body.input;
+        if (!input || typeof input !== 'object') {
+          return badRequest('input payload is required.');
+        }
+
+        const data = await saveLocationMasterListOnServer(
+          authResult.user,
+          input as Pick<LocationMasterList, 'barangay_id' | 'municipality' | 'barangay_name' | 'puroks'>,
+        );
+
+        return NextResponse.json(data, {
+          headers: { 'Cache-Control': 'no-store' },
+        });
+      }
+      case 'create_distribution_event': {
+        const event = body.event;
+        if (!event || typeof event !== 'object') {
+          return badRequest('event payload is required.');
+        }
+
+        const data = await createDistributionEventOnServer(
+          authResult.user,
+          event as Omit<DistributionEvent, 'syncStatus'> & { id: string },
+        );
+
+        return NextResponse.json(data, {
+          headers: { 'Cache-Control': 'no-store' },
+        });
+      }
+      case 'update_distribution_event': {
+        const eventId = typeof body.eventId === 'string' ? body.eventId : '';
+        const updates = body.updates;
+        if (!eventId || !updates || typeof updates !== 'object') {
+          return badRequest('eventId and updates are required.');
+        }
+
+        const data = await updateDistributionEventOnServer(
+          authResult.user,
+          eventId,
+          updates as Partial<DistributionEvent>,
+        );
+
+        return NextResponse.json(data, {
+          headers: { 'Cache-Control': 'no-store' },
+        });
+      }
       case 'create_inventory_item': {
         const item = body.item;
         if (!item || typeof item !== 'object') {
@@ -108,6 +215,51 @@ export async function POST(request: NextRequest) {
         return NextResponse.json(data, {
           headers: { 'Cache-Control': 'no-store' },
         });
+      }
+      case 'update_inventory_item': {
+        const itemId = typeof body.itemId === 'string' ? body.itemId : '';
+        const updates = body.updates;
+        if (!itemId || !updates || typeof updates !== 'object') {
+          return badRequest('itemId and updates are required.');
+        }
+
+        const data = await updateInventoryItemOnServer(
+          authResult.user,
+          itemId,
+          updates as Partial<InventoryItem>,
+        );
+
+        return NextResponse.json(data, {
+          headers: { 'Cache-Control': 'no-store' },
+        });
+      }
+      case 'create_package_template': {
+        const template = body.template;
+        if (!template || typeof template !== 'object') {
+          return badRequest('template payload is required.');
+        }
+
+        const data = await createPackageTemplateOnServer(
+          authResult.user,
+          template as Omit<PackageTemplate, 'syncStatus'> & { id: string },
+        );
+
+        return NextResponse.json(data, {
+          headers: { 'Cache-Control': 'no-store' },
+        });
+      }
+      case 'delete_package_template': {
+        const templateId = typeof body.templateId === 'string' ? body.templateId : '';
+        if (!templateId) {
+          return badRequest('templateId is required.');
+        }
+
+        await deletePackageTemplateOnServer(authResult.user, templateId);
+
+        return NextResponse.json(
+          { ok: true },
+          { headers: { 'Cache-Control': 'no-store' } },
+        );
       }
       case 'apply_inventory_transaction': {
         const params = body.params;
@@ -129,6 +281,38 @@ export async function POST(request: NextRequest) {
         const data = await applyInventoryTransactionOnServer(
           authResult.user,
           transactionParams,
+        );
+
+        return NextResponse.json(data, {
+          headers: { 'Cache-Control': 'no-store' },
+        });
+      }
+      case 'create_incident': {
+        const incident = body.incident;
+        if (!incident || typeof incident !== 'object') {
+          return badRequest('incident payload is required.');
+        }
+
+        const data = await createIncidentOnServer(
+          authResult.user,
+          incident as Omit<Incident, 'syncStatus'> & { id: string },
+        );
+
+        return NextResponse.json(data, {
+          headers: { 'Cache-Control': 'no-store' },
+        });
+      }
+      case 'update_incident_status': {
+        const incidentId = typeof body.incidentId === 'string' ? body.incidentId : '';
+        const status = typeof body.status === 'string' ? body.status : '';
+        if (!incidentId || !status) {
+          return badRequest('incidentId and status are required.');
+        }
+
+        const data = await updateIncidentStatusOnServer(
+          authResult.user,
+          incidentId,
+          status as Incident['status'],
         );
 
         return NextResponse.json(data, {
@@ -166,6 +350,28 @@ export async function POST(request: NextRequest) {
         return NextResponse.json(data, {
           headers: { 'Cache-Control': 'no-store' },
         });
+      }
+      case 'create_audit_log': {
+        const actionName = typeof body.auditAction === 'string' ? body.auditAction : '';
+        const entityType = typeof body.entityType === 'string' ? body.entityType : '';
+        const entityId = typeof body.entityId === 'string' ? body.entityId : '';
+        const changes = body.changes;
+        if (!actionName || !entityType || !entityId) {
+          return badRequest('auditAction, entityType, and entityId are required.');
+        }
+
+        await createAuditLogOnServer({
+          user: authResult.user,
+          action: actionName,
+          entityType: entityType as 'household' | 'resident' | 'distribution' | 'incident' | 'inventory' | 'user' | 'location_master',
+          entityId,
+          changes: changes && typeof changes === 'object' ? changes as Record<string, unknown> : undefined,
+        });
+
+        return NextResponse.json(
+          { ok: true },
+          { headers: { 'Cache-Control': 'no-store' } },
+        );
       }
       default:
         return badRequest(`Unsupported mutation action: ${action}`);

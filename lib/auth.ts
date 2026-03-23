@@ -1,6 +1,6 @@
 import type { User, UserRole, AuthContext } from './db/schema';
-import { db, STORE_NAMES } from './db/indexeddb';
 import { getSupabaseBrowserClient, getSupabaseBrowserConfig } from './supabase/client';
+import { runServerMutation } from './mutations';
 
 // Role-based permissions matrix
 const PERMISSIONS = {
@@ -327,18 +327,13 @@ export async function createAuditLog(
   if (!currentUser) return;
 
   try {
-    const log = {
-      id: `log_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-      user_id: currentUser.id,
-      action,
-      entity_type,
-      entity_id,
+    await runServerMutation({
+      action: 'create_audit_log',
+      auditAction: action,
+      entityType: entity_type,
+      entityId: entity_id,
       changes,
-      timestamp: new Date(),
-      syncStatus: 'pending' as const,
-    };
-
-    await db.add(STORE_NAMES.audit_logs, log);
+    });
     console.log('Audit log created:', action);
   } catch (error) {
     console.error('Failed to create audit log:', error);

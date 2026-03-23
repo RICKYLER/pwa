@@ -1,9 +1,13 @@
 import 'server-only';
 
 import type {
+  DistributionEvent,
   Household,
+  Incident,
   InventoryItem,
   InventoryMovementType,
+  LocationMasterList,
+  PackageTemplate,
   Resident,
   User,
 } from '@/lib/db/schema';
@@ -57,6 +61,25 @@ function isUuid(value: string) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
 
+function toIsoString(value: unknown) {
+  if (value instanceof Date) {
+    return value.toISOString();
+  }
+
+  if (typeof value === 'string' || typeof value === 'number') {
+    const parsed = new Date(value);
+    return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
+  }
+
+  return null;
+}
+
+function stripUndefined<T extends Record<string, unknown>>(value: T) {
+  return Object.fromEntries(
+    Object.entries(value).filter(([, entry]) => entry !== undefined),
+  );
+}
+
 async function getRemoteActorId(user: User) {
   const remoteActorId = await mirrorAppUserToSupabase(user, {
     emailConfirmed: Boolean(user.email_verified_at || !user.email_verification_required),
@@ -106,6 +129,16 @@ async function createAuditLogEntry(params: {
   if (error) {
     throw new Error(`Failed to create audit log: ${error.message}`);
   }
+}
+
+export async function createAuditLogOnServer(params: {
+  user: User;
+  action: string;
+  entityType: 'household' | 'resident' | 'distribution' | 'incident' | 'inventory' | 'user' | 'location_master';
+  entityId: string;
+  changes?: Record<string, unknown>;
+}) {
+  await createAuditLogEntry(params);
 }
 
 export async function createHouseholdBundleOnServer(
@@ -210,6 +243,103 @@ export async function updateResidentOnServer(
     entityType: 'resident',
     entityId: residentId,
     changes: updates as Record<string, unknown>,
+  });
+
+  return data;
+}
+
+export async function updateResidentHealthFlagsOnServer(
+  user: User,
+  residentId: string,
+  updates: {
+    is_pregnant?: boolean;
+    is_pwd?: boolean;
+    pwd_type?: string;
+    has_chronic_illness?: boolean;
+    chronic_conditions?: string[];
+  },
+) {
+  if (!['admin', 'encoder', 'health_worker'].includes(user.role)) {
+    throw new Error('You are not allowed to update resident health flags.');
+  }
+
+  const supabase = getSupabaseAdminClient();
+  const { data: resident, error: residentError } = await supabase
+    .from('residents')
+    .select('id, household_id')
+    .eq('id', residentId)
+    .limit(1)
+    .single();
+
+  if (residentError) {
+    throw new Error(residentError.message);
+  }
+
+  if (!resident) {
+    throw new Error('Resident not found.');
+  }
+
+  const { data: household, error: householdError } = await supabase
+    .from('households')
+    .select('id, barangay_id')
+    .eq('id', resident.household_id)
+    .limit(1)
+    .single();
+
+  if (householdError) {
+    throw new Error(householdError.message);
+  }
+
+  if (!household) {
+    throw new Error('Resident household not found.');
+  }
+
+  if (
+    user.role !== 'admin'
+    && household.barangay_id !== user.barangay_id
+  ) {
+    throw new Error('You can only manage residents inside your barangay.');
+  }
+
+  const { error: refreshError } = await supabase.rpc('refresh_vulnerability_flags_for_resident', {
+    p_resident_id: residentId,
+  });
+
+  if (refreshError) {
+    throw new Error(refreshError.message);
+  }
+
+  const payload = stripUndefined({
+    is_pregnant: typeof updates.is_pregnant === 'boolean' ? updates.is_pregnant : undefined,
+    is_pwd: typeof updates.is_pwd === 'boolean' ? updates.is_pwd : undefined,
+    pwd_type: updates.pwd_type === undefined ? undefined : toOptionalString(updates.pwd_type),
+    has_chronic_illness:
+      typeof updates.has_chronic_illness === 'boolean' ? updates.has_chronic_illness : undefined,
+    chronic_conditions: Array.isArray(updates.chronic_conditions)
+      ? updates.chronic_conditions
+      : undefined,
+    sync_status: 'synced',
+  });
+
+  const { data, error } = await supabase
+    .from('vulnerability_flags')
+    .update(payload)
+    .eq('resident_id', residentId)
+    .select('*')
+    .single();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  await createAuditLogEntry({
+    user,
+    action: 'UPDATE',
+    entityType: 'resident',
+    entityId: residentId,
+    changes: {
+      health_updates: updates,
+    },
   });
 
   return data;
@@ -353,6 +483,466 @@ export async function deleteDistributionEventOnServer(
     entityId: eventId,
     changes: {
       event_id: eventId,
+    },
+  });
+
+  return data;
+}
+
+export async function updateHouseholdOnServer(
+  user: User,
+  householdId: string,
+  updates: Partial<Household>,
+) {
+  const supabase = getSupabaseAdminClient();
+  const remoteActorId = await getRemoteActorId(user);
+  const { data: existing, error: existingError } = await supabase
+    .from('households')
+    .select('id, barangay_id, applicant_user_id, applicant_email')
+    .eq('id', householdId)
+    .limit(1);
+
+  if (existingError) {
+    throw new Error(existingError.message);
+  }
+
+  const current = existing?.[0];
+  if (!current) {
+    throw new Error(`Household ${householdId} not found`);
+  }
+
+  const canAccess =
+    user.role === 'admin'
+    || (user.role === 'encoder' && current.barangay_id === user.barangay_id)
+    || (
+      user.role === 'resident'
+      && (
+        current.applicant_user_id === remoteActorId
+        || current.applicant_email === user.email
+      )
+    );
+
+  if (!canAccess) {
+    throw new Error('You are not allowed to update this household.');
+  }
+
+  const payload = stripUndefined({
+    head_name: typeof updates.head_name === 'string' ? updates.head_name.trim() : undefined,
+    head_id: typeof updates.head_id === 'string' ? updates.head_id.trim() || null : undefined,
+    applicant_user_id: updates.applicant_user_id === undefined
+      ? undefined
+      : await resolveRemoteUserId(updates.applicant_user_id, null),
+    applicant_email: typeof updates.applicant_email === 'string' ? updates.applicant_email.trim() || null : undefined,
+    barangay_name: typeof updates.barangay_name === 'string' ? updates.barangay_name.trim() || null : undefined,
+    municipality: typeof updates.municipality === 'string' ? updates.municipality.trim() || null : undefined,
+    purok_sitio: typeof updates.purok_sitio === 'string' ? updates.purok_sitio.trim() : undefined,
+    street_address: typeof updates.street_address === 'string' ? updates.street_address.trim() : undefined,
+    landmark_directions: typeof updates.landmark_directions === 'string' ? updates.landmark_directions.trim() || null : undefined,
+    contact_number: typeof updates.contact_number === 'string' ? updates.contact_number.trim() || null : undefined,
+    status: updates.status,
+    gps_lat: typeof updates.gps_lat === 'number' ? updates.gps_lat : undefined,
+    gps_long: typeof updates.gps_long === 'number' ? updates.gps_long : undefined,
+    location_source: updates.location_source,
+    location_confidence: updates.location_confidence,
+    location_verified: typeof updates.location_verified === 'boolean' ? updates.location_verified : undefined,
+    location_verified_at: updates.location_verified_at === undefined ? undefined : toIsoString(updates.location_verified_at),
+    location_verified_by: updates.location_verified_by === undefined
+      ? undefined
+      : await resolveRemoteUserId(updates.location_verified_by, null),
+    registration_status: updates.registration_status,
+    registration_submitted_at: updates.registration_submitted_at === undefined ? undefined : toIsoString(updates.registration_submitted_at),
+    registration_reviewed_at: updates.registration_reviewed_at === undefined ? undefined : toIsoString(updates.registration_reviewed_at),
+    registration_reviewed_by: updates.registration_reviewed_by === undefined
+      ? undefined
+      : await resolveRemoteUserId(updates.registration_reviewed_by, null),
+    registration_review_notes: typeof updates.registration_review_notes === 'string'
+      ? updates.registration_review_notes.trim() || null
+      : undefined,
+    pin_qa_status: updates.pin_qa_status,
+    pin_qa_notes: typeof updates.pin_qa_notes === 'string' ? updates.pin_qa_notes.trim() || null : undefined,
+    sync_status: 'synced',
+  });
+
+  const { data, error } = await supabase
+    .from('households')
+    .update(payload)
+    .eq('id', householdId)
+    .select('*')
+    .single();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  await createAuditLogEntry({
+    user,
+    action: 'UPDATE',
+    entityType: 'household',
+    entityId: householdId,
+    changes: updates as Record<string, unknown>,
+  });
+
+  return data;
+}
+
+export async function saveLocationMasterListOnServer(
+  user: User,
+  input: Pick<LocationMasterList, 'barangay_id' | 'municipality' | 'barangay_name' | 'puroks'>,
+) {
+  if (user.role !== 'admin') {
+    throw new Error('Admin access is required to update the master list.');
+  }
+
+  const supabase = getSupabaseAdminClient();
+  const remoteActorId = await getRemoteActorId(user);
+  const payload = {
+    id: input.barangay_id,
+    barangay_id: input.barangay_id,
+    municipality: input.municipality.trim(),
+    barangay_name: input.barangay_name.trim(),
+    puroks: input.puroks,
+    updated_at: new Date().toISOString(),
+    updated_by: remoteActorId,
+  };
+
+  const { data, error } = await supabase
+    .from('location_master_lists')
+    .upsert(payload, {
+      onConflict: 'id',
+    })
+    .select('*')
+    .single();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  await createAuditLogEntry({
+    user,
+    action: 'UPSERT',
+    entityType: 'location_master',
+    entityId: input.barangay_id,
+    changes: {
+      municipality: input.municipality,
+      barangay_name: input.barangay_name,
+      puroks: input.puroks,
+    },
+  });
+
+  return data;
+}
+
+export async function createDistributionEventOnServer(
+  user: User,
+  event: Omit<DistributionEvent, 'syncStatus'> & { id: string },
+) {
+  if (!['admin', 'encoder'].includes(user.role)) {
+    throw new Error('You are not allowed to create distribution events.');
+  }
+
+  const supabase = getSupabaseAdminClient();
+  const remoteActorId = await getRemoteActorId(user);
+  const { data, error } = await supabase
+    .from('distribution_events')
+    .insert({
+      id: event.id,
+      event_name: event.event_name.trim(),
+      type: event.type,
+      incident_id: typeof event.incident_id === 'string' ? event.incident_id.trim() || null : null,
+      target_scope: event.target_scope,
+      target_group: event.target_group,
+      package_items: event.package_items,
+      location: event.location.trim(),
+      gps_lat: typeof event.gps_lat === 'number' ? event.gps_lat : null,
+      gps_lng: typeof event.gps_lng === 'number' ? event.gps_lng : null,
+      scheduled_date: event.scheduled_date,
+      status: event.status,
+      created_by: remoteActorId,
+      notes: typeof event.notes === 'string' ? event.notes.trim() || null : null,
+      sync_status: 'synced',
+    })
+    .select('*')
+    .single();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  await createAuditLogEntry({
+    user,
+    action: 'CREATE',
+    entityType: 'distribution',
+    entityId: event.id,
+    changes: {
+      event_name: event.event_name,
+      type: event.type,
+      location: event.location,
+      target_scope: event.target_scope,
+      target_group: event.target_group,
+      package_items: event.package_items,
+    },
+  });
+
+  return data;
+}
+
+export async function updateDistributionEventOnServer(
+  user: User,
+  eventId: string,
+  updates: Partial<DistributionEvent>,
+) {
+  if (!['admin', 'encoder'].includes(user.role)) {
+    throw new Error('You are not allowed to update distribution events.');
+  }
+
+  const supabase = getSupabaseAdminClient();
+  const payload = stripUndefined({
+    event_name: typeof updates.event_name === 'string' ? updates.event_name.trim() : undefined,
+    type: updates.type,
+    incident_id: typeof updates.incident_id === 'string' ? updates.incident_id.trim() || null : undefined,
+    target_scope: updates.target_scope,
+    target_group: updates.target_group,
+    package_items: Array.isArray(updates.package_items) ? updates.package_items : undefined,
+    location: typeof updates.location === 'string' ? updates.location.trim() : undefined,
+    gps_lat: typeof updates.gps_lat === 'number' ? updates.gps_lat : undefined,
+    gps_lng: typeof updates.gps_lng === 'number' ? updates.gps_lng : undefined,
+    scheduled_date: typeof updates.scheduled_date === 'string' ? updates.scheduled_date : undefined,
+    status: updates.status,
+    notes: typeof updates.notes === 'string' ? updates.notes.trim() || null : undefined,
+    sync_status: 'synced',
+  });
+
+  const { data, error } = await supabase
+    .from('distribution_events')
+    .update(payload)
+    .eq('id', eventId)
+    .select('*')
+    .single();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  await createAuditLogEntry({
+    user,
+    action: 'UPDATE',
+    entityType: 'distribution',
+    entityId: eventId,
+    changes: updates as Record<string, unknown>,
+  });
+
+  return data;
+}
+
+export async function updateInventoryItemOnServer(
+  user: User,
+  itemId: string,
+  updates: Partial<InventoryItem>,
+) {
+  if (!['admin', 'encoder'].includes(user.role)) {
+    throw new Error('You are not allowed to update inventory items.');
+  }
+
+  const supabase = getSupabaseAdminClient();
+  const payload = stripUndefined({
+    item_name: typeof updates.item_name === 'string' ? updates.item_name.trim() : undefined,
+    item_code: typeof updates.item_code === 'string' ? updates.item_code.trim() || null : undefined,
+    category: updates.category,
+    unit: updates.unit,
+    reorder_level: typeof updates.reorder_level === 'number' ? updates.reorder_level : undefined,
+    storage_location: typeof updates.storage_location === 'string' ? updates.storage_location.trim() || null : undefined,
+    expiration_date: typeof updates.expiration_date === 'string' ? updates.expiration_date.trim() || null : undefined,
+    notes: typeof updates.notes === 'string' ? updates.notes.trim() || null : undefined,
+    sync_status: 'synced',
+  });
+
+  const { data, error } = await supabase
+    .from('inventory_items')
+    .update(payload)
+    .eq('id', itemId)
+    .select('*')
+    .single();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  await createAuditLogEntry({
+    user,
+    action: 'UPDATE',
+    entityType: 'inventory',
+    entityId: itemId,
+    changes: updates as Record<string, unknown>,
+  });
+
+  return data;
+}
+
+export async function createPackageTemplateOnServer(
+  user: User,
+  template: Omit<PackageTemplate, 'syncStatus'> & { id: string },
+) {
+  if (!['admin', 'encoder'].includes(user.role)) {
+    throw new Error('You are not allowed to manage package templates.');
+  }
+
+  const supabase = getSupabaseAdminClient();
+  const { data, error } = await supabase
+    .from('package_templates')
+    .insert({
+      id: template.id,
+      name: template.name.trim(),
+      description: typeof template.description === 'string' ? template.description.trim() || null : null,
+      items: template.items,
+      created_at: template.createdAt instanceof Date ? template.createdAt.toISOString() : toIsoString(template.createdAt),
+      updated_at: template.updatedAt instanceof Date ? template.updatedAt.toISOString() : toIsoString(template.updatedAt),
+      sync_status: 'synced',
+    })
+    .select('*')
+    .single();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  await createAuditLogEntry({
+    user,
+    action: 'CREATE',
+    entityType: 'inventory',
+    entityId: template.id,
+    changes: {
+      template_name: template.name,
+      items_count: template.items.length,
+    },
+  });
+
+  return data;
+}
+
+export async function deletePackageTemplateOnServer(
+  user: User,
+  templateId: string,
+) {
+  if (!['admin', 'encoder'].includes(user.role)) {
+    throw new Error('You are not allowed to manage package templates.');
+  }
+
+  const supabase = getSupabaseAdminClient();
+  const { error } = await supabase
+    .from('package_templates')
+    .delete()
+    .eq('id', templateId);
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  await createAuditLogEntry({
+    user,
+    action: 'DELETE',
+    entityType: 'inventory',
+    entityId: templateId,
+    changes: { entity: 'package_template' },
+  });
+}
+
+export async function createIncidentOnServer(
+  user: User,
+  incident: Omit<Incident, 'syncStatus'> & { id: string },
+) {
+  if (!['admin', 'responder'].includes(user.role)) {
+    throw new Error('You are not allowed to create incidents.');
+  }
+
+  const supabase = getSupabaseAdminClient();
+  const remoteActorId = await getRemoteActorId(user);
+  const { data, error } = await supabase
+    .from('incidents')
+    .insert({
+      id: incident.id,
+      type: incident.type,
+      location: incident.location.trim(),
+      gps_lat: typeof incident.gps_lat === 'number' ? incident.gps_lat : null,
+      gps_lng: typeof incident.gps_lng === 'number' ? incident.gps_lng : null,
+      severity: incident.severity,
+      status: incident.status,
+      reported_by: remoteActorId,
+      reported_at: toIsoString(incident.reported_at) ?? new Date().toISOString(),
+      photo_url: typeof incident.photo_url === 'string' ? incident.photo_url.trim() || null : null,
+      description: incident.description.trim(),
+      sync_status: 'synced',
+    })
+    .select('*')
+    .single();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  await createAuditLogEntry({
+    user,
+    action: 'CREATE',
+    entityType: 'incident',
+    entityId: incident.id,
+    changes: {
+      type: incident.type,
+      severity: incident.severity,
+      location: incident.location,
+      gps_lat: incident.gps_lat,
+      gps_lng: incident.gps_lng,
+    },
+  });
+
+  return data;
+}
+
+export async function updateIncidentStatusOnServer(
+  user: User,
+  incidentId: string,
+  status: Incident['status'],
+) {
+  if (!['admin', 'responder'].includes(user.role)) {
+    throw new Error('You are not allowed to update incidents.');
+  }
+
+  const supabase = getSupabaseAdminClient();
+  const { data: existing, error: existingError } = await supabase
+    .from('incidents')
+    .select('id, status')
+    .eq('id', incidentId)
+    .limit(1);
+
+  if (existingError) {
+    throw new Error(existingError.message);
+  }
+
+  const current = existing?.[0];
+  if (!current) {
+    throw new Error(`Incident ${incidentId} not found`);
+  }
+
+  const { data, error } = await supabase
+    .from('incidents')
+    .update({
+      status,
+      sync_status: 'synced',
+    })
+    .eq('id', incidentId)
+    .select('*')
+    .single();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  await createAuditLogEntry({
+    user,
+    action: 'UPDATE',
+    entityType: 'incident',
+    entityId: incidentId,
+    changes: {
+      previous_status: current.status,
+      new_status: status,
     },
   });
 

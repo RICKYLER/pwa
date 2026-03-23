@@ -1,4 +1,3 @@
-import { createAuditLog } from '../auth';
 import { db, STORE_NAMES } from './indexeddb';
 import { runServerMutation } from '@/lib/mutations';
 import { bootstrapAllDataFromSupabase } from '@/lib/supabase/bootstrap';
@@ -150,25 +149,27 @@ export async function createDistributionEvent(
       ...data,
       id: generateId(),
       created_by: userId,
-      syncStatus: 'pending',
+      syncStatus: 'synced',
     });
 
-    await db.add(STORE_NAMES.distribution_events, event);
-
-    await createAuditLog('CREATE', 'distribution', event.id, {
-      event_name: data.event_name,
-      type: data.type,
-      location: data.location,
-      target_scope: event.target_scope,
-      target_group: event.target_group,
-      package_items: event.package_items.map((item) => ({
-        item_id: item.item_id,
-        quantity: item.quantity,
-        item_name: item.item_name,
-      })),
+    await runServerMutation({
+      action: 'create_distribution_event',
+      event: {
+        ...event,
+        event_name: event.event_name.trim(),
+        location: event.location.trim(),
+        notes: event.notes?.trim() || undefined,
+      },
     });
 
-    return event;
+    await bootstrapAllDataFromSupabase(true);
+
+    const createdEvent = await getDistributionEvent(event.id);
+    if (!createdEvent) {
+      throw new Error('Distribution event was created in Supabase, but it did not rehydrate locally.');
+    }
+
+    return createdEvent;
   } catch (error) {
     console.error('Error creating distribution event:', error);
     throw error;
@@ -183,23 +184,25 @@ export async function updateDistributionEvent(
   updates: Partial<DistributionEvent>,
 ): Promise<DistributionEvent> {
   try {
-    const existing = await getDistributionEvent(id);
-    if (!existing) {
-      throw new Error(`Distribution event ${id} not found`);
-    }
-
-    const updated = normalizeDistributionEvent({
-      ...existing,
-      ...updates,
-      id,
-      syncStatus: 'pending',
+    await runServerMutation({
+      action: 'update_distribution_event',
+      eventId: id,
+      updates: {
+        ...updates,
+        event_name: typeof updates.event_name === 'string' ? updates.event_name.trim() : updates.event_name,
+        location: typeof updates.location === 'string' ? updates.location.trim() : updates.location,
+        notes: typeof updates.notes === 'string' ? (updates.notes.trim() || null) : updates.notes,
+      },
     });
 
-    await db.put(STORE_NAMES.distribution_events, updated);
+    await bootstrapAllDataFromSupabase(true);
 
-    await createAuditLog('UPDATE', 'distribution', id, { changes: updates });
+    const updatedEvent = await getDistributionEvent(id);
+    if (!updatedEvent) {
+      throw new Error('Distribution event was updated in Supabase, but it did not rehydrate locally.');
+    }
 
-    return updated;
+    return updatedEvent;
   } catch (error) {
     console.error('Error updating distribution event:', error);
     throw error;
@@ -286,39 +289,35 @@ export async function recordDistribution(
       throw new Error('A resident is required for this distribution event');
     }
 
-    const existing = await getDistributionRecords(data.event_id);
-    const isDuplicate =
-      event.target_scope === 'household'
-        ? existing.some((record) => record.household_id === data.household_id)
-        : existing.some((record) => record.resident_id === data.resident_id);
+    const normalizedRequestedItems = normalizeDistributedItems(data.items_distributed);
+    const normalizedEventItems = normalizeDistributedItems(event.package_items);
 
-    if (isDuplicate) {
+    const requestSignature = JSON.stringify(
+      normalizedRequestedItems.map((item) => ({
+        item_id: item.item_id,
+        quantity: item.quantity,
+      })),
+    );
+    const eventSignature = JSON.stringify(
+      normalizedEventItems.map((item) => ({
+        item_id: item.item_id,
+        quantity: item.quantity,
+      })),
+    );
+
+    if (requestSignature && requestSignature !== eventSignature) {
       throw new Error(
-        event.target_scope === 'household'
-          ? 'This household already received from this distribution event'
-          : 'This resident already received from this distribution event',
+        'This app now records distributions from the event package itself. Update the event package items first, then release the package.',
       );
     }
 
-    const record = normalizeDistributionRecord({
-      ...data,
-      id: generateId(),
-      timestamp: new Date(),
-      syncStatus: 'pending',
-    });
-
-    await db.add(STORE_NAMES.distribution_records, record);
-
-    await createAuditLog('CREATE', 'distribution', record.id, {
+    return await releaseDistributionPackage({
       event_id: data.event_id,
       household_id: data.household_id,
       resident_id: data.resident_id,
-      beneficiary_name: data.beneficiary_name,
-      items_count: data.items_distributed.length,
-      units_count: countDistributedUnits(data.items_distributed),
+      received_by_name: data.received_by_name || data.beneficiary_name,
+      notes: data.notes,
     });
-
-    return record;
   } catch (error) {
     console.error('Error recording distribution:', error);
     throw error;
@@ -327,7 +326,7 @@ export async function recordDistribution(
 
 export async function releaseDistributionPackage(params: {
   event_id: string;
-  distributor_id: string;
+  distributor_id?: string;
   household_id?: string;
   resident_id?: string;
   received_by_name?: string;

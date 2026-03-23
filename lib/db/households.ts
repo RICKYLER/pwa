@@ -237,31 +237,49 @@ export async function createHouseholdBundle(
  */
 export async function updateHousehold(id: string, updates: Partial<Household>): Promise<Household> {
   try {
-    const existing = await getHousehold(id);
-    if (!existing) {
-      throw new Error(`Household ${id} not found`);
-    }
-
-    const updated: Household = normalizeHousehold({
-      ...existing,
-      ...updates,
-      id, // Don't allow ID change
-      createdAt: existing.createdAt, // Don't change creation time
-      updatedAt: new Date(),
-      syncStatus: 'pending',
+    await runServerMutation({
+      action: 'update_household',
+      householdId: id,
+      updates: {
+        ...updates,
+        head_name: typeof updates.head_name === 'string' ? updates.head_name.trim() : updates.head_name,
+        applicant_email:
+          typeof updates.applicant_email === 'string'
+            ? (updates.applicant_email.trim() || null)
+            : updates.applicant_email,
+        barangay_name:
+          typeof updates.barangay_name === 'string'
+            ? (updates.barangay_name.trim() || null)
+            : updates.barangay_name,
+        municipality:
+          typeof updates.municipality === 'string'
+            ? (updates.municipality.trim() || null)
+            : updates.municipality,
+        purok_sitio: typeof updates.purok_sitio === 'string' ? updates.purok_sitio.trim() : updates.purok_sitio,
+        street_address:
+          typeof updates.street_address === 'string'
+            ? updates.street_address.trim()
+            : updates.street_address,
+        landmark_directions:
+          typeof updates.landmark_directions === 'string'
+            ? (updates.landmark_directions.trim() || null)
+            : updates.landmark_directions,
+        contact_number:
+          typeof updates.contact_number === 'string'
+            ? (updates.contact_number.trim() || null)
+            : updates.contact_number,
+      },
     });
 
-    await db.put(STORE_NAMES.households, updated);
+    await bootstrapAllDataFromSupabase(true);
 
-    await createAuditLog(
-      'UPDATE',
-      'household',
-      id,
-      { changes: updates }
-    );
+    const updatedHousehold = await getHousehold(id);
+    if (!updatedHousehold) {
+      throw new Error('Household was updated in Supabase, but it did not rehydrate locally.');
+    }
 
     console.log('Household updated:', id);
-    return updated;
+    return updatedHousehold;
   } catch (error) {
     console.error('Error updating household:', error);
     throw error;

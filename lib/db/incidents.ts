@@ -1,6 +1,7 @@
 import { db, STORE_NAMES } from './indexeddb';
 import type { Incident, IncidentStatus } from './schema';
-import { createAuditLog } from '../auth';
+import { runServerMutation } from '@/lib/mutations';
+import { bootstrapAllDataFromSupabase } from '@/lib/supabase/bootstrap';
 import { DEFAULT_BARANGAY_CENTER } from '../map-pins';
 
 function generateId(): string {
@@ -34,26 +35,20 @@ function hasIncidentCoordinates(incident: Pick<Incident, 'gps_lat' | 'gps_lng'>)
     return typeof incident.gps_lat === 'number' && typeof incident.gps_lng === 'number';
 }
 
-async function backfillIncidentCoordinates(incidents: Incident[]): Promise<number> {
-    let updatedCount = 0;
-
-    for (const incident of incidents) {
-        if (hasIncidentCoordinates(incident)) continue;
-
-        const coords = resolveIncidentCoordinates(incident.location);
-        if (!coords) continue;
-
-        const updated: Incident = {
-            ...incident,
-            ...coords,
-            syncStatus: 'pending',
-        };
-
-        await db.put(STORE_NAMES.incidents, updated);
-        updatedCount += 1;
+function withResolvedIncidentCoordinates(incident: Incident): Incident {
+    if (hasIncidentCoordinates(incident)) {
+        return incident;
     }
 
-    return updatedCount;
+    const coords = resolveIncidentCoordinates(incident.location);
+    if (!coords) {
+        return incident;
+    }
+
+    return {
+        ...incident,
+        ...coords,
+    };
 }
 
 /**
@@ -63,7 +58,7 @@ export async function getIncidents(filters?: {
     status?: IncidentStatus;
 }): Promise<Incident[]> {
     try {
-        const all = await db.getAll<Incident>(STORE_NAMES.incidents);
+        const all = (await db.getAll<Incident>(STORE_NAMES.incidents)).map(withResolvedIncidentCoordinates);
         let result = all;
         if (filters?.status) result = result.filter(i => i.status === filters.status);
         return result.sort((a, b) => {
@@ -82,7 +77,8 @@ export async function getIncidents(filters?: {
  */
 export async function getIncident(id: string): Promise<Incident | undefined> {
     try {
-        return await db.get<Incident>(STORE_NAMES.incidents, id);
+        const incident = await db.get<Incident>(STORE_NAMES.incidents, id);
+        return incident ? withResolvedIncidentCoordinates(incident) : undefined;
     } catch (error) {
         console.error('Error fetching incident:', error);
         throw error;
@@ -99,18 +95,23 @@ export async function createIncident(
         const incident: Incident = {
             ...data,
             id: generateId(),
-            syncStatus: 'pending',
+            syncStatus: 'synced',
         };
-        await db.add(STORE_NAMES.incidents, incident);
-        await createAuditLog('CREATE', 'incident', incident.id, {
-            type: data.type,
-            severity: data.severity,
-            location: data.location,
-            gps_lat: data.gps_lat,
-            gps_lng: data.gps_lng,
+        await runServerMutation({
+            action: 'create_incident',
+            incident: {
+                ...incident,
+                location: incident.location.trim(),
+                description: incident.description.trim(),
+            },
         });
+        await bootstrapAllDataFromSupabase(true);
+        const createdIncident = await getIncident(incident.id);
+        if (!createdIncident) {
+            throw new Error('Incident was created in Supabase, but it did not rehydrate locally.');
+        }
         console.log('Incident created:', incident.id);
-        return incident;
+        return createdIncident;
     } catch (error) {
         console.error('Error creating incident:', error);
         throw error;
@@ -125,16 +126,18 @@ export async function updateIncidentStatus(
     status: IncidentStatus,
 ): Promise<Incident> {
     try {
-        const existing = await getIncident(id);
-        if (!existing) throw new Error(`Incident ${id} not found`);
-        const updated: Incident = { ...existing, status, syncStatus: 'pending' };
-        await db.put(STORE_NAMES.incidents, updated);
-        await createAuditLog('UPDATE', 'incident', id, {
-            previous_status: existing.status,
-            new_status: status,
+        await runServerMutation({
+            action: 'update_incident_status',
+            incidentId: id,
+            status,
         });
+        await bootstrapAllDataFromSupabase(true);
+        const updatedIncident = await getIncident(id);
+        if (!updatedIncident) {
+            throw new Error('Incident was updated in Supabase, but it did not rehydrate locally.');
+        }
         console.log('Incident status updated:', id, '->', status);
-        return updated;
+        return updatedIncident;
     } catch (error) {
         console.error('Error updating incident status:', error);
         throw error;
@@ -148,10 +151,6 @@ export async function seedDemoIncidents(reporterId: string): Promise<void> {
     try {
         const existing = await db.getAll<Incident>(STORE_NAMES.incidents);
         if (existing.length > 0) {
-            const backfilled = await backfillIncidentCoordinates(existing);
-            if (backfilled > 0) {
-                console.log('Incident coordinates backfilled:', backfilled);
-            }
             return; // already seeded
         }
 
