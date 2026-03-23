@@ -7,8 +7,9 @@ let adminClient: SupabaseClient | null = null;
 export function getSupabaseAdminConfig() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim();
   const key =
-    process.env.SUPABASE_SECRET_KEY?.trim()
-    || process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
+    // Auth admin APIs used by sync/user mirroring require the service-role JWT.
+    process.env.SUPABASE_SERVICE_ROLE_KEY?.trim()
+    || process.env.SUPABASE_SECRET_KEY?.trim();
 
   return {
     url,

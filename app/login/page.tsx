@@ -4,7 +4,6 @@ import { FormEvent, useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { getDefaultRouteForUser, login, restoreSession } from '@/lib/auth';
-import { db, seedInitialData } from '@/lib/db/indexeddb';
 import { Eye, EyeOff, ShieldCheck, Cpu, Lock } from 'lucide-react';
 
 const DEMO_USERS = [
@@ -38,8 +37,6 @@ export default function LoginPage() {
     setError('');
     setIsLoading(true);
     try {
-      await db.init();
-      await seedInitialData();
       const user = await login(email, password);
       router.push(getDefaultRouteForUser(user));
     } catch (err) {
@@ -78,9 +75,9 @@ export default function LoginPage() {
 
           <div className="grid grid-cols-2 gap-3 text-left">
             {[
-              { icon: Cpu, label: 'Offline-first', desc: 'Works without internet' },
+              { icon: Cpu, label: 'Realtime Sync', desc: 'Live Supabase updates' },
               { icon: ShieldCheck, label: 'Secure', desc: 'Role-based access control' },
-              { icon: Lock, label: 'Private', desc: 'Data stays on device' },
+              { icon: Lock, label: 'Cloud Data', desc: 'Stored in Supabase online' },
               { icon: ShieldCheck, label: 'Official', desc: 'MSWDO compliant reports' },
             ].map(f => (
               <div key={f.label} className="bg-white/5 border border-white/10 rounded-xl p-3 backdrop-blur-sm">

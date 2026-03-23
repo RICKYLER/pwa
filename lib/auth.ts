@@ -1,5 +1,6 @@
 import type { User, UserRole, AuthContext } from './db/schema';
 import { db, STORE_NAMES } from './db/indexeddb';
+import { getSupabaseBrowserClient, getSupabaseBrowserConfig } from './supabase/client';
 
 // Role-based permissions matrix
 const PERMISSIONS = {
@@ -92,6 +93,47 @@ function persistSessionSnapshot(user: User | null) {
   }
 }
 
+export async function ensureSupabaseBrowserSession(email: string, password: string): Promise<void> {
+  const supabase = getSupabaseBrowserClient();
+  if (!getSupabaseBrowserConfig().isConfigured || !supabase) {
+    return;
+  }
+
+  const normalizedEmail = email.trim().toLowerCase();
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+
+  if (session?.user?.email?.trim().toLowerCase() === normalizedEmail) {
+    return;
+  }
+
+  if (session) {
+    await supabase.auth.signOut();
+  }
+
+  const { error } = await supabase.auth.signInWithPassword({
+    email: normalizedEmail,
+    password,
+  });
+
+  if (error) {
+    throw new Error(`Supabase realtime sign-in failed: ${error.message}`);
+  }
+}
+
+async function clearSupabaseBrowserSession(): Promise<void> {
+  const supabase = getSupabaseBrowserClient();
+  if (!getSupabaseBrowserConfig().isConfigured || !supabase) {
+    return;
+  }
+
+  const { error } = await supabase.auth.signOut();
+  if (error) {
+    console.warn('Supabase browser sign-out failed:', error.message);
+  }
+}
+
 export function setAuthenticatedUser(user: User | null) {
   currentUser = normalizeUser(user);
   sessionSource = currentUser ? 'server' : null;
@@ -159,6 +201,17 @@ export async function login(email: string, password: string): Promise<User> {
     throw new Error('Login failed');
   }
 
+  try {
+    await ensureSupabaseBrowserSession(user.email, password);
+  } catch (error) {
+    await fetch('/api/auth/logout', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    }).catch(() => null);
+
+    throw error instanceof Error ? error : new Error('Supabase realtime sign-in failed');
+  }
+
   currentUser = user;
   sessionSource = 'server';
   persistSessionSnapshot(currentUser);
@@ -170,6 +223,7 @@ export async function login(email: string, password: string): Promise<User> {
  */
 export async function logout(): Promise<void> {
   try {
+    await clearSupabaseBrowserSession();
     await fetch('/api/auth/logout', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -187,14 +241,6 @@ export async function logout(): Promise<void> {
  * Return the current hydrated session user.
  */
 export function restoreSession(): User | null {
-  if (!currentUser) {
-    const snapshot = readStoredSessionSnapshot();
-    if (snapshot) {
-      currentUser = snapshot;
-      sessionSource = 'snapshot';
-    }
-  }
-
   return currentUser;
 }
 
@@ -202,15 +248,8 @@ export function restoreSession(): User | null {
  * Hydrate session state from the secure HTTP-only cookie.
  */
 export async function hydrateSession(force = false): Promise<User | null> {
-  const snapshot = !force ? restoreSession() : null;
-  const isOffline = typeof navigator !== 'undefined' && navigator.onLine === false;
-
   if (!force && currentUser && sessionSource === 'server') {
     return currentUser;
-  }
-
-  if (!force && snapshot && isOffline) {
-    return snapshot;
   }
 
   if (!force && hydratePromise) {
@@ -237,15 +276,9 @@ export async function hydrateSession(force = false): Promise<User | null> {
     })
     .catch((error) => {
       console.error('Failed to hydrate session:', error);
-
-      if (snapshot) {
-        currentUser = snapshot;
-        sessionSource = 'snapshot';
-        return snapshot;
-      }
-
       currentUser = null;
       sessionSource = null;
+      persistSessionSnapshot(null);
       return null;
     })
     .finally(() => {

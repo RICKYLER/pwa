@@ -8,8 +8,22 @@ import type {
   PackageTemplate,
 } from './schema';
 
+type InventorySnapshotPayload = {
+  inventory_items?: Array<Record<string, unknown>>;
+  inventory_movements?: Array<Record<string, unknown>>;
+  package_templates?: Array<Record<string, unknown>>;
+};
+
+let inventoryBootstrapPromise: Promise<void> | null = null;
+
 function generateId(prefix: string): string {
   return `${prefix}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+}
+
+function toOptionalString(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const trimmed = value.trim();
+  return trimmed || undefined;
 }
 
 function normalizeQuantity(value: unknown): number {
@@ -71,6 +85,156 @@ function normalizeInventoryMovement(movement: InventoryMovement): InventoryMovem
     notes: movement.notes?.trim() || undefined,
     timestamp: movement.timestamp instanceof Date ? movement.timestamp : new Date(movement.timestamp),
   };
+}
+
+function mapSnapshotInventoryItem(row: Record<string, unknown>): InventoryItem {
+  return normalizeInventoryItem({
+    id: String(row.id ?? ''),
+    item_name: String(row.item_name ?? ''),
+    item_code: toOptionalString(row.item_code),
+    category: String(row.category ?? 'other') as InventoryItem['category'],
+    quantity_available: normalizeQuantity(row.quantity_available),
+    unit: String(row.unit ?? 'pcs') as InventoryItem['unit'],
+    reorder_level: normalizeQuantity(row.reorder_level ?? 10),
+    storage_location: toOptionalString(row.storage_location),
+    expiration_date: toOptionalString(row.expiration_date),
+    notes: toOptionalString(row.notes),
+    syncStatus: 'synced',
+  });
+}
+
+function mapSnapshotInventoryMovement(row: Record<string, unknown>): InventoryMovement {
+  return normalizeInventoryMovement({
+    id: String(row.id ?? ''),
+    item_id: String(row.item_id ?? ''),
+    item_name: String(row.item_name ?? ''),
+    type: String(row.type ?? 'stock_in') as InventoryMovement['type'],
+    quantity: normalizeQuantity(row.quantity),
+    previous_quantity: normalizeQuantity(row.previous_quantity),
+    new_quantity: normalizeQuantity(row.new_quantity),
+    unit: String(row.unit ?? 'pcs') as InventoryItem['unit'],
+    performed_by: toOptionalString(row.performed_by),
+    performed_by_name: toOptionalString(row.performed_by_name),
+    reference_id: toOptionalString(row.reference_id),
+    reference_type: toOptionalString(row.reference_type) as InventoryMovement['reference_type'],
+    notes: toOptionalString(row.notes),
+    timestamp: row.timestamp instanceof Date ? row.timestamp : new Date(String(row.timestamp ?? '')),
+    syncStatus: 'synced',
+  });
+}
+
+function mapSnapshotPackageTemplate(row: Record<string, unknown>): PackageTemplate {
+  return normalizePackageTemplate({
+    id: String(row.id ?? ''),
+    name: String(row.name ?? ''),
+    description: toOptionalString(row.description),
+    items: normalizeDistributedItems(
+      Array.isArray(row.items) ? (row.items as DistributedItem[]) : [],
+    ),
+    createdAt: row.created_at instanceof Date ? row.created_at : new Date(String(row.created_at ?? '')),
+    updatedAt: row.updated_at instanceof Date ? row.updated_at : new Date(String(row.updated_at ?? '')),
+    syncStatus: 'synced',
+  });
+}
+
+async function hydrateSyncedRecord<T extends { id: string; syncStatus?: string }>(
+  storeName: string,
+  record: T,
+) {
+  if (!record.id) {
+    return;
+  }
+
+  const existing = await db.get<T>(storeName, record.id).catch(() => undefined);
+  if (existing?.syncStatus === 'pending') {
+    return;
+  }
+
+  await db.put(storeName, record);
+}
+
+export async function bootstrapInventoryFromSupabase(force = false): Promise<void> {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+    return;
+  }
+
+  if (!force && inventoryBootstrapPromise) {
+    return inventoryBootstrapPromise;
+  }
+
+  inventoryBootstrapPromise = (async () => {
+    let shouldCacheResult = false;
+
+    try {
+      const response = await fetch('/api/inventory/snapshot', {
+        cache: 'no-store',
+        credentials: 'same-origin',
+        headers: {
+          Accept: 'application/json',
+        },
+      }).catch(() => null);
+
+      if (!response) {
+        return;
+      }
+
+      if (!response.ok) {
+        if (response.status === 401 || response.status === 403 || response.status === 503) {
+          return;
+        }
+
+        throw new Error(`Inventory snapshot failed with status ${response.status}`);
+      }
+
+      const payload = await response.json().catch(() => null) as InventorySnapshotPayload | null;
+      if (!payload) {
+        return;
+      }
+
+      await db.init();
+
+      await Promise.all(
+        (payload.inventory_items ?? [])
+          .filter((row): row is Record<string, unknown> => Boolean(row && typeof row === 'object'))
+          .map((row) => hydrateSyncedRecord(
+            STORE_NAMES.inventory_items,
+            mapSnapshotInventoryItem(row),
+          )),
+      );
+
+      await Promise.all(
+        (payload.inventory_movements ?? [])
+          .filter((row): row is Record<string, unknown> => Boolean(row && typeof row === 'object'))
+          .map((row) => hydrateSyncedRecord(
+            STORE_NAMES.inventory_movements,
+            mapSnapshotInventoryMovement(row),
+          )),
+      );
+
+      await Promise.all(
+        (payload.package_templates ?? [])
+          .filter((row): row is Record<string, unknown> => Boolean(row && typeof row === 'object'))
+          .map((row) => hydrateSyncedRecord(
+            STORE_NAMES.package_templates,
+            mapSnapshotPackageTemplate(row),
+          )),
+      );
+
+      shouldCacheResult = true;
+    } catch (error) {
+      console.warn('Inventory snapshot bootstrap failed:', error);
+    } finally {
+      if (!shouldCacheResult) {
+        inventoryBootstrapPromise = null;
+      }
+    }
+  })();
+
+  return inventoryBootstrapPromise;
 }
 
 function isExpiringSoon(item: InventoryItem, days = 30): boolean {

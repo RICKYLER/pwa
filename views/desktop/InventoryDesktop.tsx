@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   AlertTriangle,
@@ -23,6 +23,7 @@ import { getCurrentUser, hasPermission } from '@/lib/auth';
 import {
   addStock,
   adjustInventoryCount,
+  bootstrapInventoryFromSupabase,
   createInventoryItem,
   createPackageTemplate,
   deleteInventoryItem,
@@ -104,6 +105,7 @@ const MOVEMENT_LABELS: Record<
 
 type StockFilter = 'all' | 'low' | 'out' | 'expiring';
 type TransactionMode = 'add' | 'adjust';
+type MovementScope = 'all' | 'selected';
 
 export default function InventoryDesktop() {
   const router = useRouter();
@@ -128,6 +130,7 @@ export default function InventoryDesktop() {
   const [showForm, setShowForm] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
+  const [movementScope, setMovementScope] = useState<MovementScope>('all');
   const [transactionItem, setTransactionItem] = useState<InventoryItem | null>(null);
   const [transactionMode, setTransactionMode] = useState<TransactionMode>('add');
   const [transactionQuantity, setTransactionQuantity] = useState('1');
@@ -179,17 +182,19 @@ export default function InventoryDesktop() {
   }, [user, router]);
 
   useEffect(() => {
-    if (!selectedItemId) {
-      void loadMovements();
+    if (movementScope === 'selected' && selectedItemId) {
+      void loadMovements(selectedItemId, 'selected');
       return;
     }
 
-    void loadMovements(selectedItemId);
-  }, [selectedItemId]);
+    void loadMovements(undefined, 'all');
+  }, [movementScope, selectedItemId]);
 
   async function load(itemIdForMovements?: string) {
     setIsLoading(true);
     try {
+      await bootstrapInventoryFromSupabase();
+
       const [inv, ls, out, exp, stats, templateList] = await Promise.all([
         getInventoryItems(),
         getLowStockItems(),
@@ -210,19 +215,33 @@ export default function InventoryDesktop() {
         setTemplateForm((current) => ({ ...current, selectedItemId: inv[0].id }));
       }
 
+      const requestedItemId =
+        itemIdForMovements && inv.some((item) => item.id === itemIdForMovements)
+          ? itemIdForMovements
+          : null;
+      const persistedSelectedItemId =
+        selectedItemId && inv.some((item) => item.id === selectedItemId)
+          ? selectedItemId
+          : null;
       const nextSelectedItemId =
-        itemIdForMovements || selectedItemId || (inv.length > 0 ? inv[0].id : null);
+        requestedItemId || persistedSelectedItemId || (inv.length > 0 ? inv[0].id : null);
       setSelectedItemId(nextSelectedItemId);
-      await loadMovements(nextSelectedItemId || undefined);
+
+      const nextMovementScope =
+        movementScope === 'selected' && !nextSelectedItemId ? 'all' : movementScope;
+      await loadMovements(
+        nextMovementScope === 'selected' ? nextSelectedItemId || undefined : undefined,
+        nextMovementScope,
+      );
     } finally {
       setIsLoading(false);
     }
   }
 
-  async function loadMovements(itemId?: string) {
+  async function loadMovements(itemId?: string, scope: MovementScope = movementScope) {
     const recentMovements = await getInventoryMovements({
-      item_id: itemId,
-      limit: itemId ? 16 : 12,
+      item_id: scope === 'selected' ? itemId : undefined,
+      limit: scope === 'selected' ? 16 : 24,
     });
     setMovements(recentMovements);
   }
@@ -1012,9 +1031,43 @@ export default function InventoryDesktop() {
 	                ) : null}
 
                 <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <p className="text-sm font-bold text-slate-800">Stock Movement History</p>
-                    <span className="text-xs text-slate-400">{movements.length} recent</span>
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-bold text-slate-800">Stock Movement History</p>
+                      <p className="mt-0.5 text-[11px] text-slate-400">
+                        {movementScope === 'all'
+                          ? 'Showing all recent inventory transactions.'
+                          : 'Showing the selected item only.'}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <div className="inline-flex rounded-full bg-slate-100 p-1">
+                        <button
+                          type="button"
+                          onClick={() => setMovementScope('all')}
+                          className={`rounded-full px-2.5 py-1 text-[11px] font-semibold transition ${
+                            movementScope === 'all'
+                              ? 'bg-white text-slate-900 shadow-sm'
+                              : 'text-slate-500 hover:text-slate-700'
+                          }`}
+                        >
+                          All Items
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setMovementScope('selected')}
+                          disabled={!selectedItem}
+                          className={`rounded-full px-2.5 py-1 text-[11px] font-semibold transition ${
+                            movementScope === 'selected'
+                              ? 'bg-white text-slate-900 shadow-sm'
+                              : 'text-slate-500 hover:text-slate-700'
+                          } disabled:cursor-not-allowed disabled:opacity-50`}
+                        >
+                          Selected
+                        </button>
+                      </div>
+                      <span className="text-xs text-slate-400">{movements.length} recent</span>
+                    </div>
                   </div>
 
                   {movements.length > 0 ? (
@@ -1038,6 +1091,11 @@ export default function InventoryDesktop() {
                                 <p className="mt-2 text-sm font-semibold text-slate-900">
                                   {movement.quantity} {movement.unit}
                                 </p>
+                                {movementScope === 'all' ? (
+                                  <p className="mt-1 text-xs font-semibold text-slate-700">
+                                    {movement.item_name}
+                                  </p>
+                                ) : null}
                                 <p className="mt-0.5 text-[11px] text-slate-500">
                                   {movement.previous_quantity} to {movement.new_quantity} {movement.unit}
                                 </p>
@@ -1061,7 +1119,9 @@ export default function InventoryDesktop() {
                     </div>
                   ) : (
                     <div className="rounded-2xl border border-dashed border-slate-300 px-4 py-8 text-center text-sm text-slate-400">
-                      No movement history yet.
+                      {movementScope === 'selected'
+                        ? 'No movement history yet for this item.'
+                        : 'No transaction history found yet.'}
                     </div>
                   )}
                 </div>

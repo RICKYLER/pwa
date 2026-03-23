@@ -8,7 +8,7 @@ import './globals.css'
 
 export const metadata: Metadata = {
   title: 'MSWDO Census PWA',
-  description: 'Municipal household census management system with offline-first support',
+  description: 'Municipal household census management system with live Supabase realtime sync',
   generator: 'v0.app',
   applicationName: 'MSWDO Census',
   appleWebApp: {

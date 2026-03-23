@@ -4,8 +4,7 @@ import { FormEvent, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Lock, ShieldCheck, CheckCircle2, AlertTriangle } from 'lucide-react';
-import { getDefaultRouteForUser, setAuthenticatedUser } from '@/lib/auth';
-import { db, seedInitialData } from '@/lib/db/indexeddb';
+import { ensureSupabaseBrowserSession, getDefaultRouteForUser, setAuthenticatedUser } from '@/lib/auth';
 
 interface SetupState {
   name: string;
@@ -70,6 +69,7 @@ export default function SetupPasswordPage() {
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError('');
+    let sessionStarted = false;
 
     if (!token) {
       setError('This password setup link is missing or invalid.');
@@ -102,11 +102,18 @@ export default function SetupPasswordPage() {
         throw new Error(payload.error || 'Unable to finish password setup.');
       }
 
+      sessionStarted = true;
+      await ensureSupabaseBrowserSession(payload.user.email, password);
       setAuthenticatedUser(payload.user);
-      await db.init();
-      await seedInitialData();
       router.push(getDefaultRouteForUser(payload.user));
     } catch (err) {
+      if (sessionStarted) {
+        await fetch('/api/auth/logout', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+        }).catch(() => null);
+      }
+
       setError(err instanceof Error ? err.message : 'Unable to finish password setup.');
     } finally {
       setIsSubmitting(false);

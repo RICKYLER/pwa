@@ -2,7 +2,7 @@
   "name": "MSWDO Household Census PWA",
   "short_name": "MSWDO Census",
   "id": "/",
-  "description": "Municipal household census management system with offline-first support for field staff",
+  "description": "Municipal household census management system with live Supabase realtime sync",
   "start_url": "/",
   "display_override": ["window-controls-overlay", "standalone"],
   "display": "standalone",

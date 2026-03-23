@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { createSessionToken, AUTH_SESSION_COOKIE, getSessionMaxAgeSeconds } from '@/lib/server/auth-session';
 import { authenticateUser } from '@/lib/server/auth-store';
+import { mirrorAppUserToSupabase } from '@/lib/server/supabase-user-mirror';
 
 export const runtime = 'nodejs';
 
@@ -38,6 +39,22 @@ export async function POST(request: NextRequest) {
   }
 
   const { user } = result;
+
+  try {
+    await mirrorAppUserToSupabase(user, {
+      password: payload.password,
+      emailConfirmed: Boolean(user.email_verified_at || !user.email_verification_required),
+    });
+  } catch (error) {
+    return NextResponse.json(
+      {
+        error: error instanceof Error
+          ? `Supabase realtime login setup failed: ${error.message}`
+          : 'Supabase realtime login setup failed.',
+      },
+      { status: 503 },
+    );
+  }
 
   const sessionToken = createSessionToken({
     userId: user.id,

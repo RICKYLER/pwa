@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect } from 'react';
-import type { RealtimeChannel, RealtimePostgresChangesPayload } from '@supabase/supabase-js';
+import type { RealtimeChannel, RealtimePostgresChangesPayload, Session } from '@supabase/supabase-js';
 import { db, STORE_NAMES } from '@/lib/db/indexeddb';
 import { getSupabaseBrowserClient, getSupabaseBrowserConfig } from '@/lib/supabase/client';
 
@@ -129,6 +129,7 @@ async function hydrateTable(tableName: string, tableConfig: TableConfig) {
   }
 
   if (!Array.isArray(data) || data.length === 0) {
+    notifyDataChanged(tableName, 'hydrate');
     return 0;
   }
 
@@ -172,26 +173,58 @@ export default function SupabaseRealtimeBridge() {
     const supabaseClient = supabase;
     let cancelled = false;
     let channel: RealtimeChannel | null = null;
+    let activeRunId = 0;
 
-    async function start() {
+    async function clearRealtimeStores() {
+      await Promise.all(TABLE_CONFIGS.map((tableConfig) => db.clear(tableConfig.storeName)));
+    }
+
+    async function disconnectChannel() {
+      if (!channel) {
+        return;
+      }
+
+      const currentChannel = channel;
+      channel = null;
+      await supabaseClient.removeChannel(currentChannel);
+    }
+
+    async function start(sessionOverride?: Session | null) {
+      const runId = ++activeRunId;
+      const session =
+        sessionOverride === undefined
+          ? (await supabaseClient.auth.getSession()).data.session
+          : sessionOverride;
+
+      if (cancelled || runId !== activeRunId) return;
+
+      if (!session) {
+        await disconnectChannel();
+        await clearRealtimeStores();
+        return;
+      }
+
+      await disconnectChannel();
       await db.init();
+      await clearRealtimeStores();
+
       let visibleRows = 0;
 
       for (const tableConfig of TABLE_CONFIGS) {
-        if (cancelled) return;
+        if (cancelled || runId !== activeRunId) return;
         const hydratedRowCount = await hydrateTable(tableConfig.table, tableConfig);
         if (typeof hydratedRowCount === 'number') {
           visibleRows += hydratedRowCount;
         }
       }
 
-      if (!cancelled && visibleRows === 0) {
+      if (!cancelled && runId === activeRunId && visibleRows === 0) {
         console.warn(
           '[Supabase Realtime] Connected, but no readable rows were returned. If you expected data here, check your table RLS policies or sign in with Supabase auth.',
         );
       }
 
-      if (cancelled) return;
+      if (cancelled || runId !== activeRunId) return;
 
       channel = supabaseClient.channel('mswdo-db-realtime');
 
@@ -219,13 +252,23 @@ export default function SupabaseRealtimeBridge() {
       });
     }
 
+    const {
+      data: { subscription },
+    } = supabaseClient.auth.onAuthStateChange((_event, session) => {
+      if (cancelled) {
+        return;
+      }
+
+      void start(session);
+    });
+
     void start();
 
     return () => {
       cancelled = true;
-      if (channel) {
-        void supabaseClient.removeChannel(channel);
-      }
+      activeRunId += 1;
+      subscription.unsubscribe();
+      void disconnectChannel();
     };
   }, []);
 

@@ -46,6 +46,20 @@ export class IndexedDBManager {
   private db: IDBDatabase | null = null;
   private initPromise: Promise<IDBDatabase> | null = null;
 
+  private assertOnlineWriteAllowed(storeName: string) {
+    if (typeof navigator === 'undefined') {
+      return;
+    }
+
+    if (storeName === STORE_NAMES.sync_queue || !SYNC_TRACKED_STORES.has(storeName)) {
+      return;
+    }
+
+    if (navigator.onLine === false) {
+      throw new Error('This app is now online-only. Reconnect to the internet and try again.');
+    }
+  }
+
   private shouldQueueSyncMutation(storeName: string, data?: Record<string, any>) {
     return (
       storeName !== STORE_NAMES.sync_queue &&
@@ -152,6 +166,7 @@ export class IndexedDBManager {
   }
 
   async add<T extends Record<string, any>>(storeName: string, data: T): Promise<T> {
+    this.assertOnlineWriteAllowed(storeName);
     const db = await this.init();
     return new Promise((resolve, reject) => {
       const tx = db.transaction(storeName, 'readwrite');
@@ -171,6 +186,7 @@ export class IndexedDBManager {
   }
 
   async put<T extends Record<string, any>>(storeName: string, data: T): Promise<T> {
+    this.assertOnlineWriteAllowed(storeName);
     const db = await this.init();
     return new Promise((resolve, reject) => {
       const tx = db.transaction(storeName, 'readwrite');
@@ -214,6 +230,7 @@ export class IndexedDBManager {
   }
 
   async delete(storeName: string, key: string): Promise<void> {
+    this.assertOnlineWriteAllowed(storeName);
     const db = await this.init();
     return new Promise((resolve, reject) => {
       const tx = db.transaction(storeName, 'readwrite');

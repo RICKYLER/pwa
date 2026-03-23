@@ -3,7 +3,12 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { getCurrentUser, hasPermission } from '@/lib/auth';
-import { getInventoryItems, createInventoryItem, getLowStockItems } from '@/lib/db/inventory';
+import {
+  bootstrapInventoryFromSupabase,
+  getInventoryItems,
+  createInventoryItem,
+  getLowStockItems,
+} from '@/lib/db/inventory';
 import { InventoryItem } from '@/lib/db/schema';
 import { Plus, AlertTriangle, Package, X, Search } from 'lucide-react';
 
@@ -35,6 +40,7 @@ export default function InventoryMobile() {
 
     async function load() {
         setIsLoading(true);
+        await bootstrapInventoryFromSupabase();
         const [inv, ls] = await Promise.all([getInventoryItems(), getLowStockItems()]);
         setItems(inv); setLowStock(ls); setIsLoading(false);
     }

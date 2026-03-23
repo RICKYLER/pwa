@@ -12,14 +12,13 @@ export default function OfflinePage() {
             <CloudOff className="h-8 w-8" />
           </div>
           <p className="mt-8 text-xs font-semibold uppercase tracking-[0.32em] text-blue-200">
-            Offline-Ready Workspace
+            Connection Required
           </p>
           <h1 className="mt-4 text-4xl font-bold leading-tight">
-            The device is offline, but your cached MSWDO workspace is still available.
+            This workspace now needs a live internet connection.
           </h1>
           <p className="mt-4 max-w-xl text-base text-slate-300">
-            Previously visited pages and local census data remain on the device. New field changes stay queued locally and
-            will back up automatically when connectivity returns.
+            The app has been switched to online-only Supabase realtime mode. Reconnect to continue working with live data.
           </p>
         </section>
 
@@ -29,9 +28,9 @@ export default function OfflinePage() {
           </div>
           <h2 className="mt-6 text-2xl font-bold text-slate-900">What you can do now</h2>
           <ul className="mt-4 space-y-3 text-sm text-slate-600">
-            <li>Open cached routes such as the dashboard, households, reports, and vulnerability views.</li>
-            <li>Continue encoding local changes that use IndexedDB on the device.</li>
-            <li>Return online later to let the background worker back up pending field updates.</li>
+            <li>Reconnect your device to the internet.</li>
+            <li>Return to the dashboard once the live Supabase connection is restored.</li>
+            <li>Refresh the page if this screen stays open after your connection comes back.</li>
           </ul>
 
           <div className="mt-8 flex flex-wrap gap-3">
