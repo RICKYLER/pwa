@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { completeEmailVerification } from '@/lib/server/auth-store';
 import { writeServerAuditLog } from '@/lib/server/supabase-audit';
-import { mirrorAppUserToSupabase } from '@/lib/server/supabase-user-mirror';
 
 export const runtime = 'nodejs';
 
@@ -26,14 +25,11 @@ export async function POST(request: NextRequest) {
   try {
     const result = await completeEmailVerification(payload.token);
     try {
-      const remoteUserId = await mirrorAppUserToSupabase(result.user, {
-        emailConfirmed: true,
-      });
       await writeServerAuditLog({
         actor: result.user,
         action: 'VERIFY_EMAIL',
         entity_type: 'user',
-        entity_id: remoteUserId ?? result.user.id,
+        entity_id: result.user.id,
         changes: {
           alreadyVerified: result.alreadyVerified,
         },

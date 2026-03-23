@@ -3,7 +3,6 @@ import { z } from 'zod';
 import { requireAdminUser } from '@/lib/server/auth-guards';
 import { resolveAppUrl } from '@/lib/server/app-url';
 import { writeServerAuditLog } from '@/lib/server/supabase-audit';
-import { mirrorAppUserToSupabase } from '@/lib/server/supabase-user-mirror';
 import {
   createPasswordSetupToken,
   createUserAccount,
@@ -56,17 +55,12 @@ export async function POST(request: NextRequest) {
 
   try {
     const user = await createUserAccount(payload);
-    let remoteUserId: string | null = null;
-
     try {
-      remoteUserId = await mirrorAppUserToSupabase(user, {
-        emailConfirmed: true,
-      });
       await writeServerAuditLog({
         actor: guard.user,
         action: 'CREATE',
         entity_type: 'user',
-        entity_id: remoteUserId ?? user.id,
+        entity_id: user.id,
         changes: {
           created_user_email: user.email,
           created_user_role: user.role,
@@ -99,7 +93,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(
       {
         user,
-        remoteUserId,
+        remoteUserId: user.id,
         inviteEmailSent,
         inviteEmailError,
         setupLink: inviteEmailSent ? null : setupLink,

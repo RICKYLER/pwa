@@ -1,7 +1,7 @@
 import { db, STORE_NAMES } from './indexeddb';
 import type { LocationMasterList } from './schema';
 import { runServerMutation } from '@/lib/mutations';
-import { bootstrapAllDataFromSupabase } from '@/lib/supabase/bootstrap';
+import { bootstrapCurrentPathData } from '@/lib/supabase/route-bootstrap';
 import {
   normalizeBarangayName,
   normalizeMunicipalityName,
@@ -62,7 +62,7 @@ export async function saveLocationMasterList(input: {
     },
   });
 
-  await bootstrapAllDataFromSupabase(true);
+  await bootstrapCurrentPathData(true);
 
   const updatedMasterList = await getLocationMasterList(input.barangay_id);
   if (!updatedMasterList) {

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   AlertTriangle,
@@ -174,26 +174,11 @@ export default function InventoryDesktop() {
     notes: '',
   });
 
-  useEffect(() => {
-    if (!user || !hasPermission('view_reports')) {
-      router.push('/dashboard');
-      return;
+  const load = useCallback(async (itemIdForMovements?: string, background = false) => {
+    if (!background) {
+      setIsLoading(true);
     }
 
-    void load();
-  }, [user, router]);
-
-  useEffect(() => {
-    if (movementScope === 'selected' && selectedItemId) {
-      void loadMovements(selectedItemId, 'selected');
-      return;
-    }
-
-    void loadMovements(undefined, 'all');
-  }, [movementScope, selectedItemId]);
-
-  async function load(itemIdForMovements?: string) {
-    setIsLoading(true);
     try {
       await bootstrapInventoryFromSupabase();
 
@@ -236,9 +221,29 @@ export default function InventoryDesktop() {
         nextMovementScope,
       );
     } finally {
-      setIsLoading(false);
+      if (!background) {
+        setIsLoading(false);
+      }
     }
-  }
+  }, [movementScope, selectedItemId, templateForm.selectedItemId]);
+
+  useEffect(() => {
+    if (!user || !hasPermission('view_reports')) {
+      router.push('/dashboard');
+      return;
+    }
+
+    void load();
+  }, [user, router, load]);
+
+  useEffect(() => {
+    if (movementScope === 'selected' && selectedItemId) {
+      void loadMovements(selectedItemId, 'selected');
+      return;
+    }
+
+    void loadMovements(undefined, 'all');
+  }, [movementScope, selectedItemId]);
 
   async function loadMovements(itemId?: string, scope: MovementScope = movementScope) {
     const recentMovements = await getInventoryMovements({
@@ -247,6 +252,22 @@ export default function InventoryDesktop() {
     });
     setMovements(recentMovements);
   }
+
+  useEffect(() => {
+    function handleDataChanged(event: WindowEventMap['mswdo-data-changed']) {
+      if (!['inventory_items', 'inventory_movements', 'package_templates'].includes(event.detail.table)) {
+        return;
+      }
+
+      void load(selectedItemId || undefined, true);
+    }
+
+    window.addEventListener('mswdo-data-changed', handleDataChanged);
+
+    return () => {
+      window.removeEventListener('mswdo-data-changed', handleDataChanged);
+    };
+  }, [load, selectedItemId]);
 
   async function handleAdd(event: React.FormEvent) {
     event.preventDefault();

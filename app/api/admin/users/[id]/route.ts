@@ -3,7 +3,6 @@ import { z } from 'zod';
 import { requireAdminUser } from '@/lib/server/auth-guards';
 import { deleteUserAccount, getStoredUserById, updateUserAccount } from '@/lib/server/auth-store';
 import { writeServerAuditLog } from '@/lib/server/supabase-audit';
-import { deleteMirroredUserFromSupabase, mirrorAppUserToSupabase } from '@/lib/server/supabase-user-mirror';
 
 export const runtime = 'nodejs';
 
@@ -38,14 +37,11 @@ export async function PATCH(
   try {
     const user = await updateUserAccount(id, payload);
     try {
-      const remoteUserId = await mirrorAppUserToSupabase(user, {
-        emailConfirmed: Boolean(user.email_verified_at || !user.email_verification_required),
-      });
       await writeServerAuditLog({
         actor: guard.user,
         action: 'UPDATE',
         entity_type: 'user',
-        entity_id: remoteUserId ?? user.id,
+        entity_id: user.id,
         changes: {
           ...payload,
           source: 'admin_update_user',
@@ -87,7 +83,6 @@ export async function DELETE(
 
     if (existingUser?.email) {
       try {
-        await deleteMirroredUserFromSupabase(existingUser.email);
         await writeServerAuditLog({
           actor: guard.user,
           action: 'DELETE',

@@ -1,0 +1,588 @@
+import 'server-only';
+
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
+import { createClient } from '@supabase/supabase-js';
+import type { User, UserRole } from '@/lib/db/schema';
+import type { AuthenticationResult, StoredUserRecord } from '@/lib/server/local-auth-store';
+import { getSupabaseAdminClient, getSupabaseAdminConfig } from '@/lib/server/supabase-admin';
+
+const PASSWORD_TOKEN_TTL_MS = 1000 * 60 * 60 * 24 * 3;
+const EMAIL_VERIFICATION_TOKEN_TTL_MS = 1000 * 60 * 60 * 24 * 3;
+
+type ProfileRow = {
+  id: string;
+  email: string;
+  name: string;
+  role: UserRole;
+  barangay_id: string;
+  must_change_password: boolean;
+  email_verification_required: boolean;
+  email_verified_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+type TokenRow = {
+  id: string;
+  user_id: string;
+  token_hash: string;
+  expires_at: string;
+  created_at: string;
+  used_at: string | null;
+};
+
+function nowIso() {
+  return new Date().toISOString();
+}
+
+function normalizeEmail(email: string) {
+  return email.trim().toLowerCase();
+}
+
+function createToken() {
+  return randomBytes(32).toString('base64url');
+}
+
+function hashToken(token: string) {
+  return createHash('sha256').update(token).digest('hex');
+}
+
+function getSupabasePublicAuthConfig() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim();
+  const key =
+    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY?.trim()
+    || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim();
+
+  return {
+    url,
+    key,
+    isConfigured: Boolean(url && key),
+  };
+}
+
+function getSupabasePublicAuthClient() {
+  const { url, key, isConfigured } = getSupabasePublicAuthConfig();
+  if (!isConfigured || !url || !key) {
+    throw new Error(
+      'Supabase public auth client is not configured. Set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY.',
+    );
+  }
+
+  return createClient(url, key, {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+      detectSessionInUrl: false,
+    },
+  });
+}
+
+export function isSupabaseAuthStoreEnabled() {
+  return getSupabaseAdminConfig().isConfigured;
+}
+
+function mapProfileRowToStoredUserRecord(row: ProfileRow): StoredUserRecord {
+  return {
+    id: row.id,
+    email: row.email,
+    name: row.name,
+    role: row.role,
+    barangay_id: row.barangay_id,
+    must_change_password: Boolean(row.must_change_password),
+    email_verification_required: Boolean(row.email_verification_required),
+    email_verified_at: row.email_verified_at ?? undefined,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function toPublicUser(record: StoredUserRecord): User {
+  return {
+    id: record.id,
+    email: record.email,
+    name: record.name,
+    role: record.role,
+    barangay_id: record.barangay_id,
+    must_change_password: record.must_change_password,
+    email_verification_required: record.email_verification_required,
+    email_verified_at: record.email_verified_at ? new Date(record.email_verified_at) : undefined,
+    createdAt: new Date(record.createdAt),
+    updatedAt: new Date(record.updatedAt),
+  };
+}
+
+async function getProfileById(userId: string): Promise<StoredUserRecord | null> {
+  const supabase = getSupabaseAdminClient();
+  const { data, error } = await supabase
+    .from('users')
+    .select('id, email, name, role, barangay_id, must_change_password, email_verification_required, email_verified_at, created_at, updated_at')
+    .eq('id', userId)
+    .maybeSingle<ProfileRow>();
+
+  if (error) {
+    throw new Error(`Failed to load Supabase user profile: ${error.message}`);
+  }
+
+  return data ? mapProfileRowToStoredUserRecord(data) : null;
+}
+
+async function getProfileByEmail(email: string): Promise<StoredUserRecord | null> {
+  const supabase = getSupabaseAdminClient();
+  const { data, error } = await supabase
+    .from('users')
+    .select('id, email, name, role, barangay_id, must_change_password, email_verification_required, email_verified_at, created_at, updated_at')
+    .eq('email', normalizeEmail(email))
+    .maybeSingle<ProfileRow>();
+
+  if (error) {
+    throw new Error(`Failed to load Supabase user profile by email: ${error.message}`);
+  }
+
+  return data ? mapProfileRowToStoredUserRecord(data) : null;
+}
+
+async function writeProfile(input: {
+  id: string;
+  email: string;
+  name: string;
+  role: UserRole;
+  barangay_id: string;
+  must_change_password: boolean;
+  email_verification_required: boolean;
+  email_verified_at?: string | null;
+}): Promise<StoredUserRecord> {
+  const supabase = getSupabaseAdminClient();
+  const existing = await getProfileById(input.id);
+  const timestamp = nowIso();
+  const { data, error } = await supabase
+    .from('users')
+    .upsert({
+      id: input.id,
+      email: normalizeEmail(input.email),
+      name: input.name.trim(),
+      role: input.role,
+      barangay_id: input.barangay_id.trim(),
+      must_change_password: input.must_change_password,
+      email_verification_required: input.email_verification_required,
+      email_verified_at: input.email_verified_at ?? null,
+      created_at: existing?.createdAt ?? timestamp,
+      updated_at: timestamp,
+    }, {
+      onConflict: 'id',
+    })
+    .select('id, email, name, role, barangay_id, must_change_password, email_verification_required, email_verified_at, created_at, updated_at')
+    .single<ProfileRow>();
+
+  if (error) {
+    throw new Error(`Failed to upsert Supabase user profile: ${error.message}`);
+  }
+
+  return mapProfileRowToStoredUserRecord(data);
+}
+
+async function deleteUnusedTokens(tableName: 'password_setup_tokens' | 'email_verification_tokens', userId: string) {
+  const supabase = getSupabaseAdminClient();
+  const { error } = await supabase
+    .from(tableName)
+    .delete()
+    .eq('user_id', userId)
+    .is('used_at', null);
+
+  if (error) {
+    throw new Error(`Failed to clear existing ${tableName}: ${error.message}`);
+  }
+}
+
+async function getTokenByHash(
+  tableName: 'password_setup_tokens' | 'email_verification_tokens',
+  rawToken: string,
+): Promise<TokenRow | null> {
+  const supabase = getSupabaseAdminClient();
+  const { data, error } = await supabase
+    .from(tableName)
+    .select('id, user_id, token_hash, expires_at, created_at, used_at')
+    .eq('token_hash', hashToken(rawToken))
+    .maybeSingle<TokenRow>();
+
+  if (error) {
+    throw new Error(`Failed to load ${tableName}: ${error.message}`);
+  }
+
+  return data ?? null;
+}
+
+function isTokenUsable(token: TokenRow | null) {
+  return Boolean(
+    token
+    && !token.used_at
+    && new Date(token.expires_at).getTime() > Date.now(),
+  );
+}
+
+async function markTokenUsed(tableName: 'password_setup_tokens' | 'email_verification_tokens', tokenId: string) {
+  const supabase = getSupabaseAdminClient();
+  const { error } = await supabase
+    .from(tableName)
+    .update({
+      used_at: nowIso(),
+    })
+    .eq('id', tokenId);
+
+  if (error) {
+    throw new Error(`Failed to update ${tableName}: ${error.message}`);
+  }
+}
+
+export async function listUsers(): Promise<User[]> {
+  const supabase = getSupabaseAdminClient();
+  const { data, error } = await supabase
+    .from('users')
+    .select('id, email, name, role, barangay_id, must_change_password, email_verification_required, email_verified_at, created_at, updated_at')
+    .order('name', { ascending: true });
+
+  if (error) {
+    throw new Error(`Failed to list Supabase users: ${error.message}`);
+  }
+
+  return (data ?? []).map((row) => toPublicUser(mapProfileRowToStoredUserRecord(row as ProfileRow)));
+}
+
+export async function getStoredUserById(userId: string): Promise<StoredUserRecord | null> {
+  return getProfileById(userId);
+}
+
+export async function getStoredUserByEmail(email: string): Promise<StoredUserRecord | null> {
+  return getProfileByEmail(email);
+}
+
+export async function createUserAccount(input: {
+  name: string;
+  email: string;
+  role: UserRole;
+  barangay_id: string;
+}): Promise<User> {
+  const normalizedEmail = normalizeEmail(input.email);
+  const supabase = getSupabaseAdminClient();
+  const { data, error } = await supabase.auth.admin.createUser({
+    email: normalizedEmail,
+    password: randomUUID(),
+    email_confirm: true,
+    user_metadata: {
+      name: input.name.trim(),
+      role: input.role,
+      barangay_id: input.barangay_id.trim(),
+    },
+  });
+
+  if (error || !data.user?.id) {
+    throw new Error(error?.message || 'Could not create the user account in Supabase.');
+  }
+
+  const profile = await writeProfile({
+    id: data.user.id,
+    email: normalizedEmail,
+    name: input.name,
+    role: input.role,
+    barangay_id: input.barangay_id,
+    must_change_password: true,
+    email_verification_required: false,
+    email_verified_at: data.user.email_confirmed_at ?? nowIso(),
+  });
+
+  return toPublicUser(profile);
+}
+
+export async function createResidentSelfServiceAccount(input: {
+  name: string;
+  email: string;
+  password: string;
+  barangay_id: string;
+}): Promise<User> {
+  const normalizedEmail = normalizeEmail(input.email);
+  const supabase = getSupabaseAdminClient();
+  const { data, error } = await supabase.auth.admin.createUser({
+    email: normalizedEmail,
+    password: input.password,
+    email_confirm: false,
+    user_metadata: {
+      name: input.name.trim(),
+      role: 'resident',
+      barangay_id: input.barangay_id.trim(),
+    },
+  });
+
+  if (error || !data.user?.id) {
+    throw new Error(error?.message || 'Could not create the resident account in Supabase.');
+  }
+
+  const profile = await writeProfile({
+    id: data.user.id,
+    email: normalizedEmail,
+    name: input.name,
+    role: 'resident',
+    barangay_id: input.barangay_id,
+    must_change_password: false,
+    email_verification_required: true,
+    email_verified_at: null,
+  });
+
+  return toPublicUser(profile);
+}
+
+export async function updateUserAccount(
+  userId: string,
+  patch: Partial<Pick<User, 'name' | 'role' | 'barangay_id'>>,
+): Promise<User> {
+  const existing = await getProfileById(userId);
+  if (!existing) {
+    throw new Error('User not found.');
+  }
+
+  const nextProfile = {
+    id: existing.id,
+    email: existing.email,
+    name: patch.name?.trim() || existing.name,
+    role: patch.role || existing.role,
+    barangay_id: patch.barangay_id?.trim() || existing.barangay_id,
+    must_change_password: existing.must_change_password,
+    email_verification_required: existing.email_verification_required,
+    email_verified_at: existing.email_verified_at ?? null,
+  };
+
+  const supabase = getSupabaseAdminClient();
+  const { error } = await supabase.auth.admin.updateUserById(userId, {
+    user_metadata: {
+      name: nextProfile.name,
+      role: nextProfile.role,
+      barangay_id: nextProfile.barangay_id,
+    },
+  });
+
+  if (error) {
+    throw new Error(`Failed to update the Supabase auth user: ${error.message}`);
+  }
+
+  const profile = await writeProfile(nextProfile);
+  return toPublicUser(profile);
+}
+
+export async function deleteUserAccount(userId: string): Promise<void> {
+  const existing = await getProfileById(userId);
+  if (!existing) {
+    throw new Error('User not found.');
+  }
+
+  const supabase = getSupabaseAdminClient();
+  const { error } = await supabase.auth.admin.deleteUser(userId);
+  if (error) {
+    throw new Error(`Failed to delete the Supabase user: ${error.message}`);
+  }
+}
+
+export async function createPasswordSetupToken(userId: string): Promise<string> {
+  const existing = await getProfileById(userId);
+  if (!existing) {
+    throw new Error('User not found.');
+  }
+
+  await deleteUnusedTokens('password_setup_tokens', userId);
+
+  const rawToken = createToken();
+  const supabase = getSupabaseAdminClient();
+  const { error } = await supabase
+    .from('password_setup_tokens')
+    .insert({
+      id: `setup_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`,
+      user_id: userId,
+      token_hash: hashToken(rawToken),
+      created_at: nowIso(),
+      expires_at: new Date(Date.now() + PASSWORD_TOKEN_TTL_MS).toISOString(),
+    });
+
+  if (error) {
+    throw new Error(`Failed to create the password setup token: ${error.message}`);
+  }
+
+  await writeProfile({
+    id: existing.id,
+    email: existing.email,
+    name: existing.name,
+    role: existing.role,
+    barangay_id: existing.barangay_id,
+    must_change_password: true,
+    email_verification_required: existing.email_verification_required,
+    email_verified_at: existing.email_verified_at ?? null,
+  });
+
+  return rawToken;
+}
+
+export async function validatePasswordSetupToken(rawToken: string): Promise<User | null> {
+  const token = await getTokenByHash('password_setup_tokens', rawToken);
+  if (!token || !isTokenUsable(token)) {
+    return null;
+  }
+
+  const user = await getProfileById(token.user_id);
+  return user ? toPublicUser(user) : null;
+}
+
+export async function completePasswordSetup(rawToken: string, password: string): Promise<User> {
+  const token = await getTokenByHash('password_setup_tokens', rawToken);
+  if (!token || !isTokenUsable(token)) {
+    throw new Error('This password setup link is invalid or has expired.');
+  }
+
+  const user = await getProfileById(token.user_id);
+  if (!user) {
+    throw new Error('User not found.');
+  }
+
+  const supabase = getSupabaseAdminClient();
+  const { error } = await supabase.auth.admin.updateUserById(user.id, {
+    password,
+  });
+
+  if (error) {
+    throw new Error(`Failed to update the Supabase password: ${error.message}`);
+  }
+
+  await markTokenUsed('password_setup_tokens', token.id);
+  const updatedUser = await writeProfile({
+    id: user.id,
+    email: user.email,
+    name: user.name,
+    role: user.role,
+    barangay_id: user.barangay_id,
+    must_change_password: false,
+    email_verification_required: user.email_verification_required,
+    email_verified_at: user.email_verified_at ?? null,
+  });
+
+  return toPublicUser(updatedUser);
+}
+
+export async function createEmailVerificationToken(userId: string): Promise<string> {
+  const user = await getProfileById(userId);
+  if (!user) {
+    throw new Error('User not found.');
+  }
+
+  if (user.role !== 'resident') {
+    throw new Error('Only resident accounts can use email verification.');
+  }
+
+  if (!user.email_verification_required && user.email_verified_at) {
+    throw new Error('This account is already verified.');
+  }
+
+  await deleteUnusedTokens('email_verification_tokens', userId);
+
+  const rawToken = createToken();
+  const supabase = getSupabaseAdminClient();
+  const { error } = await supabase
+    .from('email_verification_tokens')
+    .insert({
+      id: `verify_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`,
+      user_id: userId,
+      token_hash: hashToken(rawToken),
+      created_at: nowIso(),
+      expires_at: new Date(Date.now() + EMAIL_VERIFICATION_TOKEN_TTL_MS).toISOString(),
+    });
+
+  if (error) {
+    throw new Error(`Failed to create the email verification token: ${error.message}`);
+  }
+
+  return rawToken;
+}
+
+export async function completeEmailVerification(rawToken: string): Promise<{ user: User; alreadyVerified: boolean }> {
+  const token = await getTokenByHash('email_verification_tokens', rawToken);
+  if (!token) {
+    throw new Error('This verification link is invalid or has expired.');
+  }
+
+  const user = await getProfileById(token.user_id);
+  if (!user) {
+    throw new Error('User not found.');
+  }
+
+  const alreadyVerified =
+    Boolean(token.used_at)
+    || Boolean(user.email_verified_at)
+    || !user.email_verification_required;
+
+  if (!alreadyVerified) {
+    const supabase = getSupabaseAdminClient();
+    const { error } = await supabase.auth.admin.updateUserById(user.id, {
+      email_confirm: true,
+    });
+
+    if (error) {
+      throw new Error(`Failed to verify the Supabase email address: ${error.message}`);
+    }
+  }
+
+  if (!token.used_at) {
+    await markTokenUsed('email_verification_tokens', token.id);
+  }
+
+  const updatedUser = alreadyVerified
+    ? user
+    : await writeProfile({
+        id: user.id,
+        email: user.email,
+        name: user.name,
+        role: user.role,
+        barangay_id: user.barangay_id,
+        must_change_password: user.must_change_password,
+        email_verification_required: false,
+        email_verified_at: nowIso(),
+      });
+
+  return {
+    user: toPublicUser(updatedUser),
+    alreadyVerified,
+  };
+}
+
+export async function authenticateUser(email: string, password: string): Promise<AuthenticationResult> {
+  const user = await getProfileByEmail(email);
+  if (!user) {
+    return { status: 'invalid_credentials' };
+  }
+
+  if (user.role === 'resident' && user.email_verification_required) {
+    return {
+      status: 'email_not_verified',
+      user: toPublicUser(user),
+    };
+  }
+
+  try {
+    const supabase = getSupabasePublicAuthClient();
+    const { error } = await supabase.auth.signInWithPassword({
+      email: normalizeEmail(email),
+      password,
+    });
+
+    if (error) {
+      return { status: 'invalid_credentials' };
+    }
+  } catch (error) {
+    throw error instanceof Error
+      ? error
+      : new Error('Supabase public auth is not configured.');
+  }
+
+  return {
+    status: 'success',
+    user: toPublicUser(user),
+  };
+}
+
+export async function getAuthenticatedUser(email: string, password: string): Promise<User | null> {
+  const result = await authenticateUser(email, password);
+  return result.status === 'success' ? result.user : null;
+}

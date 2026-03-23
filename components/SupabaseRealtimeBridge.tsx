@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect } from 'react';
+import { usePathname } from 'next/navigation';
 import type { RealtimeChannel, Session } from '@supabase/supabase-js';
 import { getCurrentUser } from '@/lib/auth';
 import { db } from '@/lib/db/indexeddb';
@@ -10,7 +11,7 @@ import {
   mapSupabaseRow,
   SUPABASE_BOOTSTRAP_TABLES,
 } from '@/lib/supabase/row-mapper';
-import { bootstrapAllDataFromSupabase } from '@/lib/supabase/bootstrap';
+import { bootstrapPathnameData } from '@/lib/supabase/route-bootstrap';
 
 declare global {
   interface WindowEventMap {
@@ -77,6 +78,8 @@ async function applyBroadcastPayload(payload: BroadcastDbChangePayload) {
 }
 
 export default function SupabaseRealtimeBridge() {
+  const pathname = usePathname();
+
   useEffect(() => {
     const { isConfigured, url } = getSupabaseBrowserConfig();
     const supabase = getSupabaseBrowserClient();
@@ -89,7 +92,7 @@ export default function SupabaseRealtimeBridge() {
     let cancelled = false;
     let channels: RealtimeChannel[] = [];
     let activeRunId = 0;
-    let pollingTimer: number | null = null;
+    const failedTopics = new Set<string>();
 
     async function disconnectChannel() {
       if (channels.length === 0) {
@@ -101,29 +104,9 @@ export default function SupabaseRealtimeBridge() {
       await Promise.all(currentChannels.map((channel) => supabaseClient.removeChannel(channel)));
     }
 
-    function stopPolling() {
-      if (pollingTimer) {
-        window.clearInterval(pollingTimer);
-        pollingTimer = null;
-      }
-    }
-
-    function startPolling() {
-      if (pollingTimer || typeof window === 'undefined') {
-        return;
-      }
-
-      pollingTimer = window.setInterval(() => {
-        if (cancelled || document.visibilityState !== 'visible') {
-          return;
-        }
-
-        void bootstrapAllDataFromSupabase(true);
-      }, 15000);
-    }
-
     async function start(sessionOverride?: Session | null) {
       const runId = ++activeRunId;
+      failedTopics.clear();
       const session =
         sessionOverride === undefined
           ? (await supabaseClient.auth.getSession()).data.session
@@ -139,7 +122,7 @@ export default function SupabaseRealtimeBridge() {
 
       await disconnectChannel();
       await supabaseClient.realtime.setAuth(session.access_token);
-      await bootstrapAllDataFromSupabase(true);
+      await bootstrapPathnameData(pathname);
 
       if (cancelled || runId !== activeRunId) return;
 
@@ -175,14 +158,20 @@ export default function SupabaseRealtimeBridge() {
 
         channel.subscribe((status, error) => {
           if (status === 'SUBSCRIBED') {
-            stopPolling();
+            failedTopics.delete(topic);
             return;
           }
 
           if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
-            console.warn(`[Supabase Realtime] Channel ${topic} issue detected. Falling back to backend refresh.`, error);
-            startPolling();
-            void bootstrapAllDataFromSupabase(true);
+            if (failedTopics.has(topic)) {
+              return;
+            }
+
+            failedTopics.add(topic);
+            console.warn(
+              `[Supabase Realtime] Channel ${topic} issue detected. Automatic bootstrap fallback is disabled; data will refresh on direct transactions or successful realtime events.`,
+              error,
+            );
           }
         });
 
@@ -195,7 +184,7 @@ export default function SupabaseRealtimeBridge() {
         return;
       }
 
-      void bootstrapAllDataFromSupabase(true);
+      void bootstrapPathnameData(pathname);
     }
 
     const {
@@ -214,12 +203,11 @@ export default function SupabaseRealtimeBridge() {
     return () => {
       cancelled = true;
       activeRunId += 1;
-      stopPolling();
       subscription.unsubscribe();
       window.removeEventListener('focus', handleWindowFocus);
       void disconnectChannel();
     };
-  }, []);
+  }, [pathname]);
 
   return null;
 }

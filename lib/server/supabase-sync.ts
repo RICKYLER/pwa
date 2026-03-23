@@ -2,8 +2,8 @@ import 'server-only';
 
 import { randomUUID } from 'node:crypto';
 import type { SyncQueueItem, User } from '@/lib/db/schema';
-import { mirrorStoredUserIdToSupabase } from '@/lib/server/supabase-user-mirror';
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
+import { resolveSupabaseUserId } from '@/lib/server/supabase-user-ids';
 
 const SYNC_AGENT_EMAIL = 'sync-agent@mswdo.local';
 const SYNC_AGENT_NAME = 'MSWDO Sync Agent';
@@ -196,8 +196,7 @@ async function resolveAuditLogUserId(value: unknown, syncActorId: string) {
     return syncActorId;
   }
 
-  const mirroredUserId = await mirrorStoredUserIdToSupabase(localUserId);
-  return mirroredUserId ?? syncActorId;
+  return (await resolveSupabaseUserId(localUserId, syncActorId)) ?? syncActorId;
 }
 
 async function mapQueueItemToSupabaseRow(item: SyncQueueItem, syncActorId: string) {

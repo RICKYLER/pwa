@@ -7,7 +7,7 @@ import type {
 } from './schema';
 import { createAuditLog } from '../auth';
 import { runServerMutation } from '@/lib/mutations';
-import { bootstrapAllDataFromSupabase } from '@/lib/supabase/bootstrap';
+import { bootstrapCurrentPathData } from '@/lib/supabase/route-bootstrap';
 import { getLocationMasterList } from './location-master';
 import {
   getHouseholdRegistrationStatus,
@@ -217,7 +217,7 @@ export async function createHouseholdBundle(
       })),
     });
 
-    await bootstrapAllDataFromSupabase(true);
+    await bootstrapCurrentPathData(true);
 
     const createdHousehold = await getHousehold(householdId);
     if (!createdHousehold) {
@@ -271,7 +271,7 @@ export async function updateHousehold(id: string, updates: Partial<Household>): 
       },
     });
 
-    await bootstrapAllDataFromSupabase(true);
+    await bootstrapCurrentPathData(true);
 
     const updatedHousehold = await getHousehold(id);
     if (!updatedHousehold) {

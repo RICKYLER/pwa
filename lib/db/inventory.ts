@@ -21,6 +21,12 @@ type CreateInventoryMutationPayload = {
   inventory_movements?: Array<Record<string, unknown>>;
 };
 
+type InventoryTransactionMutationPayload = {
+  inventory_item?: Record<string, unknown>;
+  inventory_item_id?: string;
+  inventory_movement?: Record<string, unknown>;
+};
+
 let inventoryBootstrapPromise: Promise<void> | null = null;
 
 function generateId(prefix: string): string {
@@ -200,6 +206,19 @@ async function hydrateSyncedRecord<T extends { id: string; syncStatus?: string }
   await db.put(storeName, record);
 }
 
+async function deleteHydratedRecord(storeName: string, recordId: string) {
+  if (!recordId) {
+    return;
+  }
+
+  const existing = await db.get<{ syncStatus?: string }>(storeName, recordId).catch(() => undefined);
+  if (existing?.syncStatus === 'pending') {
+    return;
+  }
+
+  await db.deleteSilently(storeName, recordId);
+}
+
 export async function bootstrapInventoryFromSupabase(force = false): Promise<void> {
   if (typeof window === 'undefined') {
     return;
@@ -327,7 +346,7 @@ async function applyInventoryTransaction(params: {
       ? (item as InventoryItem & { recordVersion: number }).recordVersion
       : undefined;
 
-  await runServerMutation({
+  const payload = await runServerMutation<InventoryTransactionMutationPayload>({
     action: 'apply_inventory_transaction',
     params: {
       item_id: item.id,
@@ -344,14 +363,31 @@ async function applyInventoryTransaction(params: {
     },
   });
 
+  let updatedItem: InventoryItem | undefined;
+  if (payload.inventory_item && typeof payload.inventory_item === 'object') {
+    updatedItem = mapSnapshotInventoryItem(payload.inventory_item);
+    await hydrateSyncedRecord(STORE_NAMES.inventory_items, updatedItem);
+  }
+
+  if (payload.inventory_movement && typeof payload.inventory_movement === 'object') {
+    await hydrateSyncedRecord(
+      STORE_NAMES.inventory_movements,
+      mapSnapshotInventoryMovement(payload.inventory_movement),
+    );
+  }
+
+  if (updatedItem) {
+    return updatedItem;
+  }
+
   await bootstrapInventoryFromSupabase(true);
 
-  const updatedItem = await getInventoryItem(item.id);
-  if (!updatedItem) {
+  const refreshedItem = await getInventoryItem(item.id);
+  if (!refreshedItem) {
     throw new Error('Inventory item updated in Supabase, but it did not rehydrate locally.');
   }
 
-  return updatedItem;
+  return refreshedItem;
 }
 
 /**
@@ -455,10 +491,6 @@ export async function createInventoryItem(
       );
     }
 
-    await bootstrapInventoryFromSupabase(true).catch((error) => {
-      console.warn('Inventory snapshot refresh after create failed:', error);
-    });
-
     const createdItem = await getInventoryItem(item.id);
     if (createdItem) {
       return createdItem;
@@ -466,6 +498,15 @@ export async function createInventoryItem(
 
     if (fallbackCreatedItem) {
       return fallbackCreatedItem;
+    }
+
+    await bootstrapInventoryFromSupabase(true).catch((error) => {
+      console.warn('Inventory snapshot refresh after create failed:', error);
+    });
+
+    const refreshedItem = await getInventoryItem(item.id);
+    if (refreshedItem) {
+      return refreshedItem;
     }
 
     throw new Error('Inventory item was saved, but the page could not refresh the latest inventory snapshot yet.');
@@ -483,7 +524,7 @@ export async function updateInventoryItem(
   updates: Partial<InventoryItem>,
 ): Promise<InventoryItem> {
   try {
-    await runServerMutation({
+    const payload = await runServerMutation<Record<string, unknown>>({
       action: 'update_inventory_item',
       itemId: id,
       updates: {
@@ -502,14 +543,20 @@ export async function updateInventoryItem(
       },
     });
 
+    if (payload && typeof payload === 'object' && typeof payload.id === 'string') {
+      const updatedItem = mapSnapshotInventoryItem(payload);
+      await hydrateSyncedRecord(STORE_NAMES.inventory_items, updatedItem);
+      return updatedItem;
+    }
+
     await bootstrapInventoryFromSupabase(true);
 
-    const updatedItem = await getInventoryItem(id);
-    if (!updatedItem) {
+    const refreshedItem = await getInventoryItem(id);
+    if (!refreshedItem) {
       throw new Error('Inventory item was updated in Supabase, but it did not rehydrate locally.');
     }
 
-    return updatedItem;
+    return refreshedItem;
   } catch (error) {
     console.error('Error updating inventory item:', error);
     throw error;
@@ -668,7 +715,7 @@ export async function createPackageTemplate(data: {
       syncStatus: 'synced',
     });
 
-    await runServerMutation({
+    const payload = await runServerMutation<Record<string, unknown>>({
       action: 'create_package_template',
       template: {
         ...template,
@@ -677,14 +724,20 @@ export async function createPackageTemplate(data: {
       },
     });
 
+    if (payload && typeof payload === 'object' && typeof payload.id === 'string') {
+      const createdTemplate = mapSnapshotPackageTemplate(payload);
+      await hydrateSyncedRecord(STORE_NAMES.package_templates, createdTemplate);
+      return createdTemplate;
+    }
+
     await bootstrapInventoryFromSupabase(true);
 
-    const createdTemplate = (await getPackageTemplates()).find((entry) => entry.id === template.id);
-    if (!createdTemplate) {
+    const refreshedTemplate = (await getPackageTemplates()).find((entry) => entry.id === template.id);
+    if (!refreshedTemplate) {
       throw new Error('Package template was created in Supabase, but it did not rehydrate locally.');
     }
 
-    return createdTemplate;
+    return refreshedTemplate;
   } catch (error) {
     console.error('Error creating package template:', error);
     throw error;
@@ -697,7 +750,7 @@ export async function deletePackageTemplate(id: string): Promise<void> {
       action: 'delete_package_template',
       templateId: id,
     });
-    await bootstrapInventoryFromSupabase(true);
+    await deleteHydratedRecord(STORE_NAMES.package_templates, id);
   } catch (error) {
     console.error('Error deleting package template:', error);
     throw error;

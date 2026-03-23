@@ -12,10 +12,7 @@ import type {
   User,
 } from '@/lib/db/schema';
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
-import {
-  mirrorAppUserToSupabase,
-  mirrorStoredUserIdToSupabase,
-} from '@/lib/server/supabase-user-mirror';
+import { requireSupabaseUserId, resolveSupabaseUserId } from '@/lib/server/supabase-user-ids';
 
 type HouseholdMemberDraft = {
   full_name: string;
@@ -57,10 +54,6 @@ function toOptionalString(value: unknown) {
   return trimmed ? trimmed : null;
 }
 
-function isUuid(value: string) {
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
-}
-
 function toIsoString(value: unknown) {
   if (value instanceof Date) {
     return value.toISOString();
@@ -99,15 +92,7 @@ function isMissingRpcFunctionError(
 }
 
 async function getRemoteActorId(user: User) {
-  const remoteActorId = await mirrorAppUserToSupabase(user, {
-    emailConfirmed: Boolean(user.email_verified_at || !user.email_verification_required),
-  });
-
-  if (!remoteActorId) {
-    throw new Error('Failed to mirror the authenticated user to Supabase.');
-  }
-
-  return remoteActorId;
+  return requireSupabaseUserId(user);
 }
 
 async function resolveRemoteUserId(localUserId: string | null | undefined, fallback?: string | null) {
@@ -116,11 +101,7 @@ async function resolveRemoteUserId(localUserId: string | null | undefined, fallb
     return fallback ?? null;
   }
 
-  if (isUuid(normalized)) {
-    return normalized;
-  }
-
-  return (await mirrorStoredUserIdToSupabase(normalized)) ?? fallback ?? null;
+  return resolveSupabaseUserId(normalized, fallback);
 }
 
 async function createAuditLogEntry(params: {

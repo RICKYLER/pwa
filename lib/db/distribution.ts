@@ -1,6 +1,6 @@
 import { db, STORE_NAMES } from './indexeddb';
 import { runServerMutation } from '@/lib/mutations';
-import { bootstrapAllDataFromSupabase } from '@/lib/supabase/bootstrap';
+import { bootstrapCurrentPathData } from '@/lib/supabase/route-bootstrap';
 import { getHouseholds } from './households';
 import { getInventoryItem } from './inventory';
 import { getResidents } from './residents';
@@ -162,7 +162,7 @@ export async function createDistributionEvent(
       },
     });
 
-    await bootstrapAllDataFromSupabase(true);
+    await bootstrapCurrentPathData(true);
 
     const createdEvent = await getDistributionEvent(event.id);
     if (!createdEvent) {
@@ -195,7 +195,7 @@ export async function updateDistributionEvent(
       },
     });
 
-    await bootstrapAllDataFromSupabase(true);
+    await bootstrapCurrentPathData(true);
 
     const updatedEvent = await getDistributionEvent(id);
     if (!updatedEvent) {
@@ -352,7 +352,7 @@ export async function releaseDistributionPackage(params: {
     },
   });
 
-  await bootstrapAllDataFromSupabase(true);
+  await bootstrapCurrentPathData(true);
 
   const records = await getDistributionRecords(event.id);
   const latestRecord = records.find((record) =>
@@ -450,7 +450,7 @@ export async function deleteDistributionEvent(id: string): Promise<void> {
       eventId: id,
     });
 
-    await bootstrapAllDataFromSupabase(true);
+    await bootstrapCurrentPathData(true);
   } catch (error) {
     console.error('Error deleting distribution event:', error);
     throw error;

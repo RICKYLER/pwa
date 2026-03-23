@@ -148,8 +148,8 @@ export async function flushSyncQueueNow(): Promise<number> {
     await recordDetailedSyncFailures(payload?.failedItems);
 
     if (syncedItemIds.size > 0 && typeof window !== 'undefined') {
-      await import('@/lib/supabase/bootstrap')
-        .then(({ bootstrapAllDataFromSupabase }) => bootstrapAllDataFromSupabase(true))
+      await import('@/lib/supabase/route-bootstrap')
+        .then(({ bootstrapCurrentPathData }) => bootstrapCurrentPathData(true))
         .catch((error) => {
           console.warn('Failed to refresh Supabase data after sync:', error);
         });

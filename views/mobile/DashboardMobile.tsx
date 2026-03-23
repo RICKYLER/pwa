@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { getCurrentUser, getDefaultRouteForUser, hasPermission, restoreSession } from '@/lib/auth';
@@ -33,21 +33,48 @@ export default function DashboardMobile() {
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState('');
 
-    useEffect(() => {
-        async function init() {
-            try {
-                await db.init();
-                const u = restoreSession();
-                if (!u) { router.push('/login'); return; }
-                if (getDefaultRouteForUser(u) !== '/dashboard') { router.push(getDefaultRouteForUser(u)); return; }
-                setUser(u);
-                const s = await getDashboardStats(u.barangay_id);
-                setStats(s);
-            } catch (e) { setError(e instanceof Error ? e.message : 'Failed to load'); }
-            finally { setIsLoading(false); }
+    const loadDashboard = useCallback(async (background = false) => {
+        try {
+            if (!background) {
+                setIsLoading(true);
+            }
+
+            await db.init();
+            const u = restoreSession();
+            if (!u) { router.push('/login'); return; }
+            if (getDefaultRouteForUser(u) !== '/dashboard') { router.push(getDefaultRouteForUser(u)); return; }
+            setUser(u);
+            const s = await getDashboardStats(u.barangay_id);
+            setStats(s);
+            setError('');
+        } catch (e) {
+            setError(e instanceof Error ? e.message : 'Failed to load');
+        } finally {
+            if (!background) {
+                setIsLoading(false);
+            }
         }
-        init();
     }, [router]);
+
+    useEffect(() => {
+        void loadDashboard();
+    }, [loadDashboard]);
+
+    useEffect(() => {
+        function handleDataChanged(event: WindowEventMap['mswdo-data-changed']) {
+            if (!['households', 'residents', 'vulnerability_flags'].includes(event.detail.table)) {
+                return;
+            }
+
+            void loadDashboard(true);
+        }
+
+        window.addEventListener('mswdo-data-changed', handleDataChanged);
+
+        return () => {
+            window.removeEventListener('mswdo-data-changed', handleDataChanged);
+        };
+    }, [loadDashboard]);
 
     if (!user) return null;
 

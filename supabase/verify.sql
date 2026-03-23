@@ -18,7 +18,9 @@ where table_schema = 'public'
     'distribution_records',
     'incidents',
     'audit_logs',
-    'sync_backups'
+    'sync_backups',
+    'password_setup_tokens',
+    'email_verification_tokens'
   )
 order by table_name;
 
@@ -35,6 +37,8 @@ where schemaname = 'public'
     'vulnerability_flags',
     'inventory_items',
     'distribution_events',
-    'incidents'
+    'incidents',
+    'password_setup_tokens',
+    'email_verification_tokens'
   )
 order by tablename;

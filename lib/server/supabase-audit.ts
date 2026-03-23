@@ -2,7 +2,7 @@ import 'server-only';
 
 import type { User } from '@/lib/db/schema';
 import { getSupabaseAdminClient, getSupabaseAdminConfig } from '@/lib/server/supabase-admin';
-import { mirrorAppUserToSupabase, mirrorStoredUserIdToSupabase } from '@/lib/server/supabase-user-mirror';
+import { requireSupabaseUserId, resolveSupabaseUserId } from '@/lib/server/supabase-user-ids';
 
 export async function writeServerAuditLog(params: {
   actor?: User | null;
@@ -17,8 +17,8 @@ export async function writeServerAuditLog(params: {
   }
 
   const actorId =
-    (params.actor ? await mirrorAppUserToSupabase(params.actor) : null)
-    ?? (params.actorLocalUserId ? await mirrorStoredUserIdToSupabase(params.actorLocalUserId) : null);
+    (params.actor ? await requireSupabaseUserId(params.actor).catch(() => null) : null)
+    ?? (params.actorLocalUserId ? await resolveSupabaseUserId(params.actorLocalUserId) : null);
 
   if (!actorId) {
     return null;

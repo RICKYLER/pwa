@@ -450,6 +450,24 @@ create table if not exists public.sync_backups (
   unique (queue_id)
 );
 
+create table if not exists public.password_setup_tokens (
+  id text primary key default gen_random_uuid()::text,
+  user_id uuid not null references public.users (id) on delete cascade,
+  token_hash text not null unique,
+  expires_at timestamptz not null,
+  created_at timestamptz not null default timezone('utc', now()),
+  used_at timestamptz
+);
+
+create table if not exists public.email_verification_tokens (
+  id text primary key default gen_random_uuid()::text,
+  user_id uuid not null references public.users (id) on delete cascade,
+  token_hash text not null unique,
+  expires_at timestamptz not null,
+  created_at timestamptz not null default timezone('utc', now()),
+  used_at timestamptz
+);
+
 create index if not exists households_barangay_id_idx on public.households (barangay_id);
 create index if not exists households_registration_status_idx on public.households (registration_status);
 create index if not exists households_status_idx on public.households (status);
@@ -470,6 +488,8 @@ create index if not exists incidents_status_idx on public.incidents (status);
 create index if not exists incidents_reported_at_idx on public.incidents (reported_at desc);
 create index if not exists audit_logs_timestamp_idx on public.audit_logs ("timestamp" desc);
 create index if not exists sync_backups_entity_idx on public.sync_backups (entity_type, entity_id, synced_at desc);
+create index if not exists password_setup_tokens_user_id_idx on public.password_setup_tokens (user_id, used_at, expires_at desc);
+create index if not exists email_verification_tokens_user_id_idx on public.email_verification_tokens (user_id, used_at, expires_at desc);
 
 create unique index if not exists distribution_records_unique_household_per_event
   on public.distribution_records (event_id, household_id)
@@ -707,6 +727,8 @@ alter table public.distribution_records enable row level security;
 alter table public.incidents enable row level security;
 alter table public.audit_logs enable row level security;
 alter table public.sync_backups enable row level security;
+alter table public.password_setup_tokens enable row level security;
+alter table public.email_verification_tokens enable row level security;
 
 drop policy if exists "users_select_self_or_admin" on public.users;
 create policy "users_select_self_or_admin"
@@ -972,6 +994,8 @@ alter table public.incidents replica identity full;
 alter table public.location_master_lists replica identity full;
 alter table public.audit_logs replica identity full;
 alter table public.sync_backups replica identity full;
+alter table public.password_setup_tokens replica identity full;
+alter table public.email_verification_tokens replica identity full;
 
 do $$
 declare

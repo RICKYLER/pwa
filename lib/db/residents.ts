@@ -6,7 +6,7 @@ import {
 import { getHousehold, getHouseholds } from './households';
 import { createAuditLog } from '../auth';
 import { runServerMutation } from '@/lib/mutations';
-import { bootstrapAllDataFromSupabase } from '@/lib/supabase/bootstrap';
+import { bootstrapCurrentPathData } from '@/lib/supabase/route-bootstrap';
 
 /**
  * Generate ID for residents
@@ -100,7 +100,7 @@ export async function createResident(data: Omit<Resident, 'id' | 'createdAt' | '
       },
     });
 
-    await bootstrapAllDataFromSupabase(true);
+    await bootstrapCurrentPathData(true);
 
     const createdResident = await getResident(resident.id);
     if (!createdResident) {
@@ -143,7 +143,7 @@ export async function updateResident(id: string, updates: Partial<Resident>): Pr
       },
     });
 
-    await bootstrapAllDataFromSupabase(true);
+    await bootstrapCurrentPathData(true);
 
     const updatedResident = await getResident(id);
     if (!updatedResident) {
@@ -222,7 +222,7 @@ export async function updateHealthFlags(
       updates,
     });
 
-    await bootstrapAllDataFromSupabase(true);
+    await bootstrapCurrentPathData(true);
     const updated = await getResidentVulnerabilityFlags(resident_id);
     console.log('Health flags updated for resident:', resident_id);
     return updated;

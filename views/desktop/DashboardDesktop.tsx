@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { getCurrentUser, getDefaultRouteForUser, hasPermission, restoreSession } from '@/lib/auth';
@@ -27,33 +27,60 @@ function greeting() {
 }
 
 export default function DashboardDesktop() {
-    const router = useRouter();
-    const [user, setUser] = useState<ReturnType<typeof getCurrentUser>>(null);
+  const router = useRouter();
+  const [user, setUser] = useState<ReturnType<typeof getCurrentUser>>(null);
     const [stats, setStats] = useState<Stats | null>(null);
     const [topVulnerable, setTopVulnerable] = useState<Array<{ purok: string; vulnerable_count: number }>>([]);
-    const [isLoading, setIsLoading] = useState(true);
-    const [error, setError] = useState('');
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState('');
+
+    const loadDashboard = useCallback(async (background = false) => {
+        try {
+            if (!background) {
+                setIsLoading(true);
+            }
+
+            await db.init();
+            const u = restoreSession();
+            if (!u) { router.push('/login'); return; }
+            if (getDefaultRouteForUser(u) !== '/dashboard') { router.push(getDefaultRouteForUser(u)); return; }
+            setUser(u);
+            const [s, , vuln] = await Promise.all([
+                getDashboardStats(u.barangay_id),
+                getTopPuroksByPopulation(u.barangay_id),
+                getTopPuroksByVulnerability(u.barangay_id),
+            ]);
+            setStats(s);
+            setTopVulnerable(vuln);
+            setError('');
+        } catch (e) {
+            setError(e instanceof Error ? e.message : 'Failed to load');
+        } finally {
+            if (!background) {
+                setIsLoading(false);
+            }
+        }
+    }, [router]);
 
     useEffect(() => {
-        async function init() {
-            try {
-                await db.init();
-                const u = restoreSession();
-                if (!u) { router.push('/login'); return; }
-                if (getDefaultRouteForUser(u) !== '/dashboard') { router.push(getDefaultRouteForUser(u)); return; }
-                setUser(u);
-                const [s, , vuln] = await Promise.all([
-                    getDashboardStats(u.barangay_id),
-                    getTopPuroksByPopulation(u.barangay_id),
-                    getTopPuroksByVulnerability(u.barangay_id),
-                ]);
-                setStats(s);
-                setTopVulnerable(vuln);
-            } catch (e) { setError(e instanceof Error ? e.message : 'Failed to load'); }
-            finally { setIsLoading(false); }
+        void loadDashboard();
+    }, [loadDashboard]);
+
+    useEffect(() => {
+        function handleDataChanged(event: WindowEventMap['mswdo-data-changed']) {
+            if (!['households', 'residents', 'vulnerability_flags'].includes(event.detail.table)) {
+                return;
+            }
+
+            void loadDashboard(true);
         }
-        init();
-    }, [router]);
+
+        window.addEventListener('mswdo-data-changed', handleDataChanged);
+
+        return () => {
+            window.removeEventListener('mswdo-data-changed', handleDataChanged);
+        };
+    }, [loadDashboard]);
 
     if (!user) return null;
 

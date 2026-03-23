@@ -1,7 +1,7 @@
 import { db, STORE_NAMES } from './indexeddb';
 import type { Incident, IncidentStatus } from './schema';
 import { runServerMutation } from '@/lib/mutations';
-import { bootstrapAllDataFromSupabase } from '@/lib/supabase/bootstrap';
+import { bootstrapCurrentPathData } from '@/lib/supabase/route-bootstrap';
 import { DEFAULT_BARANGAY_CENTER } from '../map-pins';
 
 function generateId(): string {
@@ -105,7 +105,7 @@ export async function createIncident(
                 description: incident.description.trim(),
             },
         });
-        await bootstrapAllDataFromSupabase(true);
+        await bootstrapCurrentPathData(true);
         const createdIncident = await getIncident(incident.id);
         if (!createdIncident) {
             throw new Error('Incident was created in Supabase, but it did not rehydrate locally.');
@@ -131,7 +131,7 @@ export async function updateIncidentStatus(
             incidentId: id,
             status,
         });
-        await bootstrapAllDataFromSupabase(true);
+        await bootstrapCurrentPathData(true);
         const updatedIncident = await getIncident(id);
         if (!updatedIncident) {
             throw new Error('Incident was updated in Supabase, but it did not rehydrate locally.');

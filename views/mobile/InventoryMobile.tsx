@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { getCurrentUser, hasPermission } from '@/lib/auth';
 import {
@@ -35,17 +35,41 @@ export default function InventoryMobile() {
     const [addItemError, setAddItemError] = useState('');
     const [form, setForm] = useState({ item_name: '', category: 'food' as const, quantity_available: 0, unit: 'pcs' as const, expiration_date: '', notes: '' });
 
-    useEffect(() => {
-        if (!user || !hasPermission('view_reports')) { router.push('/dashboard'); return; }
-        load();
-    }, [user, router]);
+    const load = useCallback(async (background = false) => {
+        if (!background) {
+            setIsLoading(true);
+        }
 
-    async function load() {
-        setIsLoading(true);
         await bootstrapInventoryFromSupabase();
         const [inv, ls] = await Promise.all([getInventoryItems(), getLowStockItems()]);
-        setItems(inv); setLowStock(ls); setIsLoading(false);
-    }
+        setItems(inv);
+        setLowStock(ls);
+
+        if (!background) {
+            setIsLoading(false);
+        }
+    }, []);
+
+    useEffect(() => {
+        if (!user || !hasPermission('view_reports')) { router.push('/dashboard'); return; }
+        void load();
+    }, [user, router, load]);
+
+    useEffect(() => {
+        function handleDataChanged(event: WindowEventMap['mswdo-data-changed']) {
+            if (!['inventory_items', 'inventory_movements', 'package_templates'].includes(event.detail.table)) {
+                return;
+            }
+
+            void load(true);
+        }
+
+        window.addEventListener('mswdo-data-changed', handleDataChanged);
+
+        return () => {
+            window.removeEventListener('mswdo-data-changed', handleDataChanged);
+        };
+    }, [load]);
 
     async function handleAdd(e: React.FormEvent) {
         e.preventDefault();

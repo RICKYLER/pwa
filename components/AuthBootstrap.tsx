@@ -3,7 +3,8 @@
 import { ReactNode, useEffect, useState } from 'react';
 import { hydrateSession } from '@/lib/auth';
 import SupabaseRealtimeBridge from '@/components/SupabaseRealtimeBridge';
-import { bootstrapAllDataFromSupabase, clearSupabaseBootstrapData } from '@/lib/supabase/bootstrap';
+import { clearSupabaseBootstrapData } from '@/lib/supabase/bootstrap';
+import { bootstrapCurrentPathData } from '@/lib/supabase/route-bootstrap';
 
 declare global {
   interface WindowEventMap {
@@ -17,44 +18,33 @@ declare global {
 
 export default function AuthBootstrap({ children }: { children: ReactNode }) {
   const [isReady, setIsReady] = useState(false);
-  const [dataVersion, setDataVersion] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
 
-    hydrateSession()
-      .then(async (user) => {
-        if (user) {
-          await bootstrapAllDataFromSupabase();
-          return;
-        }
+    async function initializeAuthState() {
+      const user = await hydrateSession().catch(() => null);
 
+      if (!user) {
         await clearSupabaseBootstrapData({
           includeSyncQueue: true,
           notifyTables: false,
-        });
-      })
-      .catch(() => null)
-      .finally(() => {
-        if (!cancelled) {
-          setIsReady(true);
-        }
-      });
+        }).catch(() => null);
+      }
+
+      if (!cancelled) {
+        setIsReady(true);
+      }
+
+      if (user) {
+        void bootstrapCurrentPathData();
+      }
+    }
+
+    void initializeAuthState();
 
     return () => {
       cancelled = true;
-    };
-  }, []);
-
-  useEffect(() => {
-    function handleRealtimeDataChanged() {
-      setDataVersion((value) => value + 1);
-    }
-
-    window.addEventListener('mswdo-data-changed', handleRealtimeDataChanged);
-
-    return () => {
-      window.removeEventListener('mswdo-data-changed', handleRealtimeDataChanged);
     };
   }, []);
 
@@ -72,7 +62,7 @@ export default function AuthBootstrap({ children }: { children: ReactNode }) {
   return (
     <>
       <SupabaseRealtimeBridge />
-      <div key={dataVersion}>{children}</div>
+      {children}
     </>
   );
 }

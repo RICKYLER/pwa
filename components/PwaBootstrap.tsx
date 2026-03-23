@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { AlertTriangle, Cloud, CloudCheck } from 'lucide-react';
 import { flushSyncQueueNow, getPendingSyncCount } from '@/lib/db/client-sync';
 import { clearLegacyLocalDatabase } from '@/lib/db/indexeddb';
-import { bootstrapAllDataFromSupabase } from '@/lib/supabase/bootstrap';
+import { bootstrapCurrentPathData } from '@/lib/supabase/route-bootstrap';
 
 declare global {
   interface WindowEventMap {
@@ -74,7 +74,7 @@ export default function PwaBootstrap() {
         }
 
         if (beforeCount > 0 && afterCount < beforeCount) {
-          await bootstrapAllDataFromSupabase(true);
+          await bootstrapCurrentPathData(true);
         }
 
         if (beforeCount > 0 && afterCount >= beforeCount && !cancelled) {

@@ -2,15 +2,33 @@ import { NextRequest, NextResponse } from 'next/server';
 import type { User } from '@/lib/db/schema';
 import { requireAuthenticatedUser } from '@/lib/server/auth-guards';
 import { getSupabaseAdminClient, getSupabaseAdminConfig } from '@/lib/server/supabase-admin';
-import { mirrorAppUserToSupabase } from '@/lib/server/supabase-user-mirror';
-import type { SupabaseBootstrapTable } from '@/lib/supabase/row-mapper';
+import { resolveSupabaseUserId } from '@/lib/server/supabase-user-ids';
+import {
+  SUPABASE_BOOTSTRAP_TABLES,
+  type SupabaseBootstrapTable,
+} from '@/lib/supabase/row-mapper';
 
 export const runtime = 'nodejs';
 
 type BootstrapPayload = Partial<Record<SupabaseBootstrapTable, unknown[]>>;
+const VALID_BOOTSTRAP_TABLES = new Set<SupabaseBootstrapTable>(
+  SUPABASE_BOOTSTRAP_TABLES.map((entry) => entry.table),
+);
 
 function uniqueStrings(values: Array<string | null | undefined>) {
   return [...new Set(values.filter((value): value is string => typeof value === 'string' && value.length > 0))];
+}
+
+function parseRequestedTables(request: NextRequest) {
+  const rawTables = request.nextUrl.searchParams.get('tables');
+  if (!rawTables) {
+    return null;
+  }
+
+  const tables = uniqueStrings(rawTables.split(',').map((value) => value.trim()));
+  return tables.filter((value): value is SupabaseBootstrapTable => (
+    VALID_BOOTSTRAP_TABLES.has(value as SupabaseBootstrapTable)
+  ));
 }
 
 async function loadHouseholds(user: User, remoteUserId: string | null) {
@@ -201,37 +219,105 @@ async function loadAuditLogs(remoteUserId: string | null, role: User['role']) {
   return data ?? [];
 }
 
-async function buildBootstrapPayload(user: User): Promise<BootstrapPayload> {
+async function buildBootstrapPayload(
+  user: User,
+  requestedTables?: SupabaseBootstrapTable[],
+): Promise<BootstrapPayload> {
   const payload: BootstrapPayload = {};
-  const remoteUserId = getSupabaseAdminConfig().isConfigured
-    ? await mirrorAppUserToSupabase(user, {
-        emailConfirmed: Boolean(user.email_verified_at || !user.email_verification_required),
-      }).catch(() => null)
+  const requestedTableSet = requestedTables?.length ? new Set(requestedTables) : null;
+  const wants = (table: SupabaseBootstrapTable) => !requestedTableSet || requestedTableSet.has(table);
+  const needsHouseholds = wants('households')
+    || wants('residents')
+    || wants('vulnerability_flags')
+    || wants('beneficiaries');
+  const needsResidents = wants('residents')
+    || wants('vulnerability_flags')
+    || wants('beneficiaries');
+  const shouldResolveRemoteUserId = getSupabaseAdminConfig().isConfigured && (
+    wants('audit_logs')
+    || (needsHouseholds && user.role === 'resident')
+  );
+  const remoteUserId = shouldResolveRemoteUserId
+    ? await resolveSupabaseUserId(user.id).catch(() => null)
     : null;
 
-  const households = await loadHouseholds(user, remoteUserId);
-  const householdIds = households
-    .map((household) => (typeof household.id === 'string' ? household.id : ''))
-    .filter(Boolean);
-  const residents = await loadResidentsForHouseholds(householdIds);
-  const residentIds = residents
-    .map((resident) => (typeof resident.id === 'string' ? resident.id : ''))
-    .filter(Boolean);
-
-  payload.households = households;
-  payload.residents = residents;
-  payload.vulnerability_flags = await loadVulnerabilityFlags(residentIds, user.role);
-  payload.programs = await loadPrograms();
-  payload.beneficiaries = await loadBeneficiaries(user, residentIds);
-  payload.location_master_lists = await loadLocationMasters(user);
-  payload.audit_logs = await loadAuditLogs(remoteUserId, user.role);
-
-  if (user.role === 'admin' || user.role === 'encoder') {
-    Object.assign(payload, await loadInventoryBundle());
-    Object.assign(payload, await loadDistributionBundle());
+  let households: Record<string, unknown>[] = [];
+  let householdIds: string[] = [];
+  if (needsHouseholds) {
+    households = await loadHouseholds(user, remoteUserId);
+    householdIds = households
+      .map((household) => (typeof household.id === 'string' ? household.id : ''))
+      .filter(Boolean);
   }
 
-  if (['admin', 'encoder', 'health_worker', 'responder'].includes(user.role)) {
+  if (wants('households')) {
+    payload.households = households;
+  }
+
+  let residents: Record<string, unknown>[] = [];
+  let residentIds: string[] = [];
+  if (needsResidents) {
+    residents = await loadResidentsForHouseholds(householdIds);
+    residentIds = residents
+      .map((resident) => (typeof resident.id === 'string' ? resident.id : ''))
+      .filter(Boolean);
+  }
+
+  if (wants('residents')) {
+    payload.residents = residents;
+  }
+
+  if (wants('vulnerability_flags')) {
+    payload.vulnerability_flags = await loadVulnerabilityFlags(residentIds, user.role);
+  }
+
+  if (wants('programs')) {
+    payload.programs = await loadPrograms();
+  }
+
+  if (wants('beneficiaries')) {
+    payload.beneficiaries = await loadBeneficiaries(user, residentIds);
+  }
+
+  if (wants('location_master_lists')) {
+    payload.location_master_lists = await loadLocationMasters(user);
+  }
+
+  if (wants('audit_logs')) {
+    payload.audit_logs = await loadAuditLogs(remoteUserId, user.role);
+  }
+
+  if ((user.role === 'admin' || user.role === 'encoder') && (
+    wants('inventory_items')
+    || wants('inventory_movements')
+    || wants('package_templates')
+  )) {
+    const inventoryBundle = await loadInventoryBundle();
+    if (wants('inventory_items')) {
+      payload.inventory_items = inventoryBundle.inventory_items;
+    }
+    if (wants('inventory_movements')) {
+      payload.inventory_movements = inventoryBundle.inventory_movements;
+    }
+    if (wants('package_templates')) {
+      payload.package_templates = inventoryBundle.package_templates;
+    }
+  }
+
+  if ((user.role === 'admin' || user.role === 'encoder') && (
+    wants('distribution_events')
+    || wants('distribution_records')
+  )) {
+    const distributionBundle = await loadDistributionBundle();
+    if (wants('distribution_events')) {
+      payload.distribution_events = distributionBundle.distribution_events;
+    }
+    if (wants('distribution_records')) {
+      payload.distribution_records = distributionBundle.distribution_records;
+    }
+  }
+
+  if (wants('incidents') && ['admin', 'encoder', 'health_worker', 'responder'].includes(user.role)) {
     payload.incidents = await loadIncidents();
   }
 
@@ -252,7 +338,15 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const payload = await buildBootstrapPayload(authResult.user);
+    const requestedTables = parseRequestedTables(request);
+    if (request.nextUrl.searchParams.has('tables') && requestedTables && requestedTables.length === 0) {
+      return NextResponse.json(
+        { error: 'No valid bootstrap tables were requested.' },
+        { status: 400 },
+      );
+    }
+
+    const payload = await buildBootstrapPayload(authResult.user, requestedTables ?? undefined);
 
     return NextResponse.json(payload, {
       headers: {

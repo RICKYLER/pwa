@@ -41,6 +41,21 @@ let currentUser: User | null = null;
 let hydratePromise: Promise<User | null> | null = null;
 let sessionSource: 'server' | 'snapshot' | null = null;
 const AUTH_SNAPSHOT_KEY = 'mswdo.auth.snapshot';
+const AUTH_SESSION_TIMEOUT_MS = 10_000;
+
+async function fetchWithTimeout(input: RequestInfo | URL, init: RequestInit, timeoutMs: number) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    return await fetch(input, {
+      ...init,
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
 
 function normalizeUser(user: User | null): User | null {
   if (!user) return null;
@@ -264,10 +279,18 @@ export async function hydrateSession(force = false): Promise<User | null> {
     return hydratePromise;
   }
 
-  hydratePromise = fetch('/api/auth/session', {
+  hydratePromise = fetchWithTimeout('/api/auth/session', {
     cache: 'no-store',
+    credentials: 'same-origin',
     headers: { Accept: 'application/json' },
-  })
+  }, AUTH_SESSION_TIMEOUT_MS)
+    .catch(async (error) => {
+      if (error instanceof Error && error.name === 'AbortError') {
+        console.warn(`Session hydration timed out after ${AUTH_SESSION_TIMEOUT_MS}ms.`);
+      }
+
+      throw error;
+    })
     .then(async (response) => {
       if (!response.ok) {
         currentUser = null;

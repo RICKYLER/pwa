@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { getCurrentUser, hasPermission } from '@/lib/auth';
@@ -29,21 +29,45 @@ export default function HouseholdsDesktop() {
     const [isLoading, setIsLoading] = useState(true);
     const [memberCounts, setMemberCounts] = useState<Record<string, number>>({});
 
-    useEffect(() => {
+    const loadHouseholdsData = useCallback(async (background = false) => {
         if (!user || !hasPermission('view_households')) { router.push('/dashboard'); return; }
         const u = user;
-        async function load() {
+
+        if (!background) {
             setIsLoading(true);
-            const all = await getHouseholds({ barangay_id: u.barangay_id });
-            setHouseholds(all);
-            const counts: Record<string, number> = {};
-            for (const h of all) counts[h.id] = (await getResidentsInHousehold(h.id)).length;
-            setMemberCounts(counts);
-            setPuroks(await getAllPuroks(u.barangay_id));
+        }
+
+        const all = await getHouseholds({ barangay_id: u.barangay_id });
+        setHouseholds(all);
+        const counts: Record<string, number> = {};
+        for (const h of all) counts[h.id] = (await getResidentsInHousehold(h.id)).length;
+        setMemberCounts(counts);
+        setPuroks(await getAllPuroks(u.barangay_id));
+
+        if (!background) {
             setIsLoading(false);
         }
-        load();
     }, [user, router]);
+
+    useEffect(() => {
+        void loadHouseholdsData();
+    }, [loadHouseholdsData]);
+
+    useEffect(() => {
+        function handleDataChanged(event: WindowEventMap['mswdo-data-changed']) {
+            if (!['households', 'residents'].includes(event.detail.table)) {
+                return;
+            }
+
+            void loadHouseholdsData(true);
+        }
+
+        window.addEventListener('mswdo-data-changed', handleDataChanged);
+
+        return () => {
+            window.removeEventListener('mswdo-data-changed', handleDataChanged);
+        };
+    }, [loadHouseholdsData]);
 
     useEffect(() => {
         let r = households;
