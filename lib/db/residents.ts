@@ -1,12 +1,12 @@
 import { db, STORE_NAMES } from './indexeddb';
 import type { PWDType, Resident, ResidentStatus, VulnerabilityFlags } from './schema';
 import {
-  calculateVulnerabilityFlags,
   getCurrentVulnerabilityFlagsMapForResidents,
-  updateAgeBasedFlags,
 } from './vulnerability';
 import { getHousehold, getHouseholds } from './households';
 import { createAuditLog } from '../auth';
+import { runServerMutation } from '@/lib/mutations';
+import { bootstrapAllDataFromSupabase } from '@/lib/supabase/bootstrap';
 
 /**
  * Generate ID for residents
@@ -80,37 +80,35 @@ export async function createResident(data: Omit<Resident, 'id' | 'createdAt' | '
       id: generateId(),
       createdAt: new Date(),
       updatedAt: new Date(),
-      syncStatus: 'pending',
+      syncStatus: 'synced',
     };
 
-    await db.add(STORE_NAMES.residents, resident);
+    await runServerMutation({
+      action: 'create_resident',
+      resident: {
+        id: resident.id,
+        household_id: resident.household_id,
+        full_name: resident.full_name.trim(),
+        birthdate: resident.birthdate,
+        gender: resident.gender,
+        relationship_to_head: resident.relationship_to_head.trim(),
+        status: resident.status,
+        civil_status: resident.civil_status,
+        occupation: resident.occupation?.trim() || undefined,
+        income_level: resident.income_level,
+        contact_number: resident.contact_number?.trim() || undefined,
+      },
+    });
 
-    // Create vulnerability flags
-    const household = await getHousehold(data.household_id);
-    if (household) {
-      const flags = calculateVulnerabilityFlags(resident, household);
-      await db.add(STORE_NAMES.vulnerability_flags, {
-        id: `vf_${resident.id}`,
-        resident_id: resident.id,
-        ...flags,
-      } as VulnerabilityFlags);
+    await bootstrapAllDataFromSupabase(true);
 
-      console.log(`Vulnerability flags created for ${resident.full_name}:`, {
-        is_child: flags.is_child,
-        is_adult: flags.is_adult,
-        is_senior: flags.is_senior,
-      });
+    const createdResident = await getResident(resident.id);
+    if (!createdResident) {
+      throw new Error('Resident was created in Supabase, but it did not rehydrate locally.');
     }
 
-    await createAuditLog(
-      'CREATE',
-      'resident',
-      resident.id,
-      { name: data.full_name, birthdate: data.birthdate }
-    );
-
-    console.log('Resident created:', resident.id);
-    return resident;
+    console.log('Resident created:', createdResident.id);
+    return createdResident;
   } catch (error) {
     console.error('Error creating resident:', error);
     throw error;
@@ -127,43 +125,33 @@ export async function updateResident(id: string, updates: Partial<Resident>): Pr
       throw new Error(`Resident ${id} not found`);
     }
 
-    const updated: Resident = {
-      ...existing,
-      ...updates,
-      id,
-      createdAt: existing.createdAt,
-      updatedAt: new Date(),
-      syncStatus: 'pending',
-    };
+    await runServerMutation({
+      action: 'update_resident',
+      residentId: id,
+      updates: {
+        ...updates,
+        full_name: typeof updates.full_name === 'string' ? updates.full_name.trim() : updates.full_name,
+        relationship_to_head:
+          typeof updates.relationship_to_head === 'string'
+            ? updates.relationship_to_head.trim()
+            : updates.relationship_to_head,
+        occupation: typeof updates.occupation === 'string' ? (updates.occupation.trim() || null) : updates.occupation,
+        contact_number:
+          typeof updates.contact_number === 'string'
+            ? (updates.contact_number.trim() || null)
+            : updates.contact_number,
+      },
+    });
 
-    await db.put(STORE_NAMES.residents, updated);
+    await bootstrapAllDataFromSupabase(true);
 
-    // Check if age-based flags need updating (birthday might have passed)
-    const household = await getHousehold(updated.household_id);
-    if (household) {
-      const existingFlags = await db.get<VulnerabilityFlags>(
-        STORE_NAMES.vulnerability_flags,
-        `vf_${id}`
-      );
-      
-      if (existingFlags) {
-        const updated_flags = updateAgeBasedFlags(updated, household, existingFlags);
-        if (updated_flags) {
-          await db.put(STORE_NAMES.vulnerability_flags, updated_flags);
-          console.log('Vulnerability flags updated for resident:', id);
-        }
-      }
+    const updatedResident = await getResident(id);
+    if (!updatedResident) {
+      throw new Error('Resident was updated in Supabase, but it did not rehydrate locally.');
     }
 
-    await createAuditLog(
-      'UPDATE',
-      'resident',
-      id,
-      { changes: updates }
-    );
-
     console.log('Resident updated:', id);
-    return updated;
+    return updatedResident;
   } catch (error) {
     console.error('Error updating resident:', error);
     throw error;

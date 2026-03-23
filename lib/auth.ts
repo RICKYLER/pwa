@@ -234,6 +234,14 @@ export async function logout(): Promise<void> {
     currentUser = null;
     sessionSource = null;
     persistSessionSnapshot(null);
+    await import('@/lib/supabase/bootstrap')
+      .then(({ clearSupabaseBootstrapData }) => clearSupabaseBootstrapData({
+        includeSyncQueue: true,
+        notifyTables: false,
+      }))
+      .catch((error) => {
+        console.warn('Failed to clear local Supabase mirror on logout:', error);
+      });
   }
 }
 

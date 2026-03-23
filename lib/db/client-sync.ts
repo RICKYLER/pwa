@@ -146,9 +146,31 @@ export async function flushSyncQueueNow(): Promise<number> {
     }
 
     await recordDetailedSyncFailures(payload?.failedItems);
+
+    if (syncedItemIds.size > 0 && typeof window !== 'undefined') {
+      await import('@/lib/supabase/bootstrap')
+        .then(({ bootstrapAllDataFromSupabase }) => bootstrapAllDataFromSupabase(true))
+        .catch((error) => {
+          console.warn('Failed to refresh Supabase data after sync:', error);
+        });
+    }
   } catch (error) {
     await recordSyncFailure(items, error instanceof Error ? error.message : 'Sync backup failed');
   }
 
   return getPendingSyncCount();
+}
+
+export async function syncMutationNow(queueItemId: string): Promise<void> {
+  await flushSyncQueueNow();
+
+  const queuedItem = await getQueueItem(queueItemId);
+  if (!queuedItem) {
+    return;
+  }
+
+  throw new Error(
+    queuedItem.last_error
+    || 'Failed to save this change to Supabase. Please try again.',
+  );
 }

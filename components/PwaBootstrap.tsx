@@ -3,6 +3,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { AlertTriangle, Cloud, CloudCheck } from 'lucide-react';
 import { flushSyncQueueNow, getPendingSyncCount } from '@/lib/db/client-sync';
+import { clearLegacyLocalDatabase } from '@/lib/db/indexeddb';
+import { bootstrapAllDataFromSupabase } from '@/lib/supabase/bootstrap';
 
 declare global {
   interface WindowEventMap {
@@ -71,6 +73,10 @@ export default function PwaBootstrap() {
           setPendingSyncCount(afterCount);
         }
 
+        if (beforeCount > 0 && afterCount < beforeCount) {
+          await bootstrapAllDataFromSupabase(true);
+        }
+
         if (beforeCount > 0 && afterCount >= beforeCount && !cancelled) {
           setSyncError('Some realtime updates are still pending. Please stay online and try again.');
         }
@@ -90,6 +96,7 @@ export default function PwaBootstrap() {
       await Promise.all([
         unregisterLegacyServiceWorkers(),
         clearLegacyCaches(),
+        clearLegacyLocalDatabase(),
       ]);
 
       await refreshPendingCount();

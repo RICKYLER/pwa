@@ -27,6 +27,19 @@ const SUPPORTED_ENTITY_TYPES = [
 
 type SupportedEntityType = (typeof SUPPORTED_ENTITY_TYPES)[number];
 
+const CONFLICT_GUARDED_ENTITY_TYPES = new Set<SupportedEntityType>([
+  'households',
+  'residents',
+  'vulnerability_flags',
+  'programs',
+  'beneficiaries',
+  'inventory_items',
+  'package_templates',
+  'distribution_events',
+  'incidents',
+  'location_master_lists',
+]);
+
 type SyncFailure = {
   id: string;
   entity_type: string;
@@ -168,6 +181,13 @@ function normalizeDistributedItems(value: unknown) {
 function normalizeJsonValue(value: unknown) {
   if (value === undefined) return null;
   return value;
+}
+
+function extractConflictGuard(data: Record<string, unknown>) {
+  return {
+    baseUpdatedAt: toOptionalString(data.__base_updated_at),
+    baseRecordVersion: toOptionalNumber(data.__base_record_version),
+  };
 }
 
 async function resolveAuditLogUserId(value: unknown, syncActorId: string) {
@@ -497,12 +517,46 @@ async function applySyncItem(item: SyncQueueItem, syncActorId: string) {
   }
 
   const supabase = getSupabaseAdminClient();
+  const rawData =
+    item.data && typeof item.data === 'object'
+      ? item.data as Record<string, unknown>
+      : {};
+  const conflictGuard = extractConflictGuard(rawData);
+  const canUseConflictGuard = CONFLICT_GUARDED_ENTITY_TYPES.has(item.entity_type);
 
   if (item.operation === 'delete') {
-    const { error } = await supabase
+    let query = supabase
       .from(item.entity_type)
       .delete()
       .eq('id', item.entity_id);
+
+    if (canUseConflictGuard) {
+      if (conflictGuard.baseRecordVersion !== null) {
+        query = query.eq('record_version', conflictGuard.baseRecordVersion);
+      } else if (conflictGuard.baseUpdatedAt) {
+        query = query.eq('updated_at', conflictGuard.baseUpdatedAt);
+      }
+    }
+
+    const { data, error } = await query
+      .select('id');
+
+    if (error) {
+      throw new Error(error.message);
+    }
+
+    if (canUseConflictGuard && (!Array.isArray(data) || data.length === 0)) {
+      throw new Error(`Conflict detected while deleting ${item.entity_type}:${item.entity_id}. Refresh before retrying.`);
+    }
+
+    return;
+  }
+
+  const payload = await mapQueueItemToSupabaseRow(item, syncActorId);
+  if (item.operation === 'create') {
+    const { error } = await supabase
+      .from(item.entity_type)
+      .insert(payload);
 
     if (error) {
       throw new Error(error.message);
@@ -511,15 +565,33 @@ async function applySyncItem(item: SyncQueueItem, syncActorId: string) {
     return;
   }
 
-  const payload = await mapQueueItemToSupabaseRow(item, syncActorId);
-  const { error } = await supabase
+  const { id: _id, ...updatePayload } = payload;
+  let query = supabase
     .from(item.entity_type)
-    .upsert(payload, {
-      onConflict: 'id',
-    });
+    .update(updatePayload)
+    .eq('id', item.entity_id);
+
+  if (canUseConflictGuard) {
+    if (conflictGuard.baseRecordVersion !== null) {
+      query = query.eq('record_version', conflictGuard.baseRecordVersion);
+    } else if (conflictGuard.baseUpdatedAt) {
+      query = query.eq('updated_at', conflictGuard.baseUpdatedAt);
+    }
+  }
+
+  const { data, error } = await query
+    .select('id');
 
   if (error) {
     throw new Error(error.message);
+  }
+
+  if (!Array.isArray(data) || data.length === 0) {
+    if (canUseConflictGuard) {
+      throw new Error(`Conflict detected while updating ${item.entity_type}:${item.entity_id}. Refresh before retrying.`);
+    }
+
+    throw new Error(`${item.entity_type}:${item.entity_id} no longer exists in Supabase.`);
   }
 }
 

@@ -6,6 +6,8 @@ import type {
   HouseholdRegistrationStatus,
 } from './schema';
 import { createAuditLog } from '../auth';
+import { runServerMutation } from '@/lib/mutations';
+import { bootstrapAllDataFromSupabase } from '@/lib/supabase/bootstrap';
 import { getLocationMasterList } from './location-master';
 import {
   getHouseholdRegistrationStatus,
@@ -18,6 +20,23 @@ import {
 function generateId(): string {
   return `hh_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 }
+
+function generateResidentBundleId(): string {
+  return `res_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+}
+
+type HouseholdMemberBundleDraft = {
+  full_name: string;
+  birthdate: string;
+  gender: 'M' | 'F';
+  relationship_to_head: string;
+  civil_status: 'single' | 'married' | 'widowed' | 'separated';
+  occupation: string;
+  income_level: 'low' | 'middle' | 'high';
+  is_pregnant: boolean;
+  is_pwd: boolean;
+  pwd_type?: string;
+};
 
 function normalizeCoordinate(value: unknown): number | undefined {
   if (typeof value === 'number') {
@@ -155,27 +174,58 @@ export async function getHouseholdsByPurok(purok: string): Promise<Household[]> 
  * Create new household
  */
 export async function createHousehold(data: Omit<Household, 'id' | 'createdAt' | 'updatedAt' | 'syncStatus'>): Promise<Household> {
+  return createHouseholdBundle(data, []);
+}
+
+export async function createHouseholdBundle(
+  data: Omit<Household, 'id' | 'createdAt' | 'updatedAt' | 'syncStatus'>,
+  members: HouseholdMemberBundleDraft[],
+): Promise<Household> {
   try {
-    const household: Household = normalizeHousehold({
+    const householdId = generateId();
+    const household = normalizeHousehold({
       ...data,
       registration_status: data.registration_status ?? 'approved',
-      id: generateId(),
+      id: householdId,
       createdAt: new Date(),
       updatedAt: new Date(),
-      syncStatus: 'pending', // Will sync when backend available
+      syncStatus: 'synced' as const,
     });
 
-    await db.add(STORE_NAMES.households, household);
-    
-    await createAuditLog(
-      'CREATE',
-      'household',
-      household.id,
-      { household_name: data.head_name, purok: data.purok_sitio }
-    );
+    await runServerMutation({
+      action: 'create_household_bundle',
+      household: {
+        ...household,
+        createdAt: undefined,
+        updatedAt: undefined,
+        syncStatus: undefined,
+      },
+      members: members.map((member) => ({
+        id: generateResidentBundleId(),
+        household_id: householdId,
+        full_name: member.full_name.trim(),
+        birthdate: member.birthdate,
+        gender: member.gender,
+        relationship_to_head: member.relationship_to_head.trim(),
+        civil_status: member.civil_status,
+        occupation: member.occupation.trim() || undefined,
+        income_level: member.income_level,
+        status: 'active',
+        is_pregnant: Boolean(member.is_pregnant),
+        is_pwd: Boolean(member.is_pwd),
+        pwd_type: member.is_pwd ? member.pwd_type || undefined : undefined,
+      })),
+    });
 
-    console.log('Household created:', household.id);
-    return household;
+    await bootstrapAllDataFromSupabase(true);
+
+    const createdHousehold = await getHousehold(householdId);
+    if (!createdHousehold) {
+      throw new Error('Household was created in Supabase, but it did not rehydrate locally.');
+    }
+
+    console.log('Household created:', createdHousehold.id);
+    return createdHousehold;
   } catch (error) {
     console.error('Error creating household:', error);
     throw error;

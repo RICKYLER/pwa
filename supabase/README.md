@@ -48,6 +48,7 @@ Notes:
 - `Success. No rows returned.` is expected after `schema.sql`. The script mainly creates tables, functions, triggers, and policies, so there is nothing to display unless you run a `select`.
 - If you want to confirm the schema exists, run [verify.sql](/root/pwa/supabase/verify.sql#L1) next.
 - New schema changes should go into new files under `supabase/migrations/`, for example: `npx supabase migration new add_something`.
+- To apply the latest scoped realtime broadcasts, server mutation RPCs, and conflict-guard changes from this repo, run `npx supabase db push` after pulling the newest migration files.
 - `public.users` is the app profile table linked to `auth.users`.
 - Passwords are intentionally handled by Supabase Auth, not stored in `public.users`.
 - Realtime is enabled in the SQL script by adding the main tables to `supabase_realtime`.

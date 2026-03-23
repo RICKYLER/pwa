@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import nodemailer from 'nodemailer';
 import { fetchOpenWeatherFieldResponseWeather } from '@/lib/weather';
 import { requireAdminUser } from '@/lib/server/auth-guards';
+import { getSupabaseAdminClient, getSupabaseAdminConfig } from '@/lib/server/supabase-admin';
 
 export const runtime = 'nodejs';
 
@@ -450,6 +451,118 @@ async function checkRecaptcha(): Promise<HealthCheckResult> {
   );
 }
 
+async function checkSupabaseAdminConfig(): Promise<HealthCheckResult> {
+  const { url, key, isConfigured } = getSupabaseAdminConfig();
+
+  if (!isConfigured || !url || !key) {
+    return result(
+      'supabase_admin',
+      'Supabase Admin Client',
+      'error',
+      false,
+      'Supabase admin env is incomplete',
+      'Set NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.',
+    );
+  }
+
+  return result(
+    'supabase_admin',
+    'Supabase Admin Client',
+    'healthy',
+    true,
+    'Supabase admin env is configured',
+    url,
+  );
+}
+
+async function checkSupabaseAuthAdmin(): Promise<HealthCheckResult> {
+  if (!getSupabaseAdminConfig().isConfigured) {
+    return result(
+      'supabase_auth_admin',
+      'Supabase Auth Admin',
+      'error',
+      false,
+      'Supabase auth admin check skipped',
+      'Supabase admin env is missing.',
+    );
+  }
+
+  try {
+    const supabase = getSupabaseAdminClient();
+    const { data, error } = await supabase.auth.admin.listUsers({
+      page: 1,
+      perPage: 1,
+    });
+
+    if (error) {
+      throw error;
+    }
+
+    return result(
+      'supabase_auth_admin',
+      'Supabase Auth Admin',
+      'healthy',
+      true,
+      'Supabase Auth admin access succeeded',
+      `${data.users.length} user record(s) returned from test query.`,
+    );
+  } catch (error) {
+    return result(
+      'supabase_auth_admin',
+      'Supabase Auth Admin',
+      'error',
+      true,
+      'Supabase Auth admin access failed',
+      safeErrorMessage(error),
+    );
+  }
+}
+
+async function checkSupabaseCoreTables(): Promise<HealthCheckResult> {
+  if (!getSupabaseAdminConfig().isConfigured) {
+    return result(
+      'supabase_core_tables',
+      'Supabase Core Tables',
+      'error',
+      false,
+      'Supabase table check skipped',
+      'Supabase admin env is missing.',
+    );
+  }
+
+  try {
+    const supabase = getSupabaseAdminClient();
+    const [usersResult, householdsResult, residentsResult] = await Promise.all([
+      supabase.from('users').select('id', { count: 'exact', head: true }),
+      supabase.from('households').select('id', { count: 'exact', head: true }),
+      supabase.from('residents').select('id', { count: 'exact', head: true }),
+    ]);
+
+    const error = usersResult.error || householdsResult.error || residentsResult.error;
+    if (error) {
+      throw error;
+    }
+
+    return result(
+      'supabase_core_tables',
+      'Supabase Core Tables',
+      'healthy',
+      true,
+      'Supabase core tables are readable',
+      `users=${usersResult.count ?? 0}, households=${householdsResult.count ?? 0}, residents=${residentsResult.count ?? 0}`,
+    );
+  } catch (error) {
+    return result(
+      'supabase_core_tables',
+      'Supabase Core Tables',
+      'error',
+      true,
+      'Supabase core table access failed',
+      safeErrorMessage(error),
+    );
+  }
+}
+
 export async function GET(request: NextRequest) {
   const guard = await requireAdminUser(request);
   if ('response' in guard) {
@@ -461,6 +574,9 @@ export async function GET(request: NextRequest) {
 
   const checks = await Promise.all([
     checkAppUrl(),
+    checkSupabaseAdminConfig(),
+    checkSupabaseAuthAdmin(),
+    checkSupabaseCoreTables(),
     checkSmtp(),
     checkMapsKeyPresence(),
     checkTimezone(lat, lng),

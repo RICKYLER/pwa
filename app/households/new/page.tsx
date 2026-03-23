@@ -3,8 +3,7 @@
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { getCurrentUser, hasPermission } from '@/lib/auth';
-import { createHousehold } from '@/lib/db/households';
-import { createResident, updateHealthFlags } from '@/lib/db/residents';
+import { createHouseholdBundle } from '@/lib/db/households';
 import { HouseholdForm, MemberDraft } from '@/components/forms/household-form';
 import { ArrowLeft } from 'lucide-react';
 import Link from 'next/link';
@@ -28,34 +27,10 @@ export default function AddHouseholdPage() {
     try {
       setIsLoading(true);
 
-      // 1. Create the household
-      const household = await createHousehold({
+      await createHouseholdBundle({
         ...data,
         barangay_id: user?.barangay_id || 'barangay-1',
-      });
-
-      // 2. Create each member linked to the new household
-      for (const member of members) {
-        const resident = await createResident({
-          household_id: household.id,
-          full_name: member.full_name,
-          birthdate: member.birthdate,
-          gender: member.gender,
-          relationship_to_head: member.relationship_to_head,
-          civil_status: member.civil_status,
-          occupation: member.occupation,
-          income_level: member.income_level,
-          status: 'active',
-        });
-
-        if (member.is_pregnant || member.is_pwd) {
-          await updateHealthFlags(resident.id, {
-            is_pregnant: member.is_pregnant,
-            is_pwd: member.is_pwd,
-            pwd_type: member.is_pwd ? member.pwd_type || undefined : undefined,
-          });
-        }
-      }
+      }, members);
 
       router.push('/households');
     } catch (error) {

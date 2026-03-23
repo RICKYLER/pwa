@@ -1,32 +1,16 @@
 'use client';
 
 import { useEffect } from 'react';
-import type { RealtimeChannel, RealtimePostgresChangesPayload, Session } from '@supabase/supabase-js';
-import { db, STORE_NAMES } from '@/lib/db/indexeddb';
+import type { RealtimeChannel, Session } from '@supabase/supabase-js';
+import { getCurrentUser } from '@/lib/auth';
+import { db } from '@/lib/db/indexeddb';
 import { getSupabaseBrowserClient, getSupabaseBrowserConfig } from '@/lib/supabase/client';
-
-type StoreName = (typeof STORE_NAMES)[keyof typeof STORE_NAMES];
-
-type TableConfig = {
-  table: string;
-  storeName: StoreName;
-};
-
-const TABLE_CONFIGS: TableConfig[] = [
-  { table: 'households', storeName: STORE_NAMES.households },
-  { table: 'residents', storeName: STORE_NAMES.residents },
-  { table: 'vulnerability_flags', storeName: STORE_NAMES.vulnerability_flags },
-  { table: 'inventory_items', storeName: STORE_NAMES.inventory_items },
-  { table: 'inventory_movements', storeName: STORE_NAMES.inventory_movements },
-  { table: 'package_templates', storeName: STORE_NAMES.package_templates },
-  { table: 'distribution_events', storeName: STORE_NAMES.distribution_events },
-  { table: 'distribution_records', storeName: STORE_NAMES.distribution_records },
-  { table: 'incidents', storeName: STORE_NAMES.incidents },
-  { table: 'location_master_lists', storeName: STORE_NAMES.location_master_lists },
-  { table: 'programs', storeName: STORE_NAMES.programs },
-  { table: 'beneficiaries', storeName: STORE_NAMES.beneficiaries },
-  { table: 'audit_logs', storeName: STORE_NAMES.audit_logs },
-];
+import { getRealtimeTopicsForUser } from '@/lib/supabase/realtime-topics';
+import {
+  mapSupabaseRow,
+  SUPABASE_BOOTSTRAP_TABLES,
+} from '@/lib/supabase/row-mapper';
+import { bootstrapAllDataFromSupabase } from '@/lib/supabase/bootstrap';
 
 declare global {
   interface WindowEventMap {
@@ -35,71 +19,6 @@ declare global {
       table: string;
       mode: 'hydrate' | 'change';
     }>;
-  }
-}
-
-function mapSupabaseRow(table: string, row: Record<string, unknown>) {
-  const {
-    created_at,
-    updated_at,
-    updated_by,
-    sync_status: _syncStatus,
-    ...base
-  } = row;
-
-  switch (table) {
-    case 'households':
-      return {
-        ...base,
-        createdAt: created_at,
-        updatedAt: updated_at,
-        syncStatus: 'synced' as const,
-      };
-    case 'residents':
-      return {
-        ...base,
-        createdAt: created_at,
-        updatedAt: updated_at,
-        syncStatus: 'synced' as const,
-      };
-    case 'vulnerability_flags':
-      return {
-        ...base,
-        updatedAt: updated_at,
-        syncStatus: 'synced' as const,
-      };
-    case 'programs':
-      return {
-        ...base,
-        createdAt: created_at,
-      };
-    case 'beneficiaries':
-      return {
-        ...base,
-        enrollment_date:
-          typeof base.enrollment_date === 'string'
-            ? new Date(`${base.enrollment_date}T00:00:00.000Z`)
-            : base.enrollment_date,
-        syncStatus: 'synced' as const,
-      };
-    case 'package_templates':
-      return {
-        ...base,
-        createdAt: created_at,
-        updatedAt: updated_at,
-        syncStatus: 'synced' as const,
-      };
-    case 'location_master_lists':
-      return {
-        ...base,
-        updatedAt: updated_at,
-        updatedBy: typeof updated_by === 'string' ? updated_by : undefined,
-      };
-    default:
-      return {
-        ...base,
-        syncStatus: 'synced' as const,
-      };
   }
 }
 
@@ -115,50 +34,46 @@ function notifyDataChanged(table: string, mode: 'hydrate' | 'change') {
   }));
 }
 
-async function hydrateTable(tableName: string, tableConfig: TableConfig) {
-  const supabase = getSupabaseBrowserClient();
-  if (!supabase) return null;
+type BroadcastDbChangePayload = {
+  id?: string;
+  table?: string;
+  schema?: string;
+  operation?: 'INSERT' | 'UPDATE' | 'DELETE';
+  record?: Record<string, unknown> | null;
+  old_record?: Record<string, unknown> | null;
+};
 
-  const { data, error } = await supabase
-    .from(tableConfig.table)
-    .select('*');
-
-  if (error) {
-    console.warn(`[Supabase Realtime] Could not hydrate ${tableConfig.table}:`, error.message);
+async function applyBroadcastPayload(payload: BroadcastDbChangePayload) {
+  const tableName = typeof payload.table === 'string' ? payload.table : '';
+  const tableConfig = SUPABASE_BOOTSTRAP_TABLES.find((entry) => entry.table === tableName);
+  if (!tableConfig) {
     return null;
   }
 
-  if (!Array.isArray(data) || data.length === 0) {
-    notifyDataChanged(tableName, 'hydrate');
-    return 0;
-  }
+  if (payload.operation === 'DELETE') {
+    const deletedId =
+      typeof payload.old_record?.id === 'string'
+        ? payload.old_record.id
+        : typeof payload.id === 'string'
+          ? payload.id
+          : null;
 
-  await Promise.all(
-    data.map((row) => db.put(
-      tableConfig.storeName,
-      mapSupabaseRow(tableConfig.table, row as Record<string, unknown>),
-    )),
-  );
-
-  notifyDataChanged(tableName, 'hydrate');
-  return data.length;
-}
-
-async function applyRealtimePayload(payload: RealtimePostgresChangesPayload<Record<string, unknown>>, tableConfig: TableConfig) {
-  if (payload.eventType === 'DELETE') {
-    const deletedId = typeof payload.old?.id === 'string' ? payload.old.id : null;
     if (deletedId) {
       await db.deleteSilently(tableConfig.storeName, deletedId);
     }
-    return;
+
+    return tableConfig.table;
   }
 
-  if (payload.new && typeof payload.new === 'object') {
+  if (payload.record && typeof payload.record === 'object') {
     await db.put(
       tableConfig.storeName,
-      mapSupabaseRow(tableConfig.table, payload.new),
+      mapSupabaseRow(tableConfig.table, payload.record),
     );
+    return tableConfig.table;
   }
+
+  return null;
 }
 
 export default function SupabaseRealtimeBridge() {
@@ -172,21 +87,39 @@ export default function SupabaseRealtimeBridge() {
 
     const supabaseClient = supabase;
     let cancelled = false;
-    let channel: RealtimeChannel | null = null;
+    let channels: RealtimeChannel[] = [];
     let activeRunId = 0;
-
-    async function clearRealtimeStores() {
-      await Promise.all(TABLE_CONFIGS.map((tableConfig) => db.clear(tableConfig.storeName)));
-    }
+    let pollingTimer: number | null = null;
 
     async function disconnectChannel() {
-      if (!channel) {
+      if (channels.length === 0) {
         return;
       }
 
-      const currentChannel = channel;
-      channel = null;
-      await supabaseClient.removeChannel(currentChannel);
+      const currentChannels = channels;
+      channels = [];
+      await Promise.all(currentChannels.map((channel) => supabaseClient.removeChannel(channel)));
+    }
+
+    function stopPolling() {
+      if (pollingTimer) {
+        window.clearInterval(pollingTimer);
+        pollingTimer = null;
+      }
+    }
+
+    function startPolling() {
+      if (pollingTimer || typeof window === 'undefined') {
+        return;
+      }
+
+      pollingTimer = window.setInterval(() => {
+        if (cancelled || document.visibilityState !== 'visible') {
+          return;
+        }
+
+        void bootstrapAllDataFromSupabase(true);
+      }, 15000);
     }
 
     async function start(sessionOverride?: Session | null) {
@@ -200,56 +133,69 @@ export default function SupabaseRealtimeBridge() {
 
       if (!session) {
         await disconnectChannel();
-        await clearRealtimeStores();
+        await supabaseClient.realtime.setAuth();
         return;
       }
 
       await disconnectChannel();
-      await db.init();
-      await clearRealtimeStores();
-
-      let visibleRows = 0;
-
-      for (const tableConfig of TABLE_CONFIGS) {
-        if (cancelled || runId !== activeRunId) return;
-        const hydratedRowCount = await hydrateTable(tableConfig.table, tableConfig);
-        if (typeof hydratedRowCount === 'number') {
-          visibleRows += hydratedRowCount;
-        }
-      }
-
-      if (!cancelled && runId === activeRunId && visibleRows === 0) {
-        console.warn(
-          '[Supabase Realtime] Connected, but no readable rows were returned. If you expected data here, check your table RLS policies or sign in with Supabase auth.',
-        );
-      }
+      await supabaseClient.realtime.setAuth(session.access_token);
+      await bootstrapAllDataFromSupabase(true);
 
       if (cancelled || runId !== activeRunId) return;
 
-      channel = supabaseClient.channel('mswdo-db-realtime');
+      const currentUser = getCurrentUser();
+      const realtimeTopics = getRealtimeTopicsForUser(currentUser);
 
-      TABLE_CONFIGS.forEach((tableConfig) => {
-        channel = channel?.on(
-          'postgres_changes',
-          { event: '*', schema: 'public', table: tableConfig.table },
-          async (payload) => {
-            if (cancelled) return;
+      channels = realtimeTopics.map((topic) => {
+        const handleBroadcastMessage = async (message: { payload?: BroadcastDbChangePayload | null }) => {
+          if (cancelled) return;
 
-            try {
-              await applyRealtimePayload(payload, tableConfig);
-              notifyDataChanged(tableConfig.table, 'change');
-            } catch (error) {
-              console.error(`[Supabase Realtime] Failed to apply ${tableConfig.table} change:`, error);
+          try {
+            const changedTable = await applyBroadcastPayload(
+              (message?.payload ?? null) as BroadcastDbChangePayload,
+            );
+
+            if (changedTable) {
+              notifyDataChanged(changedTable, 'change');
             }
-          },
-        ) ?? null;
-      });
+          } catch (error) {
+            console.error(`[Supabase Realtime] Failed to apply broadcast from ${topic}:`, error);
+          }
+        };
 
-      channel?.subscribe((status) => {
-        if (status === 'CHANNEL_ERROR') {
-          console.warn('[Supabase Realtime] Channel error. Check env vars and table RLS/select policies.');
-        }
+        const channel = supabaseClient
+          .channel(topic, {
+            config: {
+              private: true,
+            },
+          })
+          .on('broadcast', { event: 'INSERT' }, handleBroadcastMessage)
+          .on('broadcast', { event: 'UPDATE' }, handleBroadcastMessage)
+          .on('broadcast', { event: 'DELETE' }, handleBroadcastMessage);
+
+        channel.subscribe((status, error) => {
+          if (status === 'SUBSCRIBED') {
+            stopPolling();
+            return;
+          }
+
+          if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+            console.warn(`[Supabase Realtime] Channel ${topic} issue detected. Falling back to backend refresh.`, error);
+            startPolling();
+            void bootstrapAllDataFromSupabase(true);
+          }
+        });
+
+        return channel;
       });
+    }
+
+    function handleWindowFocus() {
+      if (cancelled) {
+        return;
+      }
+
+      void bootstrapAllDataFromSupabase(true);
     }
 
     const {
@@ -263,11 +209,14 @@ export default function SupabaseRealtimeBridge() {
     });
 
     void start();
+    window.addEventListener('focus', handleWindowFocus);
 
     return () => {
       cancelled = true;
       activeRunId += 1;
+      stopPolling();
       subscription.unsubscribe();
+      window.removeEventListener('focus', handleWindowFocus);
       void disconnectChannel();
     };
   }, []);

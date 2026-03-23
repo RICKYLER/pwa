@@ -1,8 +1,10 @@
 import { createAuditLog } from '../auth';
 import { db, STORE_NAMES } from './indexeddb';
-import { getHousehold, getHouseholds } from './households';
-import { getInventoryItem, releaseStock } from './inventory';
-import { getResident, getResidents } from './residents';
+import { runServerMutation } from '@/lib/mutations';
+import { bootstrapAllDataFromSupabase } from '@/lib/supabase/bootstrap';
+import { getHouseholds } from './households';
+import { getInventoryItem } from './inventory';
+import { getResidents } from './residents';
 import { getCurrentVulnerabilityFlagsMapForResidents } from './vulnerability';
 import type {
   DistributedItem,
@@ -340,92 +342,31 @@ export async function releaseDistributionPackage(params: {
     throw new Error('This event has no package items configured yet');
   }
 
-  let household: Household | undefined;
-  let resident: Resident | undefined;
-
-  if (event.target_scope === 'household') {
-    if (!params.household_id) {
-      throw new Error('Select a household before releasing items');
-    }
-
-    household = await getHousehold(params.household_id);
-    if (!household || household.status !== 'active') {
-      throw new Error('Selected household is not available for distribution');
-    }
-  } else {
-    if (!params.resident_id) {
-      throw new Error('Select a resident before releasing items');
-    }
-
-    resident = await getResident(params.resident_id);
-    if (!resident || resident.status !== 'active') {
-      throw new Error('Selected resident is not available for distribution');
-    }
-
-    household = await getHousehold(resident.household_id);
-  }
-
-  const existing = await getDistributionRecords(event.id);
-  const duplicate =
-    event.target_scope === 'household'
-      ? existing.some((record) => record.household_id === household?.id)
-      : existing.some((record) => record.resident_id === resident?.id);
-
-  if (duplicate) {
-    throw new Error(
-      event.target_scope === 'household'
-        ? 'This household already claimed this package'
-        : 'This resident already claimed this package',
-    );
-  }
-
-  const inventorySnapshots = await Promise.all(
-    event.package_items.map(async (packageItem) => {
-      const inventoryItem = await getInventoryItem(packageItem.item_id);
-      if (!inventoryItem) {
-        throw new Error(`Inventory item ${packageItem.item_name || packageItem.item_id} was not found`);
-      }
-
-      if (inventoryItem.quantity_available < packageItem.quantity) {
-        throw new Error(
-          `Not enough stock for ${inventoryItem.item_name}. Need ${packageItem.quantity} ${inventoryItem.unit}, only ${inventoryItem.quantity_available} left.`,
-        );
-      }
-
-      return {
-        inventoryItem,
-        distributedItem: {
-          item_id: packageItem.item_id,
-          quantity: packageItem.quantity,
-          item_name: packageItem.item_name || inventoryItem.item_name,
-          unit: packageItem.unit || inventoryItem.unit,
-        } satisfies DistributedItem,
-      };
-    }),
-  );
-
-  await Promise.all(
-    inventorySnapshots.map(({ inventoryItem, distributedItem }) =>
-      releaseStock(inventoryItem.id, distributedItem.quantity, {
-        type: 'distribution_release',
-        notes: `Released for event ${event.event_name}`,
-        reference_id: event.id,
-        reference_type: 'distribution',
-      }),
-    ),
-  );
-
-  return recordDistribution({
-    event_id: event.id,
-    household_id: household?.id,
-    resident_id: resident?.id,
-    beneficiary_name: resident?.full_name || household?.head_name || params.received_by_name?.trim(),
-    items_distributed: inventorySnapshots.map((entry) => entry.distributedItem),
-    received_by_name:
-      params.received_by_name?.trim() || resident?.full_name || household?.head_name,
-    distributor_id: params.distributor_id,
-    notes: params.notes?.trim() || undefined,
+  await runServerMutation({
+    action: 'release_distribution_package',
+    params: {
+      event_id: event.id,
+      household_id: params.household_id,
+      resident_id: params.resident_id,
+      received_by_name: params.received_by_name?.trim() || undefined,
+      notes: params.notes?.trim() || undefined,
+    },
   });
+
+  await bootstrapAllDataFromSupabase(true);
+
+  const records = await getDistributionRecords(event.id);
+  const latestRecord = records.find((record) =>
+    event.target_scope === 'household'
+      ? record.household_id === params.household_id
+      : record.resident_id === params.resident_id,
+  );
+
+  if (!latestRecord) {
+    throw new Error('Distribution was saved in Supabase, but it did not rehydrate locally.');
+  }
+
+  return latestRecord;
 }
 
 /**
@@ -505,14 +446,12 @@ export async function deleteDistributionEvent(id: string): Promise<void> {
     const event = await getDistributionEvent(id);
     if (!event) throw new Error(`Distribution event ${id} not found`);
 
-    const records = await getDistributionRecords(id);
-    await Promise.all(records.map((record) => db.delete(STORE_NAMES.distribution_records, record.id)));
-    await db.delete(STORE_NAMES.distribution_events, id);
-
-    await createAuditLog('DELETE', 'distribution', id, {
-      event_name: event.event_name,
-      location: event.location,
+    await runServerMutation({
+      action: 'delete_distribution_event',
+      eventId: id,
     });
+
+    await bootstrapAllDataFromSupabase(true);
   } catch (error) {
     console.error('Error deleting distribution event:', error);
     throw error;

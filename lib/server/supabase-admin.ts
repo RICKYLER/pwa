@@ -23,7 +23,7 @@ export function getSupabaseAdminClient() {
 
   if (!isConfigured || !url || !key) {
     throw new Error(
-      'Supabase admin client is not configured. Set NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SECRET_KEY.',
+      'Supabase admin client is not configured. Set NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.',
     );
   }
 

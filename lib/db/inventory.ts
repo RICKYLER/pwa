@@ -1,5 +1,6 @@
-import { createAuditLog, getCurrentUser } from '../auth';
+import { createAuditLog } from '../auth';
 import { db, STORE_NAMES } from './indexeddb';
+import { runServerMutation } from '@/lib/mutations';
 import type {
   DistributedItem,
   InventoryItem,
@@ -254,23 +255,6 @@ export function getItemStockState(item: InventoryItem): 'out' | 'low' | 'healthy
   return 'healthy';
 }
 
-async function createInventoryMovementEntry(
-  data: Omit<InventoryMovement, 'id' | 'timestamp' | 'syncStatus'>,
-): Promise<InventoryMovement> {
-  const currentUser = getCurrentUser();
-  const movement: InventoryMovement = normalizeInventoryMovement({
-    ...data,
-    id: generateId('mov'),
-    performed_by: data.performed_by || currentUser?.id,
-    performed_by_name: data.performed_by_name || currentUser?.name,
-    timestamp: new Date(),
-    syncStatus: 'pending',
-  });
-
-  await db.add(STORE_NAMES.inventory_movements, movement);
-  return movement;
-}
-
 async function applyInventoryTransaction(params: {
   item_id: string;
   type: InventoryMovementType;
@@ -292,32 +276,34 @@ async function applyInventoryTransaction(params: {
     throw new Error('Transaction quantity must be greater than zero');
   }
 
-  const previousQuantity = item.quantity_available;
-  const nextQuantity =
-    typeof params.next_quantity === 'number'
-      ? Math.max(0, normalizeQuantity(params.next_quantity))
-      : params.type === 'stock_in'
-        ? previousQuantity + quantity
-        : Math.max(0, previousQuantity - quantity);
+  const currentRecordVersion =
+    typeof (item as InventoryItem & { recordVersion?: unknown }).recordVersion === 'number'
+      ? (item as InventoryItem & { recordVersion: number }).recordVersion
+      : undefined;
 
-  const updatedItem = await updateInventoryItem(item.id, {
-    quantity_available: nextQuantity,
+  await runServerMutation({
+    action: 'apply_inventory_transaction',
+    params: {
+      item_id: item.id,
+      type: params.type,
+      quantity,
+      next_quantity:
+        typeof params.next_quantity === 'number'
+          ? Math.max(0, normalizeQuantity(params.next_quantity))
+          : undefined,
+      notes: params.notes,
+      reference_id: params.reference_id,
+      reference_type: params.reference_type,
+      expected_record_version: currentRecordVersion,
+    },
   });
 
-  await createInventoryMovementEntry({
-    item_id: item.id,
-    item_name: item.item_name,
-    type: params.type,
-    quantity: params.type === 'adjustment' ? Math.abs(nextQuantity - previousQuantity) : quantity,
-    previous_quantity: previousQuantity,
-    new_quantity: nextQuantity,
-    unit: item.unit,
-    performed_by: params.performed_by,
-    performed_by_name: params.performed_by_name,
-    reference_id: params.reference_id,
-    reference_type: params.reference_type,
-    notes: params.notes,
-  });
+  await bootstrapInventoryFromSupabase(true);
+
+  const updatedItem = await getInventoryItem(item.id);
+  if (!updatedItem) {
+    throw new Error('Inventory item updated in Supabase, but it did not rehydrate locally.');
+  }
 
   return updatedItem;
 }
@@ -384,35 +370,33 @@ export async function createInventoryItem(
     const item = normalizeInventoryItem({
       ...data,
       id: generateId('inv'),
-      syncStatus: 'pending',
+      syncStatus: 'synced',
     });
 
-    await db.add(STORE_NAMES.inventory_items, item);
-
-    if (item.quantity_available > 0) {
-      await createInventoryMovementEntry({
-        item_id: item.id,
+    await runServerMutation({
+      action: 'create_inventory_item',
+      item: {
+        id: item.id,
         item_name: item.item_name,
-        type: 'stock_in',
-        quantity: item.quantity_available,
-        previous_quantity: 0,
-        new_quantity: item.quantity_available,
+        item_code: item.item_code,
+        category: item.category,
+        quantity_available: item.quantity_available,
         unit: item.unit,
-        reference_id: item.id,
-        reference_type: 'inventory',
-        notes: 'Opening stock',
-      });
+        reorder_level: item.reorder_level,
+        storage_location: item.storage_location,
+        expiration_date: item.expiration_date,
+        notes: item.notes,
+      },
+    });
+
+    await bootstrapInventoryFromSupabase(true);
+
+    const createdItem = await getInventoryItem(item.id);
+    if (!createdItem) {
+      throw new Error('Inventory item was created in Supabase, but it did not rehydrate locally.');
     }
 
-    await createAuditLog('CREATE', 'inventory', item.id, {
-      item_name: item.item_name,
-      category: item.category,
-      quantity: item.quantity_available,
-      reorder_level: item.reorder_level,
-      storage_location: item.storage_location,
-    });
-
-    return item;
+    return createdItem;
   } catch (error) {
     console.error('Error creating inventory item:', error);
     throw error;

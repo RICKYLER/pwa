@@ -1,12 +1,6 @@
-import type { 
-  User, Household, Resident, VulnerabilityFlags, 
-  Program, Beneficiary, InventoryItem, DistributionEvent,
-  DistributionRecord, Incident, AuditLog, SyncQueueItem, LocationMasterList,
-  InventoryMovement, PackageTemplate,
-} from './schema';
+import type { SyncQueueItem } from './schema';
 
-const DB_NAME = 'mswdo_census';
-const DB_VERSION = 3;
+const LEGACY_DB_NAME = 'mswdo_census';
 
 export const STORE_NAMES = {
   users: 'users',
@@ -42,9 +36,59 @@ const SYNC_TRACKED_STORES = new Set<string>([
   STORE_NAMES.audit_logs,
 ]);
 
+const ALL_STORE_NAMES = Object.values(STORE_NAMES);
+
+function cloneValue<T>(value: T): T {
+  if (typeof structuredClone === 'function') {
+    return structuredClone(value);
+  }
+
+  return value;
+}
+
+function normalizeConflictDate(value: unknown) {
+  if (value instanceof Date) {
+    return value.toISOString();
+  }
+
+  if (typeof value === 'string' && value.trim()) {
+    return value;
+  }
+
+  return undefined;
+}
+
 export class IndexedDBManager {
-  private db: IDBDatabase | null = null;
-  private initPromise: Promise<IDBDatabase> | null = null;
+  private initialized = false;
+  private stores = new Map<string, Map<string, Record<string, any>>>();
+
+  private getStore(storeName: string) {
+    let store = this.stores.get(storeName);
+    if (!store) {
+      store = new Map<string, Record<string, any>>();
+      this.stores.set(storeName, store);
+    }
+
+    return store;
+  }
+
+  private buildQueueItemId(storeName: string, entityId: string) {
+    return `${storeName}:${entityId}`;
+  }
+
+  private buildConflictMetadata(baseRecord?: Record<string, any>) {
+    if (!baseRecord) {
+      return {};
+    }
+
+    const baseUpdatedAt = normalizeConflictDate(baseRecord.updatedAt);
+    return {
+      ...(baseUpdatedAt ? { __base_updated_at: baseUpdatedAt } : {}),
+      ...(typeof baseRecord.recordVersion === 'number'
+        ? { __base_record_version: baseRecord.recordVersion }
+        : {}),
+    };
+  }
 
   private assertOnlineWriteAllowed(storeName: string) {
     if (typeof navigator === 'undefined') {
@@ -78,6 +122,7 @@ export class IndexedDBManager {
     storeName: string,
     operation: SyncQueueItem['operation'],
     data: Record<string, any>,
+    baseRecord?: Record<string, any>,
   ): Promise<void> {
     if (!this.shouldQueueSyncMutation(storeName, data)) {
       return;
@@ -88,7 +133,10 @@ export class IndexedDBManager {
       operation,
       entity_type: storeName,
       entity_id: data.id,
-      data,
+      data: {
+        ...data,
+        ...this.buildConflictMetadata(baseRecord),
+      },
       timestamp: new Date(),
       attempts: 0,
     };
@@ -97,7 +145,11 @@ export class IndexedDBManager {
     this.notifySyncQueueChanged();
   }
 
-  private async queueDeleteMutation(storeName: string, entityId: string): Promise<void> {
+  private async queueDeleteMutation(
+    storeName: string,
+    entityId: string,
+    baseRecord?: Record<string, any>,
+  ): Promise<void> {
     if (storeName === STORE_NAMES.sync_queue || !SYNC_TRACKED_STORES.has(storeName)) {
       return;
     }
@@ -107,7 +159,10 @@ export class IndexedDBManager {
       operation: 'delete',
       entity_type: storeName,
       entity_id: entityId,
-      data: { id: entityId },
+      data: {
+        id: entityId,
+        ...this.buildConflictMetadata(baseRecord),
+      },
       timestamp: new Date(),
       attempts: 0,
     };
@@ -116,161 +171,175 @@ export class IndexedDBManager {
     this.notifySyncQueueChanged();
   }
 
-  async init(): Promise<IDBDatabase> {
-    if (this.db) return this.db;
-    if (this.initPromise) return this.initPromise;
+  private async putSilently<T extends Record<string, any>>(storeName: string, data: T): Promise<T> {
+    await this.init();
+    this.getStore(storeName).set(String(data.id), cloneValue(data));
+    return data;
+  }
 
-    this.initPromise = new Promise((resolve, reject) => {
-      const request = indexedDB.open(DB_NAME, DB_VERSION);
+  private async syncMutationImmediately(
+    storeName: string,
+    entityId: string,
+    rollback: () => Promise<void>,
+  ): Promise<void> {
+    if (storeName === STORE_NAMES.sync_queue || !SYNC_TRACKED_STORES.has(storeName)) {
+      return;
+    }
 
-      request.onerror = () => {
-        console.error('IndexedDB open error:', request.error);
-        reject(request.error);
-      };
+    const queueItemId = this.buildQueueItemId(storeName, entityId);
+    const queuedItem = await this.get<SyncQueueItem>(STORE_NAMES.sync_queue, queueItemId).catch(() => undefined);
+    if (!queuedItem) {
+      return;
+    }
 
-      request.onsuccess = () => {
-        this.db = request.result;
-        console.log('IndexedDB initialized');
-        resolve(this.db);
-      };
+    try {
+      const { syncMutationNow } = await import('./client-sync');
+      await syncMutationNow(queueItemId);
+    } catch (error) {
+      await rollback().catch((rollbackError) => {
+        console.error(`Failed to roll back ${storeName}:${entityId} after Supabase sync failure:`, rollbackError);
+      });
+      await this.deleteSilently(STORE_NAMES.sync_queue, queueItemId).catch(() => undefined);
+      this.notifySyncQueueChanged();
+      throw error instanceof Error
+        ? error
+        : new Error('Failed to save this change to Supabase.');
+    }
+  }
 
-      request.onupgradeneeded = (event) => {
-        const db = (event.target as IDBOpenDBRequest).result;
-        console.log('Creating IndexedDB schema v' + DB_VERSION);
+  async init(): Promise<void> {
+    if (this.initialized) {
+      return;
+    }
 
-        // Create stores with auto-increment where needed
-        const createStore = (name: string) => {
-          if (!db.objectStoreNames.contains(name)) {
-            db.createObjectStore(name, { keyPath: 'id' });
-          }
-        };
-        createStore(STORE_NAMES.users);
-        createStore(STORE_NAMES.households);
-        createStore(STORE_NAMES.residents);
-        createStore(STORE_NAMES.vulnerability_flags);
-        createStore(STORE_NAMES.programs);
-        createStore(STORE_NAMES.beneficiaries);
-        createStore(STORE_NAMES.inventory_items);
-        createStore(STORE_NAMES.inventory_movements);
-        createStore(STORE_NAMES.package_templates);
-        createStore(STORE_NAMES.distribution_events);
-        createStore(STORE_NAMES.distribution_records);
-        createStore(STORE_NAMES.incidents);
-        createStore(STORE_NAMES.location_master_lists);
-        createStore(STORE_NAMES.audit_logs);
-        createStore(STORE_NAMES.sync_queue);
-      };
+    ALL_STORE_NAMES.forEach((storeName) => {
+      this.getStore(storeName);
     });
 
-    return this.initPromise;
+    this.initialized = true;
+    console.log('Local IndexedDB disabled. Using in-memory session store backed by Supabase.');
   }
 
   async add<T extends Record<string, any>>(storeName: string, data: T): Promise<T> {
     this.assertOnlineWriteAllowed(storeName);
-    const db = await this.init();
-    return new Promise((resolve, reject) => {
-      const tx = db.transaction(storeName, 'readwrite');
-      const store = tx.objectStore(storeName);
-      const request = store.add(data);
+    const shouldSyncImmediately = this.shouldQueueSyncMutation(storeName, data);
+    await this.init();
 
-      request.onsuccess = () => {
-        console.log(`Added to ${storeName}:`, data.id);
-        void this.queueSyncMutation(storeName, 'create', data)
-          .catch((error) => {
-            console.error(`Failed to queue create mutation for ${storeName}:`, error);
-          })
-          .finally(() => resolve(data));
-      };
-      request.onerror = () => reject(request.error);
-    });
+    const recordId = String(data.id);
+    const store = this.getStore(storeName);
+    if (store.has(recordId)) {
+      throw new Error(`Record already exists in ${storeName}: ${recordId}`);
+    }
+
+    store.set(recordId, cloneValue(data));
+    console.log(`Added to ${storeName}:`, data.id);
+
+    try {
+      await this.queueSyncMutation(storeName, 'create', data);
+    } catch (error) {
+      console.error(`Failed to queue create mutation for ${storeName}:`, error);
+      store.delete(recordId);
+      throw error;
+    }
+
+    if (shouldSyncImmediately && typeof data.id === 'string') {
+      await this.syncMutationImmediately(storeName, data.id, async () => {
+        await this.deleteSilently(storeName, data.id);
+      });
+    }
+
+    return cloneValue(data);
   }
 
   async put<T extends Record<string, any>>(storeName: string, data: T): Promise<T> {
     this.assertOnlineWriteAllowed(storeName);
-    const db = await this.init();
-    return new Promise((resolve, reject) => {
-      const tx = db.transaction(storeName, 'readwrite');
-      const store = tx.objectStore(storeName);
-      const request = store.put(data);
+    const shouldSyncImmediately = this.shouldQueueSyncMutation(storeName, data);
+    const existingRecord =
+      typeof data.id === 'string'
+        ? await this.get<T>(storeName, data.id).catch(() => undefined)
+        : undefined;
+    await this.init();
 
-      request.onsuccess = () => {
-        console.log(`Updated ${storeName}:`, data.id);
-        void this.queueSyncMutation(storeName, 'update', data)
-          .catch((error) => {
-            console.error(`Failed to queue update mutation for ${storeName}:`, error);
-          })
-          .finally(() => resolve(data));
-      };
-      request.onerror = () => reject(request.error);
-    });
+    this.getStore(storeName).set(String(data.id), cloneValue(data));
+    console.log(`Updated ${storeName}:`, data.id);
+
+    try {
+      await this.queueSyncMutation(
+        storeName,
+        'update',
+        data,
+        existingRecord as Record<string, any> | undefined,
+      );
+    } catch (error) {
+      console.error(`Failed to queue update mutation for ${storeName}:`, error);
+      if (existingRecord && typeof data.id === 'string') {
+        this.getStore(storeName).set(data.id, cloneValue(existingRecord as Record<string, any>));
+      }
+      throw error;
+    }
+
+    if (shouldSyncImmediately && typeof data.id === 'string') {
+      await this.syncMutationImmediately(storeName, data.id, async () => {
+        if (existingRecord) {
+          await this.putSilently(storeName, existingRecord);
+          return;
+        }
+
+        await this.deleteSilently(storeName, data.id);
+      });
+    }
+
+    return cloneValue(data);
   }
 
   async get<T = any>(storeName: string, key: string): Promise<T | undefined> {
-    const db = await this.init();
-    return new Promise((resolve, reject) => {
-      const tx = db.transaction(storeName, 'readonly');
-      const store = tx.objectStore(storeName);
-      const request = store.get(key);
-
-      request.onsuccess = () => resolve(request.result);
-      request.onerror = () => reject(request.error);
-    });
+    await this.init();
+    const entry = this.getStore(storeName).get(key);
+    return entry === undefined ? undefined : cloneValue(entry as T);
   }
 
   async getAll<T = any>(storeName: string): Promise<T[]> {
-    const db = await this.init();
-    return new Promise((resolve, reject) => {
-      const tx = db.transaction(storeName, 'readonly');
-      const store = tx.objectStore(storeName);
-      const request = store.getAll();
-
-      request.onsuccess = () => resolve(request.result);
-      request.onerror = () => reject(request.error);
-    });
+    await this.init();
+    return Array.from(this.getStore(storeName).values()).map((entry) => cloneValue(entry as T));
   }
 
   async delete(storeName: string, key: string): Promise<void> {
     this.assertOnlineWriteAllowed(storeName);
-    const db = await this.init();
-    return new Promise((resolve, reject) => {
-      const tx = db.transaction(storeName, 'readwrite');
-      const store = tx.objectStore(storeName);
-      const request = store.delete(key);
+    const existingRecord = await this.get<Record<string, any>>(storeName, key).catch(() => undefined);
+    await this.init();
 
-      request.onsuccess = () => {
-        console.log(`Deleted from ${storeName}:`, key);
-        void this.queueDeleteMutation(storeName, key)
-          .catch((error) => {
-            console.error(`Failed to queue delete mutation for ${storeName}:`, error);
-          })
-          .finally(() => resolve());
-      };
-      request.onerror = () => reject(request.error);
-    });
+    this.getStore(storeName).delete(key);
+    console.log(`Deleted from ${storeName}:`, key);
+
+    try {
+      await this.queueDeleteMutation(storeName, key, existingRecord);
+    } catch (error) {
+      console.error(`Failed to queue delete mutation for ${storeName}:`, error);
+      if (existingRecord) {
+        this.getStore(storeName).set(key, cloneValue(existingRecord));
+      }
+      throw error;
+    }
+
+    if (SYNC_TRACKED_STORES.has(storeName)) {
+      await this.syncMutationImmediately(storeName, key, async () => {
+        if (!existingRecord) {
+          return;
+        }
+
+        await this.putSilently(storeName, existingRecord);
+      });
+    }
   }
 
   async deleteSilently(storeName: string, key: string): Promise<void> {
-    const db = await this.init();
-    return new Promise((resolve, reject) => {
-      const tx = db.transaction(storeName, 'readwrite');
-      const store = tx.objectStore(storeName);
-      const request = store.delete(key);
-
-      request.onsuccess = () => resolve();
-      request.onerror = () => reject(request.error);
-    });
+    await this.init();
+    this.getStore(storeName).delete(key);
   }
 
   async clear(storeName: string): Promise<void> {
-    const db = await this.init();
-    return new Promise((resolve, reject) => {
-      const tx = db.transaction(storeName, 'readwrite');
-      const store = tx.objectStore(storeName);
-      const request = store.clear();
-
-      request.onsuccess = () => resolve();
-      request.onerror = () => reject(request.error);
-    });
+    await this.init();
+    this.getStore(storeName).clear();
   }
 
   async query<T = any>(
@@ -282,211 +351,23 @@ export class IndexedDBManager {
   }
 }
 
+export async function clearLegacyLocalDatabase(): Promise<void> {
+  if (typeof indexedDB === 'undefined') {
+    return;
+  }
+
+  await new Promise<void>((resolve) => {
+    const request = indexedDB.deleteDatabase(LEGACY_DB_NAME);
+    request.onsuccess = () => resolve();
+    request.onerror = () => resolve();
+    request.onblocked = () => resolve();
+  });
+}
+
 // Singleton instance
 export const db = new IndexedDBManager();
 
 // Seed initial demo data
 export async function seedInitialData() {
-  console.log('Seeding initial data...');
-
-  try {
-    // Check if census data already exists
-    const existingHouseholds = await db.getAll<Household>(STORE_NAMES.households);
-    if (existingHouseholds.length > 0) {
-      console.log('Data already seeded, skipping...');
-      return;
-    }
-
-    // Sample households
-    const households: Household[] = [
-      {
-        id: 'hh-1',
-        head_name: 'Miguel Santos',
-        barangay_id: 'barangay-1',
-        barangay_name: 'Barangay 1',
-        municipality: 'Mabini',
-        purok_sitio: 'Purok 1',
-        street_address: '123 Main Street',
-        landmark_directions: 'Near the barangay hall',
-        contact_number: '09171234567',
-        status: 'active',
-        location_confidence: 'medium',
-        location_verified: false,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-        syncStatus: 'synced',
-      },
-      {
-        id: 'hh-2',
-        head_name: 'Rosa Fernandez',
-        barangay_id: 'barangay-1',
-        barangay_name: 'Barangay 1',
-        municipality: 'Mabini',
-        purok_sitio: 'Purok 2',
-        street_address: '456 Oak Avenue',
-        landmark_directions: 'Across the chapel',
-        contact_number: '09187654321',
-        status: 'active',
-        location_confidence: 'medium',
-        location_verified: false,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-        syncStatus: 'synced',
-      },
-    ];
-
-    for (const household of households) {
-      await db.add(STORE_NAMES.households, household);
-    }
-
-    const masterLists: LocationMasterList[] = [
-      {
-        id: 'barangay-1',
-        barangay_id: 'barangay-1',
-        municipality: 'Mabini',
-        barangay_name: 'Barangay 1',
-        puroks: ['Purok 1', 'Purok 2', 'Purok 3', 'Purok 4', 'Purok 5', 'Purok 6', 'Purok 7'],
-        updatedAt: new Date(),
-        updatedBy: 'user-admin-1',
-      },
-    ];
-
-    for (const masterList of masterLists) {
-      await db.add(STORE_NAMES.location_master_lists, masterList);
-    }
-
-    // Sample residents with varied ages
-    const residents: Resident[] = [
-      {
-        id: 'res-1',
-        household_id: 'hh-1',
-        full_name: 'Miguel Santos Jr.',
-        birthdate: '1968-03-15',
-        gender: 'M',
-        relationship_to_head: 'Self',
-        status: 'active',
-        civil_status: 'married',
-        occupation: 'Farmer',
-        createdAt: new Date(),
-        updatedAt: new Date(),
-        syncStatus: 'synced',
-      },
-      {
-        id: 'res-2',
-        household_id: 'hh-1',
-        full_name: 'Carmen Santos',
-        birthdate: '1970-07-22',
-        gender: 'F',
-        relationship_to_head: 'Spouse',
-        status: 'active',
-        civil_status: 'married',
-        occupation: 'Teacher',
-        createdAt: new Date(),
-        updatedAt: new Date(),
-        syncStatus: 'synced',
-      },
-      {
-        id: 'res-3',
-        household_id: 'hh-1',
-        full_name: 'Ana Santos',
-        birthdate: '2015-11-10',
-        gender: 'F',
-        relationship_to_head: 'Daughter',
-        status: 'active',
-        createdAt: new Date(),
-        updatedAt: new Date(),
-        syncStatus: 'synced',
-      },
-      {
-        id: 'res-4',
-        household_id: 'hh-1',
-        full_name: 'Elena Santos',
-        birthdate: '1950-01-28',
-        gender: 'F',
-        relationship_to_head: 'Mother',
-        status: 'active',
-        civil_status: 'widowed',
-        createdAt: new Date(),
-        updatedAt: new Date(),
-        syncStatus: 'synced',
-      },
-      {
-        id: 'res-5',
-        household_id: 'hh-2',
-        full_name: 'Rosa Fernandez',
-        birthdate: '1975-05-12',
-        gender: 'F',
-        relationship_to_head: 'Self',
-        status: 'active',
-        civil_status: 'married',
-        occupation: 'Shopkeeper',
-        createdAt: new Date(),
-        updatedAt: new Date(),
-        syncStatus: 'synced',
-      },
-      {
-        id: 'res-6',
-        household_id: 'hh-2',
-        full_name: 'Carlos Reyes',
-        birthdate: '1973-09-18',
-        gender: 'M',
-        relationship_to_head: 'Spouse',
-        status: 'active',
-        civil_status: 'married',
-        occupation: 'Construction',
-        createdAt: new Date(),
-        updatedAt: new Date(),
-        syncStatus: 'synced',
-      },
-      {
-        id: 'res-7',
-        household_id: 'hh-2',
-        full_name: 'Maria Reyes',
-        birthdate: '2020-06-14',
-        gender: 'F',
-        relationship_to_head: 'Daughter',
-        status: 'active',
-        createdAt: new Date(),
-        updatedAt: new Date(),
-        syncStatus: 'synced',
-      },
-    ];
-
-    for (const resident of residents) {
-      await db.add(STORE_NAMES.residents, resident);
-    }
-
-    // Seed programs
-    const programs: Program[] = [
-      {
-        id: 'prog-1',
-        name: 'Senior Aid',
-        description: 'Assistance for senior citizens',
-        active: true,
-        createdAt: new Date(),
-      },
-      {
-        id: 'prog-2',
-        name: 'PWD Assistance',
-        description: 'Support for persons with disabilities',
-        active: true,
-        createdAt: new Date(),
-      },
-      {
-        id: 'prog-3',
-        name: 'Maternal Health',
-        description: 'Care for pregnant women and mothers',
-        active: true,
-        createdAt: new Date(),
-      },
-    ];
-
-    for (const program of programs) {
-      await db.add(STORE_NAMES.programs, program);
-    }
-
-    console.log('Initial data seeded successfully');
-  } catch (error) {
-    console.error('Error seeding initial data:', error);
-  }
+  console.log('Local seed data disabled. Supabase is now the only persistent data source.');
 }

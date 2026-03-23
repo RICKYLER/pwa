@@ -1,7 +1,9 @@
 'use client';
 
- import { ReactNode, useEffect, useState } from 'react';
+import { ReactNode, useEffect, useState } from 'react';
 import { hydrateSession } from '@/lib/auth';
+import SupabaseRealtimeBridge from '@/components/SupabaseRealtimeBridge';
+import { bootstrapAllDataFromSupabase, clearSupabaseBootstrapData } from '@/lib/supabase/bootstrap';
 
 declare global {
   interface WindowEventMap {
@@ -21,6 +23,17 @@ export default function AuthBootstrap({ children }: { children: ReactNode }) {
     let cancelled = false;
 
     hydrateSession()
+      .then(async (user) => {
+        if (user) {
+          await bootstrapAllDataFromSupabase();
+          return;
+        }
+
+        await clearSupabaseBootstrapData({
+          includeSyncQueue: true,
+          notifyTables: false,
+        });
+      })
       .catch(() => null)
       .finally(() => {
         if (!cancelled) {
@@ -56,5 +69,10 @@ export default function AuthBootstrap({ children }: { children: ReactNode }) {
     );
   }
 
-  return <div key={dataVersion}>{children}</div>;
+  return (
+    <>
+      <SupabaseRealtimeBridge />
+      <div key={dataVersion}>{children}</div>
+    </>
+  );
 }
