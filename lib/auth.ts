@@ -2,6 +2,27 @@ import type { User, UserRole, AuthContext } from './db/schema';
 import { getSupabaseBrowserClient, getSupabaseBrowserConfig } from './supabase/client';
 import { runServerMutation } from './mutations';
 
+export class AuthRequestError extends Error {
+  code?: string;
+  email?: string;
+  status?: number;
+
+  constructor(
+    message: string,
+    options?: {
+      code?: string;
+      email?: string;
+      status?: number;
+    },
+  ) {
+    super(message);
+    this.name = 'AuthRequestError';
+    this.code = options?.code;
+    this.email = options?.email;
+    this.status = options?.status;
+  }
+}
+
 // Role-based permissions matrix
 const PERMISSIONS = {
   admin: [
@@ -206,9 +227,19 @@ export async function login(email: string, password: string): Promise<User> {
     body: JSON.stringify({ email, password }),
   });
 
-  const payload = await response.json().catch(() => ({}));
+  const payload = await response.json().catch(() => ({})) as {
+    error?: string;
+    code?: string;
+    email?: string;
+    user?: User | null;
+  };
+
   if (!response.ok) {
-    throw new Error(payload.error || 'Login failed');
+    throw new AuthRequestError(payload.error || 'Login failed', {
+      code: typeof payload.code === 'string' ? payload.code : undefined,
+      email: typeof payload.email === 'string' ? payload.email : undefined,
+      status: response.status,
+    });
   }
 
   const user = normalizeUser(payload.user as User | null);

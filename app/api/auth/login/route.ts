@@ -45,6 +45,7 @@ export async function POST(request: NextRequest) {
       {
         error: 'Please verify your email address before signing in.',
         code: 'EMAIL_NOT_VERIFIED',
+        email: result.user.email,
       },
       { status: 403 },
     );

@@ -3,8 +3,8 @@
 import { FormEvent, useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { getDefaultRouteForUser, login, restoreSession } from '@/lib/auth';
-import { Eye, EyeOff, ShieldCheck, Cpu, Lock } from 'lucide-react';
+import { AuthRequestError, getDefaultRouteForUser, login, restoreSession } from '@/lib/auth';
+import { Eye, EyeOff, ShieldCheck, Cpu, Lock, Mail, Loader2, RefreshCw } from 'lucide-react';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -12,6 +12,10 @@ export default function LoginPage() {
   const [password, setPassword] = useState('');
   const [showPass, setShowPass] = useState(false);
   const [error, setError] = useState('');
+  const [verificationEmail, setVerificationEmail] = useState('');
+  const [verificationHelpVisible, setVerificationHelpVisible] = useState(false);
+  const [verificationMessage, setVerificationMessage] = useState('');
+  const [isResendingVerification, setIsResendingVerification] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [isMounted, setIsMounted] = useState(false);
 
@@ -28,16 +32,64 @@ export default function LoginPage() {
   async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setError('');
+    setVerificationMessage('');
+    setVerificationHelpVisible(false);
     setIsLoading(true);
     try {
       const user = await login(email, password);
       router.push(getDefaultRouteForUser(user));
     } catch (err) {
+      if (err instanceof AuthRequestError && err.code === 'EMAIL_NOT_VERIFIED') {
+        setVerificationEmail(err.email || email.trim());
+        setVerificationHelpVisible(true);
+      }
+
       setError(err instanceof Error ? err.message : 'Login failed');
     } finally {
       setIsLoading(false);
     }
   }
+
+  async function handleResendVerification() {
+    const targetEmail = verificationEmail || email.trim();
+    if (!targetEmail) {
+      setError('Enter the resident email address first.');
+      return;
+    }
+
+    try {
+      setIsResendingVerification(true);
+      setError('');
+      setVerificationMessage('');
+
+      const response = await fetch('/api/auth/resend-verification', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: targetEmail }),
+      });
+
+      const payload = await response.json().catch(() => ({})) as {
+        error?: string;
+        message?: string;
+      };
+
+      if (!response.ok) {
+        throw new Error(payload.error || 'Could not resend the verification email.');
+      }
+
+      setVerificationEmail(targetEmail);
+      setVerificationHelpVisible(true);
+      setVerificationMessage(payload.message || 'A new verification email has been sent.');
+    } catch (resendError) {
+      setError(resendError instanceof Error ? resendError.message : 'Could not resend the verification email.');
+    } finally {
+      setIsResendingVerification(false);
+    }
+  }
+
+  const verifyPageHref = verificationEmail
+    ? `/resident/verify-email?email=${encodeURIComponent(verificationEmail)}`
+    : '/resident/verify-email';
 
   return (
     <div className="min-h-screen flex bg-slate-950">
@@ -110,7 +162,12 @@ export default function LoginPage() {
                   id="email"
                   type="email"
                   value={email}
-                  onChange={(e) => setEmail(e.target.value)}
+                  onChange={(e) => {
+                    setEmail(e.target.value);
+                    setVerificationEmail(e.target.value.trim());
+                    setVerificationHelpVisible(false);
+                    setVerificationMessage('');
+                  }}
                   className="w-full px-4 py-3 border border-slate-200 rounded-xl bg-slate-50 text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-400 focus:bg-white transition-all text-sm"
                   placeholder="your@email.com"
                   autoComplete="username"
@@ -130,7 +187,11 @@ export default function LoginPage() {
                     id="password"
                     type={showPass ? 'text' : 'password'}
                     value={password}
-                    onChange={(e) => setPassword(e.target.value)}
+                    onChange={(e) => {
+                      setPassword(e.target.value);
+                      setVerificationHelpVisible(false);
+                      setVerificationMessage('');
+                    }}
                     className="w-full px-4 py-3 pr-12 border border-slate-200 rounded-xl bg-slate-50 text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-400 focus:bg-white transition-all text-sm"
                     placeholder="••••••••"
                     autoComplete="current-password"
@@ -153,6 +214,43 @@ export default function LoginPage() {
                 <div className="p-3.5 bg-red-50 border border-red-200 rounded-xl text-red-700 text-sm flex items-start gap-2">
                   <span className="w-4 h-4 text-red-500 flex-shrink-0 mt-0.5">⚠</span>
                   {error}
+                </div>
+              )}
+
+              {verificationHelpVisible && (
+                <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+                  <div className="flex items-start gap-3">
+                    <Mail className="mt-0.5 h-4 w-4 flex-shrink-0 text-amber-600" />
+                    <div className="space-y-3">
+                      <p className="font-semibold">Resident email still needs verification.</p>
+                      <p className="text-amber-800">
+                        For security, resident accounts should stay blocked until the email owner confirms the address.
+                        You can resend the verification email or open the verification page again.
+                      </p>
+                      {verificationMessage && (
+                        <p className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-emerald-700">
+                          {verificationMessage}
+                        </p>
+                      )}
+                      <div className="flex flex-col gap-3 sm:flex-row">
+                        <button
+                          type="button"
+                          onClick={() => { void handleResendVerification(); }}
+                          disabled={isResendingVerification || isLoading}
+                          className="inline-flex items-center justify-center gap-2 rounded-xl border border-amber-300 bg-white px-4 py-2.5 font-semibold text-amber-900 transition hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          {isResendingVerification ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                          {isResendingVerification ? 'Sending...' : 'Resend verification email'}
+                        </button>
+                        <Link
+                          href={verifyPageHref}
+                          className="inline-flex items-center justify-center rounded-xl bg-amber-600 px-4 py-2.5 font-semibold text-white transition hover:bg-amber-700"
+                        >
+                          Open verification page
+                        </Link>
+                      </div>
+                    </div>
+                  </div>
                 </div>
               )}
 

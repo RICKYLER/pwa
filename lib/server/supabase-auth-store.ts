@@ -553,13 +553,6 @@ export async function authenticateUser(email: string, password: string): Promise
     return { status: 'invalid_credentials' };
   }
 
-  if (user.role === 'resident' && user.email_verification_required) {
-    return {
-      status: 'email_not_verified',
-      user: toPublicUser(user),
-    };
-  }
-
   try {
     const supabase = getSupabasePublicAuthClient();
     const { error } = await supabase.auth.signInWithPassword({
@@ -568,12 +561,31 @@ export async function authenticateUser(email: string, password: string): Promise
     });
 
     if (error) {
+      const normalizedMessage = error.message.trim().toLowerCase();
+      const looksLikeUnverifiedEmail =
+        normalizedMessage.includes('email not confirmed')
+        || normalizedMessage.includes('email not verified');
+
+      if (user.role === 'resident' && user.email_verification_required && looksLikeUnverifiedEmail) {
+        return {
+          status: 'email_not_verified',
+          user: toPublicUser(user),
+        };
+      }
+
       return { status: 'invalid_credentials' };
     }
   } catch (error) {
     throw error instanceof Error
       ? error
       : new Error('Supabase public auth is not configured.');
+  }
+
+  if (user.role === 'resident' && user.email_verification_required) {
+    return {
+      status: 'email_not_verified',
+      user: toPublicUser(user),
+    };
   }
 
   return {
