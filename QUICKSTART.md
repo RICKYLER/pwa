@@ -16,16 +16,13 @@ The first time you log in, the app automatically seeds itself with sample data �
 
 ---
 
-## Demo Accounts
+## Default Admin Account
 
-Pick whichever role you want to test. Each one has a different level of access.
+Use the main admin account below to sign in.
 
 | Role | Email | Password | What They Can Do |
 |------|-------|----------|------------------|
-| **Admin** | admin@mswdo.local | admin123 | Everything — user management, full access |
-| **Encoder** | encoder@barangay.local | encoder123 | Add and edit households and residents ← *Best for demos* |
-| **Health Worker** | health@barangay.local | health123 | Update health flags (PWD, pregnancy, chronic illness) |
-| **Responder** | responder@drrmo.local | responder123 | View vulnerable residents and incidents |
+| **Admin** | MSWDOOO2017@gmail.com | mswdoooadmin123 | Everything — user management and full system access |
 
 ---
 

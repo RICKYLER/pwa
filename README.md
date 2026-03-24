@@ -313,16 +313,13 @@ npm run dev
 
 Open `http://localhost:3000` after the dev server starts.
 
-### Demo Credentials
+### Default Admin Credentials
 
 | Role | Email | Password |
 |------|-------|----------|
-| Admin | `admin@mswdo.local` | `admin123` |
-| Encoder | `encoder@barangay.local` | `encoder123` |
-| Health Worker | `health@barangay.local` | `health123` |
-| Responder | `responder@drrmo.local` | `responder123` |
+| Admin | `MSWDOOO2017@gmail.com` | `mswdoooadmin123` |
 
-The auth store seeds these demo accounts automatically when the local auth store file is created for the first time.
+The local fallback auth store seeds this admin account automatically when the auth store file is created for the first time.
 
 ---
 

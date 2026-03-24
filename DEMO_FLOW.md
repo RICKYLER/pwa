@@ -31,8 +31,8 @@
 ```
 1. Show login page: "MSWDO Census - Municipal Household Census"
 2. Explain: 4 user roles (Admin, Encoder, Health Worker, Responder)
-3. Login as: encoder@barangay.local / encoder123
-4. Point out: "Encoder" role in top right
+3. Login as: MSWDOOO2017@gmail.com / mswdoooadmin123
+4. Point out: "Administrator" role in the session
 5. Show: Dashboard loads with pre-seeded data
 ```
 
@@ -320,7 +320,7 @@ System designed for:
 ```
 1. Restart dev server: npm run dev
 2. Go to login
-3. Use encoder@barangay.local / encoder123
+3. Use MSWDOOO2017@gmail.com / mswdoooadmin123
 4. Pre-seeded data auto-loads
 5. Continue from vulnerability dashboard
 ```

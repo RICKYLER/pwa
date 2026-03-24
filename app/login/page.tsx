@@ -6,17 +6,10 @@ import { useRouter } from 'next/navigation';
 import { getDefaultRouteForUser, login, restoreSession } from '@/lib/auth';
 import { Eye, EyeOff, ShieldCheck, Cpu, Lock } from 'lucide-react';
 
-const DEMO_USERS = [
-  { role: 'Admin', email: 'admin@mswdo.local', password: 'admin123', color: 'from-indigo-500 to-violet-600' },
-  { role: 'Encoder', email: 'encoder@barangay.local', password: 'encoder123', color: 'from-blue-500 to-cyan-500' },
-  { role: 'Health', email: 'health@barangay.local', password: 'health123', color: 'from-emerald-500 to-teal-500' },
-  { role: 'Responder', email: 'responder@drrmo.local', password: 'responder123', color: 'from-orange-500 to-amber-500' },
-];
-
 export default function LoginPage() {
   const router = useRouter();
-  const [email, setEmail] = useState('admin@mswdo.local');
-  const [password, setPassword] = useState('admin123');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [showPass, setShowPass] = useState(false);
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -103,7 +96,7 @@ export default function LoginPage() {
 
           <div className="mb-8">
             <h2 className="text-3xl font-bold text-slate-900 mb-1">Welcome back</h2>
-            <p className="text-slate-500">Staff and residents can sign in here to continue</p>
+            <p className="text-slate-500">Sign in with your assigned account to continue</p>
           </div>
 
           {isMounted ? (
@@ -208,31 +201,6 @@ export default function LoginPage() {
               <div className="h-[50px] animate-pulse rounded-xl bg-slate-200" />
             </div>
           )}
-
-          {/* Demo credentials */}
-          <div className="mt-8 pt-6 border-t border-slate-100">
-            <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">
-              Quick Login — Demo Accounts
-            </p>
-            <div className="grid grid-cols-2 gap-2">
-              {DEMO_USERS.map(u => (
-                <button
-                  key={u.role}
-                  type="button"
-                  onClick={() => { setEmail(u.email); setPassword(u.password); }}
-                  className={`group relative overflow-hidden flex items-center gap-2.5 p-3 rounded-xl border border-slate-200 hover:border-transparent hover:shadow-md transition-all text-left`}
-                >
-                  <div className={`w-7 h-7 rounded-lg bg-gradient-to-br ${u.color} flex-shrink-0 flex items-center justify-center`}>
-                    <span className="text-white text-xs font-bold">{u.role[0]}</span>
-                  </div>
-                  <div className="min-w-0">
-                    <p className="text-xs font-semibold text-slate-700">{u.role}</p>
-                    <p className="text-xs text-slate-400 truncate">{u.password}</p>
-                  </div>
-                </button>
-              ))}
-            </div>
-          </div>
 
           <p className="text-center text-xs text-slate-400 mt-6">
             Secure cookie session · Staff land on the dashboard, residents land on their portal

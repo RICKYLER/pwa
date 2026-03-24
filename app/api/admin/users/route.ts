@@ -25,6 +25,9 @@ const ROLE_LABELS: Record<string, string> = {
   health_worker: 'Health Worker',
   responder: 'Responder',
 };
+const INTERNAL_USER_EMAILS = new Set([
+  'sync-agent@mswdo.local',
+]);
 
 export async function GET(request: NextRequest) {
   const guard = await requireAdminUser(request);
@@ -32,7 +35,7 @@ export async function GET(request: NextRequest) {
     return guard.response;
   }
 
-  const users = await listUsers();
+  const users = (await listUsers()).filter((user) => !INTERNAL_USER_EMAILS.has(user.email.toLowerCase()));
   return NextResponse.json({ users });
 }
 
