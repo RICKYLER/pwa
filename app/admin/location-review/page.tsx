@@ -28,6 +28,7 @@ import { useGoogleMaps } from '@/components/GoogleMapsProvider';
 import { getCurrentUser } from '@/lib/auth';
 import { getHouseholds, updateHousehold } from '@/lib/db/households';
 import { getLocationMasterList, saveLocationMasterList } from '@/lib/db/location-master';
+import { bootstrapSupabaseTables } from '@/lib/supabase/bootstrap';
 import type {
   Household,
   HouseholdRegistrationStatus,
@@ -54,6 +55,7 @@ import {
 
 const CONFIDENCE_OPTIONS: LocationConfidence[] = ['high', 'medium', 'low'];
 const REVIEW_TABS: HouseholdRegistrationStatus[] = HOUSEHOLD_REGISTRATION_STATUSES;
+const REVIEW_BOOTSTRAP_TABLES = ['households', 'residents', 'location_master_lists'] as const;
 
 interface ToastState {
   type: 'success' | 'error';
@@ -290,7 +292,7 @@ export default function AdminLocationReviewPage() {
 
     try {
       const [records, masterList] = await Promise.all([
-        getHouseholds({ barangay_id: user.barangay_id }),
+        getHouseholds(),
         getLocationMasterList(user.barangay_id),
       ]);
 
@@ -325,7 +327,10 @@ export default function AdminLocationReviewPage() {
       return;
     }
 
-    void load();
+    void (async () => {
+      await bootstrapSupabaseTables([...REVIEW_BOOTSTRAP_TABLES], { force: true });
+      await load();
+    })();
   }, [load, router, user]);
 
   async function handleSaveMasterList() {

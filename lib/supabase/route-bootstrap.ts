@@ -9,6 +9,10 @@ const ROUTE_TABLES: Array<{
   tables: SupabaseBootstrapTable[];
 }> = [
   {
+    prefix: '/admin/location-review',
+    tables: ['households', 'residents', 'location_master_lists'],
+  },
+  {
     prefix: '/dashboard',
     tables: ['households', 'residents', 'vulnerability_flags', 'audit_logs'],
   },
