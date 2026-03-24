@@ -4,11 +4,14 @@ import type {
   HouseholdStatus,
   LocationConfidence,
   HouseholdRegistrationStatus,
+  Resident,
+  VulnerabilityFlags,
 } from './schema';
 import { createAuditLog } from '../auth';
 import { runServerMutation } from '@/lib/mutations';
 import { bootstrapCurrentPathData } from '@/lib/supabase/route-bootstrap';
 import { getLocationMasterList } from './location-master';
+import { mapSupabaseRow } from '@/lib/supabase/row-mapper';
 import {
   getHouseholdRegistrationStatus,
   getStoredOrDerivedPinQaStatus,
@@ -37,6 +40,17 @@ type HouseholdMemberBundleDraft = {
   is_pwd: boolean;
   pwd_type?: string;
 };
+
+type CreateHouseholdBundleMutationPayload = {
+  household?: Record<string, unknown>;
+  household_id?: string;
+  residents?: Record<string, unknown>[];
+  vulnerability_flags?: Record<string, unknown>[];
+};
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
 
 function normalizeCoordinate(value: unknown): number | undefined {
   if (typeof value === 'number') {
@@ -192,7 +206,7 @@ export async function createHouseholdBundle(
       syncStatus: 'synced' as const,
     });
 
-    await runServerMutation({
+    const payload = await runServerMutation<CreateHouseholdBundleMutationPayload>({
       action: 'create_household_bundle',
       household: {
         ...household,
@@ -216,6 +230,42 @@ export async function createHouseholdBundle(
         pwd_type: member.is_pwd ? member.pwd_type || undefined : undefined,
       })),
     });
+
+    if (isRecord(payload.household)) {
+      const createdHousehold = normalizeHousehold(
+        mapSupabaseRow('households', payload.household) as Household,
+      );
+      await db.put(STORE_NAMES.households, createdHousehold);
+
+      if (Array.isArray(payload.residents)) {
+        await Promise.all(
+          payload.residents
+            .filter(isRecord)
+            .map((resident) => db.put(
+              STORE_NAMES.residents,
+              mapSupabaseRow('residents', resident) as Resident,
+            )),
+        );
+      }
+
+      if (Array.isArray(payload.vulnerability_flags)) {
+        await Promise.all(
+          payload.vulnerability_flags
+            .filter(isRecord)
+            .map((flags) => db.put(
+              STORE_NAMES.vulnerability_flags,
+              mapSupabaseRow('vulnerability_flags', flags) as VulnerabilityFlags,
+            )),
+        );
+      }
+
+      void bootstrapCurrentPathData(true).catch((error) => {
+        console.warn('Background bootstrap after household creation failed:', error);
+      });
+
+      console.log('Household created:', createdHousehold.id);
+      return createdHousehold;
+    }
 
     await bootstrapCurrentPathData(true);
 

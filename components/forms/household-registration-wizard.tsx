@@ -374,6 +374,7 @@ export function HouseholdRegistrationWizard({
         pin_qa_notes: '',
       });
 
+      setShowRequirementsDialog(false);
       router.push(`/households/register/status?id=${recordId}`);
     } catch (submitError) {
       setError(submitError instanceof Error ? submitError.message : 'Could not submit this registration.');
@@ -909,6 +910,12 @@ export function HouseholdRegistrationWizard({
                 I understand that I must visit the MSWDO office and bring these requirements for verification.
               </span>
             </label>
+
+            {error && (
+              <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                {error}
+              </div>
+            )}
           </div>
 
           <DialogFooter className="border-t border-slate-200 px-6 py-4 sm:justify-between">
