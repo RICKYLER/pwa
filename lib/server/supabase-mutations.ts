@@ -48,6 +48,16 @@ type ReleaseDistributionParams = {
   notes?: string;
 };
 
+type RemoteHouseholdBundleInput = Omit<
+  Household,
+  'createdAt' | 'updatedAt' | 'syncStatus' | 'applicant_user_id' | 'location_verified_by' | 'registration_reviewed_by'
+> & {
+  id: string;
+  applicant_user_id?: string | null;
+  location_verified_by?: string | null;
+  registration_reviewed_by?: string | null;
+};
+
 function toOptionalString(value: unknown) {
   if (typeof value !== 'string') return null;
   const trimmed = value.trim();
@@ -65,6 +75,76 @@ function toIsoString(value: unknown) {
   }
 
   return null;
+}
+
+function toDateOnlyString(value: unknown) {
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+    if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+      return trimmed;
+    }
+
+    const parsed = new Date(trimmed);
+    if (!Number.isNaN(parsed.getTime())) {
+      return parsed.toISOString().slice(0, 10);
+    }
+  }
+
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return value.toISOString().slice(0, 10);
+  }
+
+  return null;
+}
+
+function toTextArray(value: unknown) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map((entry) => (typeof entry === 'string' ? entry.trim() : String(entry ?? '').trim()))
+    .filter(Boolean);
+}
+
+function getAgeFromBirthdate(birthdate: string) {
+  const parsed = new Date(`${birthdate}T00:00:00.000Z`);
+  if (Number.isNaN(parsed.getTime())) {
+    return 0;
+  }
+
+  const today = new Date();
+  let age = today.getUTCFullYear() - parsed.getUTCFullYear();
+  const monthDelta = today.getUTCMonth() - parsed.getUTCMonth();
+  const dayDelta = today.getUTCDate() - parsed.getUTCDate();
+
+  if (monthDelta < 0 || (monthDelta === 0 && dayDelta < 0)) {
+    age -= 1;
+  }
+
+  return Math.max(age, 0);
+}
+
+function buildVulnerabilityFlagsPayload(residentId: string, member: HouseholdMemberDraft) {
+  const birthdate = toDateOnlyString(member.birthdate) ?? new Date().toISOString().slice(0, 10);
+  const age = getAgeFromBirthdate(birthdate);
+  const category = age < 18 ? 'child' : age < 60 ? 'adult' : 'senior';
+
+  return {
+    resident_id: residentId,
+    is_child: age < 18,
+    is_adult: age >= 18 && age < 60,
+    is_senior: age >= 60,
+    is_pregnant: Boolean(member.is_pregnant),
+    is_pwd: Boolean(member.is_pwd),
+    pwd_type: member.is_pwd ? toOptionalString(member.pwd_type) : null,
+    has_chronic_illness: Boolean(member.has_chronic_illness),
+    chronic_conditions: toTextArray(member.chronic_conditions),
+    is_low_income: member.income_level === 'low',
+    notes: `Auto-categorized as ${category} (age ${age}) on ${new Date().toISOString().slice(0, 10)}`,
+    sync_status: 'synced',
+  };
 }
 
 function stripUndefined<T extends Record<string, unknown>>(value: T) {
@@ -216,6 +296,145 @@ async function createInventoryItemWithoutRpc(
   };
 }
 
+async function createHouseholdBundleWithoutRpc(
+  user: User,
+  household: RemoteHouseholdBundleInput,
+  members: HouseholdMemberDraft[],
+  remoteActorId: string,
+) {
+  if (!['admin', 'encoder', 'resident'].includes(user.role)) {
+    throw new Error('You are not allowed to create households.');
+  }
+
+  const barangayId = toOptionalString(household.barangay_id);
+  if (!barangayId) {
+    throw new Error('Household barangay_id is required.');
+  }
+
+  if (user.role === 'encoder' && user.barangay_id !== barangayId) {
+    throw new Error('You can only create households inside your barangay.');
+  }
+
+  if (user.role === 'resident' && toOptionalString(household.applicant_user_id) !== remoteActorId) {
+    throw new Error('Residents can only create their own household registrations.');
+  }
+
+  const supabase = getSupabaseAdminClient();
+  const householdPayload = stripUndefined({
+    id: toOptionalString(household.id),
+    head_name: toOptionalString(household.head_name) ?? '',
+    head_id: toOptionalString(household.head_id),
+    barangay_id: barangayId,
+    applicant_user_id: toOptionalString(household.applicant_user_id),
+    applicant_email: toOptionalString(household.applicant_email),
+    barangay_name: toOptionalString(household.barangay_name),
+    municipality: toOptionalString(household.municipality),
+    purok_sitio: toOptionalString(household.purok_sitio) ?? '',
+    street_address: toOptionalString(household.street_address) ?? '',
+    landmark_directions: toOptionalString(household.landmark_directions),
+    contact_number: toOptionalString(household.contact_number),
+    supporting_document_name: toOptionalString(household.supporting_document_name),
+    supporting_document_type: toOptionalString(household.supporting_document_type),
+    supporting_document_data: toOptionalString(household.supporting_document_data),
+    status: household.status ?? 'active',
+    gps_lat: typeof household.gps_lat === 'number' ? household.gps_lat : undefined,
+    gps_long: typeof household.gps_long === 'number' ? household.gps_long : undefined,
+    location_source: household.location_source,
+    location_confidence: household.location_confidence,
+    location_verified: Boolean(household.location_verified),
+    location_verified_at: toIsoString(household.location_verified_at),
+    location_verified_by: toOptionalString(household.location_verified_by),
+    registration_status: household.registration_status ?? 'pending',
+    registration_submitted_at: toIsoString(household.registration_submitted_at),
+    registration_reviewed_at: toIsoString(household.registration_reviewed_at),
+    registration_reviewed_by: toOptionalString(household.registration_reviewed_by),
+    registration_review_notes: toOptionalString(household.registration_review_notes),
+    pin_qa_status: household.pin_qa_status ?? 'needs_verification',
+    pin_qa_notes: toOptionalString(household.pin_qa_notes),
+    sync_status: 'synced',
+  });
+
+  const { data: createdHousehold, error: householdError } = await supabase
+    .from('households')
+    .insert(householdPayload)
+    .select('*')
+    .single();
+
+  if (householdError) {
+    throw new Error(householdError.message);
+  }
+
+  if (!createdHousehold) {
+    throw new Error('Household could not be created.');
+  }
+
+  const createdResidents: Array<Record<string, unknown>> = [];
+  const createdFlags: Array<Record<string, unknown>> = [];
+
+  try {
+    for (const member of members) {
+      const residentPayload = stripUndefined({
+        household_id: createdHousehold.id,
+        full_name: toOptionalString(member.full_name) ?? '',
+        birthdate: toDateOnlyString(member.birthdate) ?? new Date().toISOString().slice(0, 10),
+        gender: member.gender === 'F' ? 'F' : 'M',
+        relationship_to_head: toOptionalString(member.relationship_to_head) ?? '',
+        status: 'active',
+        civil_status: toOptionalString(member.civil_status),
+        occupation: toOptionalString(member.occupation),
+        income_level: toOptionalString(member.income_level),
+        sync_status: 'synced',
+      });
+
+      const { data: createdResident, error: residentError } = await supabase
+        .from('residents')
+        .insert(residentPayload)
+        .select('*')
+        .single();
+
+      if (residentError) {
+        throw new Error(residentError.message);
+      }
+
+      if (!createdResident) {
+        throw new Error('Resident could not be created.');
+      }
+
+      createdResidents.push(createdResident);
+
+      const { data: createdFlag, error: flagsError } = await supabase
+        .from('vulnerability_flags')
+        .upsert(buildVulnerabilityFlagsPayload(createdResident.id, member), {
+          onConflict: 'resident_id',
+        })
+        .select('*')
+        .single();
+
+      if (flagsError) {
+        throw new Error(flagsError.message);
+      }
+
+      if (createdFlag) {
+        createdFlags.push(createdFlag);
+      }
+    }
+  } catch (error) {
+    await supabase
+      .from('households')
+      .delete()
+      .eq('id', createdHousehold.id);
+
+    throw error;
+  }
+
+  return {
+    household: createdHousehold,
+    household_id: createdHousehold.id,
+    residents: createdResidents,
+    vulnerability_flags: createdFlags,
+  };
+}
+
 export async function createAuditLogOnServer(params: {
   user: User;
   action: string;
@@ -242,7 +461,8 @@ export async function createHouseholdBundleOnServer(
     location_verified_by: await resolveRemoteUserId(household.location_verified_by),
     registration_reviewed_by: await resolveRemoteUserId(household.registration_reviewed_by),
   };
-  const { data, error } = await supabase.rpc('create_household_bundle', {
+  let data: unknown = null;
+  const { data: rpcData, error } = await supabase.rpc('create_household_bundle', {
     p_household: remoteHousehold,
     p_members: members,
     p_actor_role: user.role,
@@ -251,7 +471,13 @@ export async function createHouseholdBundleOnServer(
   });
 
   if (error) {
-    throw new Error(error.message);
+    if (isMissingRpcFunctionError(error, 'create_household_bundle')) {
+      data = await createHouseholdBundleWithoutRpc(user, remoteHousehold, members, remoteActorId);
+    } else {
+      throw new Error(error.message);
+    }
+  } else {
+    data = rpcData;
   }
 
   await createAuditLogEntry({
