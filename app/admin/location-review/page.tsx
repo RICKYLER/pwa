@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { GoogleMap, InfoWindow, Marker } from '@react-google-maps/api';
@@ -178,20 +178,6 @@ export default function AdminLocationReviewPage() {
   const toastTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
-    if (!user) {
-      router.push('/login');
-      return;
-    }
-
-    if (user.role !== 'admin') {
-      router.push('/dashboard');
-      return;
-    }
-
-    void load();
-  }, [router, user]);
-
-  useEffect(() => {
     return () => {
       if (toastTimerRef.current) {
         window.clearTimeout(toastTimerRef.current);
@@ -287,18 +273,21 @@ export default function AdminLocationReviewPage() {
       });
   }, [households]);
 
-  function showToast(type: ToastState['type'], msg: string) {
+  const showToast = useCallback((type: ToastState['type'], msg: string) => {
     setToast({ type, msg });
     if (toastTimerRef.current) {
       window.clearTimeout(toastTimerRef.current);
     }
     toastTimerRef.current = window.setTimeout(() => setToast(null), 3500);
-  }
+  }, []);
 
-  async function load() {
+  const load = useCallback(async (background = false) => {
     if (!user) return;
 
-    setIsLoading(true);
+    if (!background) {
+      setIsLoading(true);
+    }
+
     try {
       const [records, masterList] = await Promise.all([
         getHouseholds({ barangay_id: user.barangay_id }),
@@ -319,9 +308,25 @@ export default function AdminLocationReviewPage() {
       console.error(error);
       showToast('error', 'Failed to load registration review data.');
     } finally {
-      setIsLoading(false);
+      if (!background) {
+        setIsLoading(false);
+      }
     }
-  }
+  }, [showToast, user]);
+
+  useEffect(() => {
+    if (!user) {
+      router.push('/login');
+      return;
+    }
+
+    if (user.role !== 'admin') {
+      router.push('/dashboard');
+      return;
+    }
+
+    void load();
+  }, [load, router, user]);
 
   async function handleSaveMasterList() {
     if (!user) return;
@@ -414,6 +419,23 @@ export default function AdminLocationReviewPage() {
 
     await persistReview('approved');
   }
+
+  useEffect(() => {
+    function handleDataChanged(event: Event) {
+      const detail = (event as CustomEvent<{ table?: string }>).detail;
+      if (!detail || !['households', 'location_master_lists'].includes(detail.table || '')) {
+        return;
+      }
+
+      void load(true);
+    }
+
+    window.addEventListener('mswdo-data-changed', handleDataChanged);
+
+    return () => {
+      window.removeEventListener('mswdo-data-changed', handleDataChanged);
+    };
+  }, [load]);
 
   const stats = {
     pending: households.filter((household) => getHouseholdRegistrationStatus(household) === 'pending').length,
