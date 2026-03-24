@@ -19,7 +19,20 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Invalid login request.' }, { status: 400 });
   }
 
-  const result = await authenticateUser(payload.email, payload.password);
+  let result;
+
+  try {
+    result = await authenticateUser(payload.email, payload.password);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Login failed.';
+    const status = /not configured/i.test(message) ? 503 : 500;
+
+    return NextResponse.json(
+      { error: message },
+      { status },
+    );
+  }
+
   if (result.status === 'invalid_credentials') {
     return NextResponse.json(
       { error: 'Invalid email or password.' },
