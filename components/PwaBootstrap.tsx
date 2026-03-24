@@ -5,6 +5,7 @@ import { AlertTriangle, Cloud, CloudCheck } from 'lucide-react';
 import { flushSyncQueueNow, getPendingSyncCount } from '@/lib/db/client-sync';
 import { clearLegacyLocalDatabase } from '@/lib/db/indexeddb';
 import { bootstrapCurrentPathData } from '@/lib/supabase/route-bootstrap';
+import PwaInstallPrompt from '@/components/PwaInstallPrompt';
 
 declare global {
   interface WindowEventMap {
@@ -13,14 +14,48 @@ declare global {
 }
 
 const CACHE_PREFIXES = ['mswdo-pwa-'];
+const CURRENT_SERVICE_WORKER_PATH = '/sw.js';
 
-async function unregisterLegacyServiceWorkers() {
+async function registerCurrentServiceWorker() {
   if (typeof window === 'undefined' || !('serviceWorker' in navigator)) {
     return;
   }
 
+  if (
+    window.isSecureContext === false
+    && window.location.hostname !== 'localhost'
+    && window.location.hostname !== '127.0.0.1'
+  ) {
+    return;
+  }
+
   const registrations = await navigator.serviceWorker.getRegistrations().catch(() => []);
-  await Promise.all(registrations.map((registration) => registration.unregister().catch(() => false)));
+  await Promise.all(
+    registrations.map(async (registration) => {
+      const workerScriptUrl = (
+        registration.active?.scriptURL
+        || registration.waiting?.scriptURL
+        || registration.installing?.scriptURL
+        || ''
+      );
+
+      if (!workerScriptUrl) {
+        await registration.unregister().catch(() => false);
+        return;
+      }
+
+      const pathname = new URL(workerScriptUrl, window.location.origin).pathname;
+      if (pathname !== CURRENT_SERVICE_WORKER_PATH) {
+        await registration.unregister().catch(() => false);
+      }
+    }),
+  );
+
+  await navigator.serviceWorker.register(CURRENT_SERVICE_WORKER_PATH, {
+    scope: '/',
+  }).catch((error) => {
+    console.warn('Failed to register the install service worker:', error);
+  });
 }
 
 async function clearLegacyCaches() {
@@ -94,7 +129,7 @@ export default function PwaBootstrap() {
 
     async function initializeOnlineBridge() {
       await Promise.all([
-        unregisterLegacyServiceWorkers(),
+        registerCurrentServiceWorker(),
         clearLegacyCaches(),
         clearLegacyLocalDatabase(),
       ]);
@@ -138,49 +173,47 @@ export default function PwaBootstrap() {
     };
   }, []);
 
-  if (!isOnline) {
-    return (
-      <div className="pointer-events-none fixed inset-x-0 bottom-0 z-50 flex justify-end p-4">
-        <div className="pointer-events-auto max-w-sm rounded-2xl border border-amber-200 bg-amber-50 p-4 shadow-xl shadow-amber-900/10">
-          <div className="flex items-start gap-3">
-            <div className="rounded-xl bg-amber-100 p-2 text-amber-700">
-              <AlertTriangle className="h-4 w-4" />
-            </div>
-            <div>
-              <p className="text-sm font-semibold text-amber-950">Internet Required</p>
-              <p className="mt-1 text-sm text-amber-800">
-                This app now runs as an online-only realtime Supabase workspace. Reconnect to continue.
-              </p>
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  if (!isSyncing && pendingSyncCount === 0 && !syncError) {
-    return null;
-  }
-
   return (
-    <div className="pointer-events-none fixed inset-x-0 bottom-0 z-50 flex justify-end p-4">
-      <div className="pointer-events-auto max-w-sm rounded-2xl border border-slate-200/80 bg-white/95 p-4 shadow-xl shadow-slate-900/10 backdrop-blur">
-        <div className="flex items-start gap-3">
-          <div className={`rounded-xl p-2 ${syncError ? 'bg-amber-50 text-amber-700' : 'bg-blue-50 text-blue-700'}`}>
-            {syncError ? <AlertTriangle className="h-4 w-4" /> : isSyncing || pendingSyncCount > 0 ? <Cloud className="h-4 w-4" /> : <CloudCheck className="h-4 w-4" />}
-          </div>
-          <div className="min-w-0 flex-1">
-            <p className="text-sm font-semibold text-slate-900">Realtime Sync Status</p>
-            <p className="mt-1 text-sm text-slate-600">
-              {syncError
-                ? syncError
-                : isSyncing
-                  ? `Syncing ${pendingSyncCount} pending change${pendingSyncCount === 1 ? '' : 's'} to Supabase`
-                  : `${pendingSyncCount} pending change${pendingSyncCount === 1 ? '' : 's'} waiting for realtime sync`}
-            </p>
+    <>
+      <PwaInstallPrompt />
+
+      {!isOnline ? (
+        <div className="pointer-events-none fixed inset-x-0 bottom-0 z-50 flex justify-end p-4">
+          <div className="pointer-events-auto max-w-sm rounded-2xl border border-amber-200 bg-amber-50 p-4 shadow-xl shadow-amber-900/10">
+            <div className="flex items-start gap-3">
+              <div className="rounded-xl bg-amber-100 p-2 text-amber-700">
+                <AlertTriangle className="h-4 w-4" />
+              </div>
+              <div>
+                <p className="text-sm font-semibold text-amber-950">Internet Required</p>
+                <p className="mt-1 text-sm text-amber-800">
+                  This app now runs as an online-only realtime Supabase workspace. Reconnect to continue.
+                </p>
+              </div>
+            </div>
           </div>
         </div>
-      </div>
-    </div>
+      ) : (isSyncing || pendingSyncCount > 0 || syncError) ? (
+        <div className="pointer-events-none fixed inset-x-0 bottom-0 z-50 flex justify-end p-4">
+          <div className="pointer-events-auto max-w-sm rounded-2xl border border-slate-200/80 bg-white/95 p-4 shadow-xl shadow-slate-900/10 backdrop-blur">
+            <div className="flex items-start gap-3">
+              <div className={`rounded-xl p-2 ${syncError ? 'bg-amber-50 text-amber-700' : 'bg-blue-50 text-blue-700'}`}>
+                {syncError ? <AlertTriangle className="h-4 w-4" /> : isSyncing || pendingSyncCount > 0 ? <Cloud className="h-4 w-4" /> : <CloudCheck className="h-4 w-4" />}
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-semibold text-slate-900">Realtime Sync Status</p>
+                <p className="mt-1 text-sm text-slate-600">
+                  {syncError
+                    ? syncError
+                    : isSyncing
+                      ? `Syncing ${pendingSyncCount} pending change${pendingSyncCount === 1 ? '' : 's'} to Supabase`
+                      : `${pendingSyncCount} pending change${pendingSyncCount === 1 ? '' : 's'} waiting for realtime sync`}
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </>
   );
 }
