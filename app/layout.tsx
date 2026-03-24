@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from 'next'
 import { Analytics } from '@vercel/analytics/next'
+import { SpeedInsights } from '@vercel/speed-insights/next'
 import AuthBootstrap from '@/components/AuthBootstrap'
 import GoogleMapsProvider from '@/components/GoogleMapsProvider'
 import PwaBootstrap from '@/components/PwaBootstrap'
@@ -77,6 +78,7 @@ export default function RootLayout({
           </GoogleMapsProvider>
         </AuthBootstrap>
         <Analytics />
+        <SpeedInsights />
       </body>
     </html>
   )
