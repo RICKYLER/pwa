@@ -1,6 +1,6 @@
 import 'server-only';
 
-import { createHash, randomBytes, randomUUID } from 'node:crypto';
+import { createHash, createHmac, randomBytes, randomUUID } from 'node:crypto';
 import { createClient } from '@supabase/supabase-js';
 import type { User, UserRole } from '@/lib/db/schema';
 import type { AuthenticationResult, StoredUserRecord } from '@/lib/server/local-auth-store';
@@ -31,6 +31,15 @@ type TokenRow = {
   used_at: string | null;
 };
 
+type StatelessTokenKind = 'password_setup' | 'email_verification';
+
+type StatelessTokenPayload = {
+  exp: number;
+  kind: StatelessTokenKind;
+  user_id: string;
+  version: number;
+};
+
 function nowIso() {
   return new Date().toISOString();
 }
@@ -45,6 +54,86 @@ function createToken() {
 
 function hashToken(token: string) {
   return createHash('sha256').update(token).digest('hex');
+}
+
+function getAuthTokenSecret() {
+  return process.env.AUTH_TOKEN_SECRET?.trim()
+    || process.env.AUTH_SESSION_SECRET
+    || 'dev-insecure-auth-session-secret-change-me';
+}
+
+function encodeTokenPayload(payload: StatelessTokenPayload) {
+  return Buffer.from(JSON.stringify(payload), 'utf8').toString('base64url');
+}
+
+function decodeTokenPayload(value: string): StatelessTokenPayload | null {
+  try {
+    return JSON.parse(Buffer.from(value, 'base64url').toString('utf8')) as StatelessTokenPayload;
+  } catch {
+    return null;
+  }
+}
+
+function signAuthToken(encodedPayload: string) {
+  return createHmac('sha256', getAuthTokenSecret())
+    .update(encodedPayload)
+    .digest('base64url');
+}
+
+function getRecordVersion(record: Pick<StoredUserRecord, 'updatedAt'>) {
+  return new Date(record.updatedAt).getTime();
+}
+
+function createStatelessToken(input: {
+  kind: StatelessTokenKind;
+  ttlMs: number;
+  user: Pick<StoredUserRecord, 'id' | 'updatedAt'>;
+}) {
+  const encodedPayload = encodeTokenPayload({
+    exp: Date.now() + input.ttlMs,
+    kind: input.kind,
+    user_id: input.user.id,
+    version: getRecordVersion(input.user),
+  });
+
+  return `${encodedPayload}.${signAuthToken(encodedPayload)}`;
+}
+
+function parseStatelessToken(rawToken: string, kind: StatelessTokenKind): StatelessTokenPayload | null {
+  const [encodedPayload, signature] = rawToken.split('.');
+  if (!encodedPayload || !signature) {
+    return null;
+  }
+
+  if (signAuthToken(encodedPayload) !== signature) {
+    return null;
+  }
+
+  const payload = decodeTokenPayload(encodedPayload);
+  if (!payload) {
+    return null;
+  }
+
+  if (
+    payload.kind !== kind
+    || typeof payload.user_id !== 'string'
+    || typeof payload.version !== 'number'
+    || typeof payload.exp !== 'number'
+    || payload.exp <= Date.now()
+  ) {
+    return null;
+  }
+
+  return payload;
+}
+
+function isMissingTokenTableError(
+  error: unknown,
+  tableName: 'password_setup_tokens' | 'email_verification_tokens',
+) {
+  const message = error instanceof Error ? error.message.toLowerCase() : '';
+  return message.includes('could not find the table')
+    && message.includes(tableName);
 }
 
 function getSupabasePublicAuthConfig() {
@@ -385,81 +474,166 @@ export async function createPasswordSetupToken(userId: string): Promise<string> 
     throw new Error('User not found.');
   }
 
-  await deleteUnusedTokens('password_setup_tokens', userId);
+  try {
+    await deleteUnusedTokens('password_setup_tokens', userId);
 
-  const rawToken = createToken();
-  const supabase = getSupabaseAdminClient();
-  const { error } = await supabase
-    .from('password_setup_tokens')
-    .insert({
-      id: `setup_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`,
-      user_id: userId,
-      token_hash: hashToken(rawToken),
-      created_at: nowIso(),
-      expires_at: new Date(Date.now() + PASSWORD_TOKEN_TTL_MS).toISOString(),
+    const rawToken = createToken();
+    const supabase = getSupabaseAdminClient();
+    const { error } = await supabase
+      .from('password_setup_tokens')
+      .insert({
+        id: `setup_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`,
+        user_id: userId,
+        token_hash: hashToken(rawToken),
+        created_at: nowIso(),
+        expires_at: new Date(Date.now() + PASSWORD_TOKEN_TTL_MS).toISOString(),
+      });
+
+    if (error) {
+      throw new Error(`Failed to create the password setup token: ${error.message}`);
+    }
+
+    await writeProfile({
+      id: existing.id,
+      email: existing.email,
+      name: existing.name,
+      role: existing.role,
+      barangay_id: existing.barangay_id,
+      must_change_password: true,
+      email_verification_required: existing.email_verification_required,
+      email_verified_at: existing.email_verified_at ?? null,
     });
 
-  if (error) {
-    throw new Error(`Failed to create the password setup token: ${error.message}`);
+    return rawToken;
+  } catch (error) {
+    if (!isMissingTokenTableError(error, 'password_setup_tokens')) {
+      throw error;
+    }
+
+    const updatedUser = await writeProfile({
+      id: existing.id,
+      email: existing.email,
+      name: existing.name,
+      role: existing.role,
+      barangay_id: existing.barangay_id,
+      must_change_password: true,
+      email_verification_required: existing.email_verification_required,
+      email_verified_at: existing.email_verified_at ?? null,
+    });
+
+    return createStatelessToken({
+      kind: 'password_setup',
+      ttlMs: PASSWORD_TOKEN_TTL_MS,
+      user: updatedUser,
+    });
   }
-
-  await writeProfile({
-    id: existing.id,
-    email: existing.email,
-    name: existing.name,
-    role: existing.role,
-    barangay_id: existing.barangay_id,
-    must_change_password: true,
-    email_verification_required: existing.email_verification_required,
-    email_verified_at: existing.email_verified_at ?? null,
-  });
-
-  return rawToken;
 }
 
 export async function validatePasswordSetupToken(rawToken: string): Promise<User | null> {
-  const token = await getTokenByHash('password_setup_tokens', rawToken);
-  if (!token || !isTokenUsable(token)) {
-    return null;
-  }
+  try {
+    const token = await getTokenByHash('password_setup_tokens', rawToken);
+    if (!token || !isTokenUsable(token)) {
+      return null;
+    }
 
-  const user = await getProfileById(token.user_id);
-  return user ? toPublicUser(user) : null;
+    const user = await getProfileById(token.user_id);
+    return user ? toPublicUser(user) : null;
+  } catch (error) {
+    if (!isMissingTokenTableError(error, 'password_setup_tokens')) {
+      throw error;
+    }
+
+    const token = parseStatelessToken(rawToken, 'password_setup');
+    if (!token) {
+      return null;
+    }
+
+    const user = await getProfileById(token.user_id);
+    if (!user || !user.must_change_password) {
+      return null;
+    }
+
+    return getRecordVersion(user) === token.version
+      ? toPublicUser(user)
+      : null;
+  }
 }
 
 export async function completePasswordSetup(rawToken: string, password: string): Promise<User> {
-  const token = await getTokenByHash('password_setup_tokens', rawToken);
-  if (!token || !isTokenUsable(token)) {
-    throw new Error('This password setup link is invalid or has expired.');
+  try {
+    const token = await getTokenByHash('password_setup_tokens', rawToken);
+    if (!token || !isTokenUsable(token)) {
+      throw new Error('This password setup link is invalid or has expired.');
+    }
+
+    const user = await getProfileById(token.user_id);
+    if (!user) {
+      throw new Error('User not found.');
+    }
+
+    const supabase = getSupabaseAdminClient();
+    const { error } = await supabase.auth.admin.updateUserById(user.id, {
+      password,
+    });
+
+    if (error) {
+      throw new Error(`Failed to update the Supabase password: ${error.message}`);
+    }
+
+    await markTokenUsed('password_setup_tokens', token.id);
+    const updatedUser = await writeProfile({
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      role: user.role,
+      barangay_id: user.barangay_id,
+      must_change_password: false,
+      email_verification_required: user.email_verification_required,
+      email_verified_at: user.email_verified_at ?? null,
+    });
+
+    return toPublicUser(updatedUser);
+  } catch (error) {
+    if (!isMissingTokenTableError(error, 'password_setup_tokens')) {
+      throw error;
+    }
+
+    const token = parseStatelessToken(rawToken, 'password_setup');
+    if (!token) {
+      throw new Error('This password setup link is invalid or has expired.');
+    }
+
+    const user = await getProfileById(token.user_id);
+    if (!user) {
+      throw new Error('User not found.');
+    }
+
+    if (!user.must_change_password || getRecordVersion(user) !== token.version) {
+      throw new Error('This password setup link is invalid or has expired.');
+    }
+
+    const supabase = getSupabaseAdminClient();
+    const { error: updateError } = await supabase.auth.admin.updateUserById(user.id, {
+      password,
+    });
+
+    if (updateError) {
+      throw new Error(`Failed to update the Supabase password: ${updateError.message}`);
+    }
+
+    const updatedUser = await writeProfile({
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      role: user.role,
+      barangay_id: user.barangay_id,
+      must_change_password: false,
+      email_verification_required: user.email_verification_required,
+      email_verified_at: user.email_verified_at ?? null,
+    });
+
+    return toPublicUser(updatedUser);
   }
-
-  const user = await getProfileById(token.user_id);
-  if (!user) {
-    throw new Error('User not found.');
-  }
-
-  const supabase = getSupabaseAdminClient();
-  const { error } = await supabase.auth.admin.updateUserById(user.id, {
-    password,
-  });
-
-  if (error) {
-    throw new Error(`Failed to update the Supabase password: ${error.message}`);
-  }
-
-  await markTokenUsed('password_setup_tokens', token.id);
-  const updatedUser = await writeProfile({
-    id: user.id,
-    email: user.email,
-    name: user.name,
-    role: user.role,
-    barangay_id: user.barangay_id,
-    must_change_password: false,
-    email_verification_required: user.email_verification_required,
-    email_verified_at: user.email_verified_at ?? null,
-  });
-
-  return toPublicUser(updatedUser);
 }
 
 export async function createEmailVerificationToken(userId: string): Promise<string> {
@@ -476,75 +650,151 @@ export async function createEmailVerificationToken(userId: string): Promise<stri
     throw new Error('This account is already verified.');
   }
 
-  await deleteUnusedTokens('email_verification_tokens', userId);
+  try {
+    await deleteUnusedTokens('email_verification_tokens', userId);
 
-  const rawToken = createToken();
-  const supabase = getSupabaseAdminClient();
-  const { error } = await supabase
-    .from('email_verification_tokens')
-    .insert({
-      id: `verify_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`,
-      user_id: userId,
-      token_hash: hashToken(rawToken),
-      created_at: nowIso(),
-      expires_at: new Date(Date.now() + EMAIL_VERIFICATION_TOKEN_TTL_MS).toISOString(),
+    const rawToken = createToken();
+    const supabase = getSupabaseAdminClient();
+    const { error } = await supabase
+      .from('email_verification_tokens')
+      .insert({
+        id: `verify_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`,
+        user_id: userId,
+        token_hash: hashToken(rawToken),
+        created_at: nowIso(),
+        expires_at: new Date(Date.now() + EMAIL_VERIFICATION_TOKEN_TTL_MS).toISOString(),
+      });
+
+    if (error) {
+      throw new Error(`Failed to create the email verification token: ${error.message}`);
+    }
+
+    return rawToken;
+  } catch (error) {
+    if (!isMissingTokenTableError(error, 'email_verification_tokens')) {
+      throw error;
+    }
+
+    const updatedUser = await writeProfile({
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      role: user.role,
+      barangay_id: user.barangay_id,
+      must_change_password: user.must_change_password,
+      email_verification_required: true,
+      email_verified_at: user.email_verified_at ?? null,
     });
 
-  if (error) {
-    throw new Error(`Failed to create the email verification token: ${error.message}`);
+    return createStatelessToken({
+      kind: 'email_verification',
+      ttlMs: EMAIL_VERIFICATION_TOKEN_TTL_MS,
+      user: updatedUser,
+    });
   }
-
-  return rawToken;
 }
 
 export async function completeEmailVerification(rawToken: string): Promise<{ user: User; alreadyVerified: boolean }> {
-  const token = await getTokenByHash('email_verification_tokens', rawToken);
-  if (!token) {
-    throw new Error('This verification link is invalid or has expired.');
-  }
-
-  const user = await getProfileById(token.user_id);
-  if (!user) {
-    throw new Error('User not found.');
-  }
-
-  const alreadyVerified =
-    Boolean(token.used_at)
-    || Boolean(user.email_verified_at)
-    || !user.email_verification_required;
-
-  if (!alreadyVerified) {
-    const supabase = getSupabaseAdminClient();
-    const { error } = await supabase.auth.admin.updateUserById(user.id, {
-      email_confirm: true,
-    });
-
-    if (error) {
-      throw new Error(`Failed to verify the Supabase email address: ${error.message}`);
+  try {
+    const token = await getTokenByHash('email_verification_tokens', rawToken);
+    if (!token) {
+      throw new Error('This verification link is invalid or has expired.');
     }
-  }
 
-  if (!token.used_at) {
-    await markTokenUsed('email_verification_tokens', token.id);
-  }
+    const user = await getProfileById(token.user_id);
+    if (!user) {
+      throw new Error('User not found.');
+    }
 
-  const updatedUser = alreadyVerified
-    ? user
-    : await writeProfile({
-        id: user.id,
-        email: user.email,
-        name: user.name,
-        role: user.role,
-        barangay_id: user.barangay_id,
-        must_change_password: user.must_change_password,
-        email_verification_required: false,
-        email_verified_at: nowIso(),
+    const alreadyVerified =
+      Boolean(token.used_at)
+      || Boolean(user.email_verified_at)
+      || !user.email_verification_required;
+
+    if (!alreadyVerified) {
+      const supabase = getSupabaseAdminClient();
+      const { error } = await supabase.auth.admin.updateUserById(user.id, {
+        email_confirm: true,
       });
 
-  return {
-    user: toPublicUser(updatedUser),
-    alreadyVerified,
-  };
+      if (error) {
+        throw new Error(`Failed to verify the Supabase email address: ${error.message}`);
+      }
+    }
+
+    if (!token.used_at) {
+      await markTokenUsed('email_verification_tokens', token.id);
+    }
+
+    const updatedUser = alreadyVerified
+      ? user
+      : await writeProfile({
+          id: user.id,
+          email: user.email,
+          name: user.name,
+          role: user.role,
+          barangay_id: user.barangay_id,
+          must_change_password: user.must_change_password,
+          email_verification_required: false,
+          email_verified_at: nowIso(),
+        });
+
+    return {
+      user: toPublicUser(updatedUser),
+      alreadyVerified,
+    };
+  } catch (error) {
+    if (!isMissingTokenTableError(error, 'email_verification_tokens')) {
+      throw error;
+    }
+
+    const token = parseStatelessToken(rawToken, 'email_verification');
+    if (!token) {
+      throw new Error('This verification link is invalid or has expired.');
+    }
+
+    const user = await getProfileById(token.user_id);
+    if (!user) {
+      throw new Error('User not found.');
+    }
+
+    const alreadyVerified =
+      Boolean(user.email_verified_at)
+      || !user.email_verification_required;
+
+    if (!alreadyVerified && getRecordVersion(user) !== token.version) {
+      throw new Error('This verification link is invalid or has expired.');
+    }
+
+    if (!alreadyVerified) {
+      const supabase = getSupabaseAdminClient();
+      const { error: updateError } = await supabase.auth.admin.updateUserById(user.id, {
+        email_confirm: true,
+      });
+
+      if (updateError) {
+        throw new Error(`Failed to verify the Supabase email address: ${updateError.message}`);
+      }
+    }
+
+    const updatedUser = alreadyVerified
+      ? user
+      : await writeProfile({
+          id: user.id,
+          email: user.email,
+          name: user.name,
+          role: user.role,
+          barangay_id: user.barangay_id,
+          must_change_password: user.must_change_password,
+          email_verification_required: false,
+          email_verified_at: nowIso(),
+        });
+
+    return {
+      user: toPublicUser(updatedUser),
+      alreadyVerified,
+    };
+  }
 }
 
 export async function authenticateUser(email: string, password: string): Promise<AuthenticationResult> {
