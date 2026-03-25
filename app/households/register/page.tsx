@@ -6,9 +6,10 @@ import { useRouter } from 'next/navigation';
 import { ArrowLeft, ShieldCheck } from 'lucide-react';
 import AppShell from '@/components/AppShell';
 import { HouseholdRegistrationWizard } from '@/components/forms/household-registration-wizard';
+import type { MemberDraft } from '@/components/forms/household-form';
 import ResidentShell from '@/components/resident/ResidentShell';
 import { getCurrentUser, hasPermission } from '@/lib/auth';
-import { createHousehold } from '@/lib/db/households';
+import { createHouseholdBundle } from '@/lib/db/households';
 import type { Household } from '@/lib/db/schema';
 
 export default function HouseholdRegistrationPage() {
@@ -32,12 +33,13 @@ export default function HouseholdRegistrationPage() {
 
   async function handleSubmit(
     data: Omit<Household, 'id' | 'createdAt' | 'updatedAt' | 'syncStatus'>,
+    members: MemberDraft[],
   ): Promise<string> {
-    const created = await createHousehold({
+    const created = await createHouseholdBundle({
       ...data,
       applicant_user_id: user?.role === 'resident' ? user.id : data.applicant_user_id,
       applicant_email: user?.role === 'resident' ? user.email : data.applicant_email,
-    });
+    }, members);
     return created.id;
   }
 

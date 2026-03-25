@@ -13,12 +13,16 @@ import {
   LocateFixed,
   Mail,
   MapPin,
+  Plus,
   Phone,
   Search,
+  Trash2,
   Upload,
   User,
+  Users,
 } from 'lucide-react';
 import { LocationPicker } from '@/components/LocationPicker';
+import type { MemberDraft } from '@/components/forms/household-form';
 import { useGoogleMaps } from '@/components/GoogleMapsProvider';
 import {
   Dialog,
@@ -37,7 +41,8 @@ import {
   normalizeMunicipalityName,
   normalizePurokSitio,
 } from '@/lib/geocoding';
-import type { Household, LocationConfidence, LocationSource } from '@/lib/db/schema';
+import { calculateAge } from '@/lib/db/vulnerability';
+import type { Household, LocationConfidence, LocationSource, PWDType } from '@/lib/db/schema';
 
 const MAX_DOCUMENT_BYTES = 2 * 1024 * 1024;
 const DEFAULT_MUNICIPALITY = process.env.NEXT_PUBLIC_DEFAULT_MUNICIPALITY?.trim() || '';
@@ -48,6 +53,7 @@ interface RegistrationWizardProps {
   lockApplicantEmail?: boolean;
   onSubmit: (
     data: Omit<Household, 'id' | 'createdAt' | 'updatedAt' | 'syncStatus'>,
+    members: MemberDraft[],
   ) => Promise<string>;
 }
 
@@ -70,7 +76,7 @@ interface RegistrationFormState {
 }
 
 const STEP_LABELS = [
-  { id: 1, label: 'Personal Information', hint: 'Basic profile and address' },
+  { id: 1, label: 'Personal Information', hint: 'Basic profile, address, and members' },
   { id: 2, label: 'Location Verification', hint: 'Pin and confirm the map location' },
   { id: 3, label: 'Review and Submit', hint: 'Check details before sending' },
 ];
@@ -92,6 +98,40 @@ const EMPTY_FORM: RegistrationFormState = {
   street_address: '',
   landmark_directions: '',
 };
+
+const EMPTY_MEMBER: MemberDraft = {
+  full_name: '',
+  birthdate: '',
+  gender: 'M',
+  relationship_to_head: '',
+  civil_status: 'single',
+  occupation: '',
+  income_level: 'low',
+  is_pregnant: false,
+  is_pwd: false,
+  pwd_type: '',
+};
+
+const PWD_TYPE_LABELS: Record<PWDType, string> = {
+  physical: 'Physical',
+  visual: 'Visual',
+  hearing: 'Hearing',
+  intellectual: 'Intellectual',
+  psychosocial: 'Psychosocial',
+};
+
+const RELATIONSHIP_OPTIONS = [
+  'Child',
+  'Mother',
+  'Father',
+  'Spouse',
+  'Brother',
+  'Sister',
+  'Grandmother',
+  'Grandfather',
+  'Parent',
+  'Relative',
+];
 
 function formatCoordinate(value?: number): string {
   return typeof value === 'number' ? value.toFixed(6) : 'Not captured yet';
@@ -116,6 +156,37 @@ function isEmailValid(value: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
 }
 
+function getMemberAgeCategory(birthdate: string): 'child' | 'adult' | 'senior' | null {
+  if (!birthdate) return null;
+  const age = calculateAge(birthdate);
+  if (age < 18) return 'child';
+  if (age >= 60) return 'senior';
+  return 'adult';
+}
+
+function formatRelationshipLabel(value: string): string {
+  return value
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+    .join(' ');
+}
+
+function getMemberTags(member: MemberDraft): string[] {
+  const tags: string[] = [];
+  const ageCategory = getMemberAgeCategory(member.birthdate);
+
+  if (ageCategory === 'child') tags.push('Minor');
+  if (ageCategory === 'senior') tags.push('Senior');
+  if (member.is_pregnant) tags.push('Pregnant');
+  if (member.is_pwd) {
+    tags.push(member.pwd_type ? `PWD - ${PWD_TYPE_LABELS[member.pwd_type]}` : 'PWD');
+  }
+
+  return tags;
+}
+
 export function HouseholdRegistrationWizard({
   barangayId,
   initialValues,
@@ -138,6 +209,10 @@ export function HouseholdRegistrationWizard({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [documentError, setDocumentError] = useState('');
+  const [members, setMembers] = useState<MemberDraft[]>([]);
+  const [showMemberForm, setShowMemberForm] = useState(false);
+  const [memberDraft, setMemberDraft] = useState<MemberDraft>({ ...EMPTY_MEMBER });
+  const [memberError, setMemberError] = useState('');
   const [showRequirementsDialog, setShowRequirementsDialog] = useState(false);
   const [requirementsAcknowledged, setRequirementsAcknowledged] = useState(false);
 
@@ -207,6 +282,27 @@ export function HouseholdRegistrationWizard({
       && locationConfirmed,
     );
   }, [form.gps_lat, form.gps_long, locationConfirmed]);
+
+  const memberDraftAge = memberDraft.birthdate ? calculateAge(memberDraft.birthdate) : null;
+  const memberDraftAgeCategory = getMemberAgeCategory(memberDraft.birthdate);
+  const memberSummary = useMemo(() => (
+    members.reduce(
+      (summary, member) => {
+        const ageCategory = getMemberAgeCategory(member.birthdate);
+        if (ageCategory === 'child') summary.children++;
+        if (ageCategory === 'senior') summary.seniors++;
+        if (member.is_pregnant) summary.pregnant++;
+        if (member.is_pwd) summary.pwd++;
+        return summary;
+      },
+      {
+        children: 0,
+        seniors: 0,
+        pregnant: 0,
+        pwd: 0,
+      },
+    )
+  ), [members]);
 
   function updateForm<K extends keyof RegistrationFormState>(
     key: K,
@@ -308,6 +404,51 @@ export function HouseholdRegistrationWizard({
     }
   }
 
+  function handleAddMember() {
+    setMemberError('');
+
+    if (!memberDraft.full_name.trim()) {
+      setMemberError('Enter the household member name.');
+      return;
+    }
+
+    if (!memberDraft.birthdate) {
+      setMemberError('Select the member birthdate.');
+      return;
+    }
+
+    if (!memberDraft.relationship_to_head.trim()) {
+      setMemberError('Enter the relationship to the household head.');
+      return;
+    }
+
+    if (memberDraft.is_pregnant && memberDraft.gender !== 'F') {
+      setMemberError('Pregnant members must use Female gender for reporting accuracy.');
+      return;
+    }
+
+    if (memberDraft.is_pwd && !memberDraft.pwd_type) {
+      setMemberError('Select the PWD type so the member is counted correctly.');
+      return;
+    }
+
+    setMembers((current) => [
+      ...current,
+      {
+        ...memberDraft,
+        full_name: memberDraft.full_name.trim(),
+        relationship_to_head: formatRelationshipLabel(memberDraft.relationship_to_head),
+        occupation: memberDraft.occupation.trim(),
+      },
+    ]);
+    setMemberDraft({ ...EMPTY_MEMBER });
+    setShowMemberForm(false);
+  }
+
+  function handleRemoveMember(index: number) {
+    setMembers((current) => current.filter((_, currentIndex) => currentIndex !== index));
+  }
+
   function goNext() {
     setError('');
 
@@ -372,7 +513,7 @@ export function HouseholdRegistrationWizard({
         registration_review_notes: '',
         pin_qa_status: 'needs_verification',
         pin_qa_notes: '',
-      });
+      }, members);
 
       setShowRequirementsDialog(false);
       router.push(`/households/register/status?id=${recordId}`);
@@ -586,6 +727,317 @@ export function HouseholdRegistrationWizard({
                 <p className="mt-2 text-xs text-slate-500">Stored for admin review: {form.supporting_document_name}</p>
               )}
             </div>
+
+            <div className="md:col-span-2">
+              <div className="rounded-3xl border border-slate-200 bg-slate-50 p-4">
+                <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 pb-4">
+                  <div className="flex items-center gap-2">
+                    <Users className="h-4 w-4 text-indigo-600" />
+                    <div>
+                      <h3 className="text-sm font-semibold text-slate-900">Household Members</h3>
+                      <p className="mt-0.5 text-xs text-slate-500">
+                        Add the other people living in this household so admin can review the full family record.
+                      </p>
+                    </div>
+                  </div>
+                  {!showMemberForm && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowMemberForm(true);
+                        setMemberError('');
+                      }}
+                      className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100"
+                    >
+                      <Plus className="h-4 w-4" />
+                      Add Member
+                    </button>
+                  )}
+                </div>
+
+                {members.length > 0 && (
+                  <div className="mt-4 space-y-4">
+                    <div className="grid gap-3 sm:grid-cols-4">
+                      {[
+                        { label: 'Members', value: members.length },
+                        { label: 'Children', value: memberSummary.children },
+                        { label: 'Seniors', value: memberSummary.seniors },
+                        { label: 'PWD / Pregnant', value: memberSummary.pwd + memberSummary.pregnant },
+                      ].map((item) => (
+                        <div key={item.label} className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
+                          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">{item.label}</p>
+                          <p className="mt-1 text-xl font-bold text-slate-900">{item.value}</p>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="space-y-2">
+                      {members.map((member, index) => (
+                        <div
+                          key={`${member.full_name}-${member.birthdate}-${index}`}
+                          className="flex flex-wrap items-start justify-between gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3"
+                        >
+                          <div className="min-w-0 flex-1">
+                            <p className="text-sm font-semibold text-slate-900">{member.full_name}</p>
+                            <p className="mt-1 text-xs text-slate-500">
+                              {member.relationship_to_head}
+                              {member.birthdate ? ` · Age ${calculateAge(member.birthdate)}` : ''}
+                              {' · '}
+                              {member.gender === 'F' ? 'Female' : 'Male'}
+                              {member.occupation.trim() ? ` · ${member.occupation.trim()}` : ''}
+                            </p>
+                            {getMemberTags(member).length > 0 && (
+                              <div className="mt-2 flex flex-wrap gap-1.5">
+                                {getMemberTags(member).map((label) => (
+                                  <span
+                                    key={label}
+                                    className="rounded-full border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-[11px] font-medium text-indigo-700"
+                                  >
+                                    {label}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveMember(index)}
+                            className="inline-flex items-center gap-1 rounded-xl border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-100"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                            Remove
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {showMemberForm ? (
+                  <div className="mt-4 space-y-4 rounded-2xl border border-indigo-200 bg-white p-4">
+                    <div>
+                      <p className="text-sm font-semibold text-slate-900">New household member</p>
+                      <p className="mt-1 text-xs text-slate-500">
+                        Add each family member one by one. These will be included in the pending admin review.
+                      </p>
+                    </div>
+
+                    {memberError && (
+                      <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-xs text-red-700">
+                        {memberError}
+                      </div>
+                    )}
+
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <div>
+                        <label className="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-500">Full name *</label>
+                        <input
+                          type="text"
+                          value={memberDraft.full_name}
+                          onChange={(event) => setMemberDraft((current) => ({ ...current, full_name: event.target.value }))}
+                          className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
+                          placeholder="e.g., Maria Dela Cruz"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-500">Birthdate *</label>
+                        <input
+                          type="date"
+                          value={memberDraft.birthdate}
+                          onChange={(event) => setMemberDraft((current) => ({ ...current, birthdate: event.target.value }))}
+                          className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
+                        />
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          {memberDraftAge !== null && (
+                            <span className="rounded-full bg-indigo-50 px-2.5 py-1 text-[11px] font-semibold text-indigo-700">
+                              Age {memberDraftAge}
+                            </span>
+                          )}
+                          {memberDraftAgeCategory === 'child' && (
+                            <span className="rounded-full bg-amber-50 px-2.5 py-1 text-[11px] font-semibold text-amber-700">
+                              Minor
+                            </span>
+                          )}
+                          {memberDraftAgeCategory === 'senior' && (
+                            <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-700">
+                              Senior
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-500">Gender</label>
+                        <select
+                          value={memberDraft.gender}
+                          onChange={(event) => setMemberDraft((current) => ({ ...current, gender: event.target.value as 'M' | 'F' }))}
+                          className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
+                        >
+                          <option value="M">Male</option>
+                          <option value="F">Female</option>
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-500">Relationship to head *</label>
+                        <input
+                          type="text"
+                          list="resident-registration-member-relationship-options"
+                          value={memberDraft.relationship_to_head}
+                          onChange={(event) => setMemberDraft((current) => ({ ...current, relationship_to_head: event.target.value }))}
+                          className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
+                          placeholder="Spouse, Child, Parent"
+                        />
+                        <datalist id="resident-registration-member-relationship-options">
+                          {RELATIONSHIP_OPTIONS.map((option) => (
+                            <option key={option} value={option} />
+                          ))}
+                        </datalist>
+                      </div>
+
+                      <div>
+                        <label className="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-500">Civil status</label>
+                        <select
+                          value={memberDraft.civil_status}
+                          onChange={(event) => setMemberDraft((current) => ({
+                            ...current,
+                            civil_status: event.target.value as MemberDraft['civil_status'],
+                          }))}
+                          className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
+                        >
+                          <option value="single">Single</option>
+                          <option value="married">Married</option>
+                          <option value="widowed">Widowed</option>
+                          <option value="separated">Separated</option>
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-500">Occupation</label>
+                        <input
+                          type="text"
+                          value={memberDraft.occupation}
+                          onChange={(event) => setMemberDraft((current) => ({ ...current, occupation: event.target.value }))}
+                          className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
+                          placeholder="Farmer, Student, Vendor"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-500">Income level</label>
+                        <select
+                          value={memberDraft.income_level}
+                          onChange={(event) => setMemberDraft((current) => ({
+                            ...current,
+                            income_level: event.target.value as MemberDraft['income_level'],
+                          }))}
+                          className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
+                        >
+                          <option value="low">Low</option>
+                          <option value="middle">Middle</option>
+                          <option value="high">High</option>
+                        </select>
+                      </div>
+
+                      <div className="md:col-span-2 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Vulnerability tracking</p>
+                        <p className="mt-1 text-xs text-slate-500">
+                          Minor and Senior tags are automatic from the birthdate. Mark Pregnant and PWD so the review team sees them immediately.
+                        </p>
+
+                        <div className="mt-3 grid gap-3 md:grid-cols-2">
+                          <label className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">
+                            <input
+                              type="checkbox"
+                              checked={memberDraft.is_pregnant}
+                              onChange={(event) => setMemberDraft((current) => ({ ...current, is_pregnant: event.target.checked }))}
+                              className="mt-0.5 h-4 w-4 rounded border-slate-300"
+                            />
+                            <span>
+                              <span className="block font-semibold text-slate-900">Pregnant member</span>
+                              <span className="mt-1 block text-xs text-slate-500">Include this member in maternal health and priority response reports.</span>
+                            </span>
+                          </label>
+
+                          <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
+                            <label className="flex items-start gap-3 text-sm text-slate-700">
+                              <input
+                                type="checkbox"
+                                checked={memberDraft.is_pwd}
+                                onChange={(event) => setMemberDraft((current) => ({
+                                  ...current,
+                                  is_pwd: event.target.checked,
+                                  pwd_type: event.target.checked ? current.pwd_type : '',
+                                }))}
+                                className="mt-0.5 h-4 w-4 rounded border-slate-300"
+                              />
+                              <span>
+                                <span className="block font-semibold text-slate-900">PWD member</span>
+                                <span className="mt-1 block text-xs text-slate-500">Mark persons with disability so they appear correctly in vulnerability counts.</span>
+                              </span>
+                            </label>
+
+                            {memberDraft.is_pwd && (
+                              <div className="mt-3">
+                                <label className="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-500">PWD type *</label>
+                                <select
+                                  value={memberDraft.pwd_type || ''}
+                                  onChange={(event) => setMemberDraft((current) => ({
+                                    ...current,
+                                    pwd_type: event.target.value as PWDType | '',
+                                  }))}
+                                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
+                                >
+                                  <option value="">Select PWD type</option>
+                                  {Object.entries(PWD_TYPE_LABELS).map(([value, label]) => (
+                                    <option key={value} value={value}>
+                                      {label}
+                                    </option>
+                                  ))}
+                                </select>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-3">
+                      <button
+                        type="button"
+                        onClick={handleAddMember}
+                        className="inline-flex items-center gap-2 rounded-2xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700"
+                      >
+                        <Plus className="h-4 w-4" />
+                        Add to member list
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowMemberForm(false);
+                          setMemberDraft({ ...EMPTY_MEMBER });
+                          setMemberError('');
+                        }}
+                        className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-600 hover:bg-slate-100"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  members.length === 0 && (
+                    <div className="mt-4 rounded-2xl border border-dashed border-slate-300 bg-white px-4 py-8 text-center">
+                      <Users className="mx-auto h-8 w-8 text-slate-300" />
+                      <p className="mt-3 text-sm font-semibold text-slate-700">No household members added yet</p>
+                      <p className="mt-1 text-xs text-slate-500">
+                        You can still submit without members, but adding them helps admin review the full household.
+                      </p>
+                    </div>
+                  )
+                )}
+              </div>
+            </div>
           </div>
         </div>
       )}
@@ -765,6 +1217,66 @@ export function HouseholdRegistrationWizard({
                 <p><span className="font-semibold text-slate-900">Purok / Sitio:</span> {form.purok_sitio}</p>
                 <p><span className="font-semibold text-slate-900">Address:</span> {form.street_address}</p>
               </div>
+            </div>
+
+            <div className="rounded-3xl border border-slate-200 bg-slate-50 p-5 lg:col-span-2">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Household members</p>
+                  <p className="mt-2 text-sm font-semibold text-slate-900">
+                    {members.length === 0 ? 'No extra members added' : `${members.length} member${members.length === 1 ? '' : 's'} included for review`}
+                  </p>
+                </div>
+                {members.length > 0 && (
+                  <div className="flex flex-wrap gap-2 text-xs">
+                    <span className="rounded-full bg-white px-3 py-1 font-medium text-slate-600">Children: {memberSummary.children}</span>
+                    <span className="rounded-full bg-white px-3 py-1 font-medium text-slate-600">Seniors: {memberSummary.seniors}</span>
+                    <span className="rounded-full bg-white px-3 py-1 font-medium text-slate-600">Pregnant: {memberSummary.pregnant}</span>
+                    <span className="rounded-full bg-white px-3 py-1 font-medium text-slate-600">PWD: {memberSummary.pwd}</span>
+                  </div>
+                )}
+              </div>
+
+              {members.length > 0 ? (
+                <div className="mt-4 grid gap-3 md:grid-cols-2">
+                  {members.map((member, index) => (
+                    <div
+                      key={`${member.full_name}-${member.birthdate}-${index}`}
+                      className="rounded-2xl border border-slate-200 bg-white px-4 py-4"
+                    >
+                      <p className="text-sm font-semibold text-slate-900">{member.full_name}</p>
+                      <p className="mt-1 text-xs text-slate-500">
+                        {member.relationship_to_head}
+                        {member.birthdate ? ` · Age ${calculateAge(member.birthdate)}` : ''}
+                        {' · '}
+                        {member.gender === 'F' ? 'Female' : 'Male'}
+                      </p>
+                      <p className="mt-2 text-xs text-slate-500">
+                        Civil status: {member.civil_status}
+                        {member.occupation.trim() ? ` · Occupation: ${member.occupation.trim()}` : ''}
+                        {' · '}
+                        Income: {member.income_level}
+                      </p>
+                      {getMemberTags(member).length > 0 && (
+                        <div className="mt-3 flex flex-wrap gap-1.5">
+                          {getMemberTags(member).map((label) => (
+                            <span
+                              key={label}
+                              className="rounded-full border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-[11px] font-medium text-indigo-700"
+                            >
+                              {label}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="mt-4 rounded-2xl border border-dashed border-slate-300 bg-white px-4 py-6 text-center text-sm text-slate-500">
+                  Only the household head will be submitted in this registration.
+                </div>
+              )}
             </div>
 
             <div className="rounded-3xl border border-slate-200 bg-slate-50 p-5 lg:col-span-2">

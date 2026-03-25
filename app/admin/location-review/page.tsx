@@ -22,18 +22,22 @@ import {
   ShieldAlert,
   Target,
   X,
+  Users,
 } from 'lucide-react';
 import AppShell from '@/components/AppShell';
 import { useGoogleMaps } from '@/components/GoogleMapsProvider';
 import { getCurrentUser } from '@/lib/auth';
 import { getHouseholds, updateHousehold } from '@/lib/db/households';
 import { getLocationMasterList, saveLocationMasterList } from '@/lib/db/location-master';
+import { getResidents } from '@/lib/db/residents';
+import { calculateAge } from '@/lib/db/vulnerability';
 import { bootstrapSupabaseTables } from '@/lib/supabase/bootstrap';
 import type {
   Household,
   HouseholdRegistrationStatus,
   LocationConfidence,
   PinQaStatus,
+  Resident,
 } from '@/lib/db/schema';
 import {
   derivePinQaStatus,
@@ -157,6 +161,7 @@ export default function AdminLocationReviewPage() {
   const [isSavingMaster, setIsSavingMaster] = useState(false);
   const [isSavingReview, setIsSavingReview] = useState(false);
   const [households, setHouseholds] = useState<Household[]>([]);
+  const [residents, setResidents] = useState<Resident[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [activeTab, setActiveTab] = useState<HouseholdRegistrationStatus>('pending');
@@ -243,6 +248,24 @@ export default function AdminLocationReviewPage() {
   }, [filteredHouseholds, selectedId]);
 
   const selectedHousehold = households.find((household) => household.id === selectedId) || null;
+  const residentsByHouseholdId = useMemo(() => {
+    const grouped = new Map<string, Resident[]>();
+
+    residents.forEach((resident) => {
+      const existing = grouped.get(resident.household_id) ?? [];
+      existing.push(resident);
+      grouped.set(resident.household_id, existing);
+    });
+
+    grouped.forEach((value, key) => {
+      grouped.set(key, [...value].sort((left, right) => left.full_name.localeCompare(right.full_name)));
+    });
+
+    return grouped;
+  }, [residents]);
+  const selectedResidents = selectedHousehold
+    ? residentsByHouseholdId.get(selectedHousehold.id) ?? []
+    : [];
 
   useEffect(() => {
     if (!selectedHousehold) return;
@@ -291,12 +314,14 @@ export default function AdminLocationReviewPage() {
     }
 
     try {
-      const [records, masterList] = await Promise.all([
+      const [records, residentRecords, masterList] = await Promise.all([
         getHouseholds(),
+        getResidents({ status: 'active' }),
         getLocationMasterList(user.barangay_id),
       ]);
 
       setHouseholds(records);
+      setResidents(residentRecords);
       setSelectedId((current) => current || records.find((household) => getHouseholdRegistrationStatus(household) === 'pending')?.id || records[0]?.id || null);
       setMasterForm({
         municipality: masterList?.municipality || records[0]?.municipality || '',
@@ -428,7 +453,7 @@ export default function AdminLocationReviewPage() {
   useEffect(() => {
     function handleDataChanged(event: Event) {
       const detail = (event as CustomEvent<{ table?: string }>).detail;
-      if (!detail || !['households', 'location_master_lists'].includes(detail.table || '')) {
+      if (!detail || !['households', 'residents', 'location_master_lists'].includes(detail.table || '')) {
         return;
       }
 
@@ -630,6 +655,7 @@ export default function AdminLocationReviewPage() {
                 {filteredHouseholds.map((household) => {
                   const active = household.id === selectedId;
                   const pinQaStatus = getStoredOrDerivedPinQaStatus(household, households);
+                  const memberCount = residentsByHouseholdId.get(household.id)?.length ?? 0;
                   return (
                     <button
                       key={household.id}
@@ -659,6 +685,9 @@ export default function AdminLocationReviewPage() {
                         </span>
                         <span className={`rounded-full border px-2 py-1 font-medium ${getPinQaTone(pinQaStatus)}`}>
                           {formatPinQaStatusLabel(pinQaStatus)}
+                        </span>
+                        <span className="rounded-full border border-slate-200 bg-slate-100 px-2 py-1 font-medium text-slate-600">
+                          {memberCount} member{memberCount === 1 ? '' : 's'}
                         </span>
                         {household.supporting_document_name && (
                           <span className="rounded-full border border-slate-200 bg-slate-100 px-2 py-1 font-medium text-slate-600">
@@ -856,6 +885,46 @@ export default function AdminLocationReviewPage() {
                             </p>
                           )}
                         </div>
+                      </div>
+
+                      <div className="rounded-3xl border border-slate-200 bg-slate-50 p-4">
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="flex items-center gap-2">
+                            <Users className="h-4 w-4 text-indigo-600" />
+                            <h3 className="text-sm font-semibold text-slate-900">Household Members</h3>
+                          </div>
+                          <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-slate-600">
+                            {selectedResidents.length} member{selectedResidents.length === 1 ? '' : 's'}
+                          </span>
+                        </div>
+
+                        {selectedResidents.length > 0 ? (
+                          <div className="mt-4 space-y-3">
+                            {selectedResidents.map((resident) => (
+                              <div
+                                key={resident.id}
+                                className="rounded-2xl border border-slate-200 bg-white px-4 py-3"
+                              >
+                                <p className="text-sm font-semibold text-slate-900">{resident.full_name}</p>
+                                <p className="mt-1 text-xs text-slate-500">
+                                  {resident.relationship_to_head}
+                                  {resident.birthdate ? ` · Age ${calculateAge(resident.birthdate)}` : ''}
+                                  {' · '}
+                                  {resident.gender === 'F' ? 'Female' : 'Male'}
+                                </p>
+                                <p className="mt-2 text-xs text-slate-500">
+                                  Civil status: {resident.civil_status || 'Not provided'}
+                                  {resident.occupation?.trim() ? ` · Occupation: ${resident.occupation.trim()}` : ''}
+                                  {resident.income_level ? ` · Income: ${resident.income_level}` : ''}
+                                </p>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <div className="mt-4 rounded-2xl border border-dashed border-slate-200 bg-white px-4 py-6 text-center text-sm text-slate-500">
+                            No household members were added to this pending registration.
+                          </div>
+                        )}
                       </div>
                     </div>
 
