@@ -34,6 +34,20 @@ test('resident accounts must verify email before they can log in', async () => {
     const afterVerification = await authStore.authenticateUser('resident@example.com', 'resident123');
     assert.equal(afterVerification.status, 'success');
 
+    const resetToken = await authStore.createPasswordResetToken(resident.id);
+    const resetUser = await authStore.validatePasswordResetToken(resetToken);
+
+    assert.equal(resetUser?.email, 'resident@example.com');
+
+    const resetResult = await authStore.completePasswordReset(resetToken, 'resident456');
+    assert.equal(resetResult.must_change_password, false);
+
+    const oldPasswordResult = await authStore.authenticateUser('resident@example.com', 'resident123');
+    assert.equal(oldPasswordResult.status, 'invalid_credentials');
+
+    const newPasswordResult = await authStore.authenticateUser('resident@example.com', 'resident456');
+    assert.equal(newPasswordResult.status, 'success');
+
     const secondVerification = await authStore.completeEmailVerification(token);
     assert.equal(secondVerification.alreadyVerified, true);
   } finally {

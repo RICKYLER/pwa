@@ -97,6 +97,69 @@ export async function sendAccountSetupEmail(params: {
   });
 }
 
+export async function sendPasswordResetEmail(params: {
+  to: string;
+  name: string;
+  resetLink: string;
+}) {
+  const { smtpFrom, transporter } = createTransport();
+
+  const html = `
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Reset Your MSWDO Census Password</title>
+</head>
+<body style="margin:0;padding:0;background:#f1f5f9;font-family:Segoe UI,Arial,sans-serif;color:#0f172a;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f1f5f9;padding:32px 16px;">
+    <tr>
+      <td align="center">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:600px;background:#ffffff;border-radius:20px;overflow:hidden;">
+          <tr>
+            <td style="padding:28px 36px;background:#1d4ed8;color:#ffffff;">
+              <p style="margin:0;font-size:12px;font-weight:700;letter-spacing:0.4px;opacity:0.8;">PASSWORD RESET</p>
+              <h1 style="margin:10px 0 0;font-size:24px;line-height:1.2;">Reset Your MSWDO Census Password</h1>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:32px 36px;">
+              <p style="margin:0 0 14px;font-size:16px;font-weight:700;">Hello, ${params.name}.</p>
+              <p style="margin:0 0 18px;font-size:14px;line-height:1.7;color:#475569;">
+                We received a request to reset the password for your MSWDO Census account.
+                Use the button below to choose a new password securely.
+              </p>
+              <div style="text-align:center;margin:28px 0;">
+                <a href="${params.resetLink}" style="display:inline-block;background:#2563eb;color:#ffffff;text-decoration:none;padding:14px 24px;border-radius:14px;font-size:14px;font-weight:800;">
+                  Reset Password
+                </a>
+              </div>
+              <p style="margin:0 0 18px;font-size:12.5px;line-height:1.7;color:#64748b;">
+                This reset link expires in 72 hours. If you did not request this, you can ignore this email.
+                If the button does not work, open this link:
+              </p>
+              <p style="margin:0;font-size:12.5px;line-height:1.7;word-break:break-all;">
+                <a href="${params.resetLink}" style="color:#2563eb;text-decoration:none;">${params.resetLink}</a>
+              </p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
+`;
+
+  await transporter.sendMail({
+    from: smtpFrom,
+    to: params.to,
+    subject: 'Reset your MSWDO Census password',
+    html,
+  });
+}
+
 export async function sendResidentVerificationEmail(params: {
   to: string;
   name: string;

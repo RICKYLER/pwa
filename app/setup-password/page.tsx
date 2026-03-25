@@ -16,6 +16,7 @@ export default function SetupPasswordPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const token = searchParams.get('token') ?? '';
+  const isResetMode = searchParams.get('mode') === 'reset';
 
   const [details, setDetails] = useState<SetupState | null>(null);
   const [password, setPassword] = useState('');
@@ -24,9 +25,39 @@ export default function SetupPasswordPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  const copy = isResetMode
+    ? {
+        invalidLink: 'This password reset link is missing or invalid.',
+        validateError: 'Unable to validate reset link.',
+        finishError: 'Unable to finish password reset.',
+        heroBadge: 'Password Recovery',
+        heroTitle: 'Choose a new password without exposing credentials in chat or email.',
+        heroDescription: 'The reset link is time-limited and lets residents or staff recover access safely from their inbox.',
+        pageTitle: 'Reset password',
+        pageDescription: 'Enter a new password to regain access to your MSWDO Census account.',
+        validatingText: 'Validating secure reset link...',
+        unavailableTitle: 'Reset link unavailable',
+        submitIdle: 'Save new password and continue',
+        submitBusy: 'Saving new password...',
+      }
+    : {
+        invalidLink: 'This password setup link is missing or invalid.',
+        validateError: 'Unable to validate setup link.',
+        finishError: 'Unable to finish password setup.',
+        heroBadge: 'Secure Account Setup',
+        heroTitle: 'Create your password without sharing credentials by email.',
+        heroDescription: 'This setup link is one-time use and lets your team onboard staff without exposing a temporary password in inboxes or browser storage.',
+        pageTitle: 'Set up password',
+        pageDescription: 'Finish account setup to access the MSWDO Census dashboard.',
+        validatingText: 'Validating secure setup link...',
+        unavailableTitle: 'Setup link unavailable',
+        submitIdle: 'Save password and continue',
+        submitBusy: 'Saving password...',
+      };
+
   useEffect(() => {
     if (!token) {
-      setError('This password setup link is missing or invalid.');
+      setError(copy.invalidLink);
       setIsLoading(false);
       return;
     }
@@ -36,13 +67,17 @@ export default function SetupPasswordPage() {
     async function loadTokenDetails() {
       try {
         setIsLoading(true);
-        const response = await fetch(`/api/auth/setup-password?token=${encodeURIComponent(token)}`, {
+        const query = new URLSearchParams({
+          token,
+          mode: isResetMode ? 'reset' : 'setup',
+        });
+        const response = await fetch(`/api/auth/setup-password?${query.toString()}`, {
           cache: 'no-store',
         });
         const payload = await response.json();
 
         if (!response.ok) {
-          throw new Error(payload.error || 'Unable to validate setup link.');
+          throw new Error(payload.error || copy.validateError);
         }
 
         if (!cancelled) {
@@ -50,7 +85,7 @@ export default function SetupPasswordPage() {
         }
       } catch (err) {
         if (!cancelled) {
-          setError(err instanceof Error ? err.message : 'Unable to validate setup link.');
+          setError(err instanceof Error ? err.message : copy.validateError);
         }
       } finally {
         if (!cancelled) {
@@ -64,7 +99,7 @@ export default function SetupPasswordPage() {
     return () => {
       cancelled = true;
     };
-  }, [token]);
+  }, [copy.invalidLink, copy.validateError, isResetMode, token]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -72,7 +107,7 @@ export default function SetupPasswordPage() {
     let sessionStarted = false;
 
     if (!token) {
-      setError('This password setup link is missing or invalid.');
+      setError(copy.invalidLink);
       return;
     }
 
@@ -94,12 +129,13 @@ export default function SetupPasswordPage() {
         body: JSON.stringify({
           token,
           password,
+          mode: isResetMode ? 'reset' : 'setup',
         }),
       });
 
       const payload = await response.json();
       if (!response.ok) {
-        throw new Error(payload.error || 'Unable to finish password setup.');
+        throw new Error(payload.error || copy.finishError);
       }
 
       sessionStarted = true;
@@ -114,7 +150,7 @@ export default function SetupPasswordPage() {
         }).catch(() => null);
       }
 
-      setError(err instanceof Error ? err.message : 'Unable to finish password setup.');
+      setError(err instanceof Error ? err.message : copy.finishError);
     } finally {
       setIsSubmitting(false);
     }
@@ -129,13 +165,12 @@ export default function SetupPasswordPage() {
             <div className="mb-8 flex h-20 w-20 items-center justify-center rounded-3xl bg-white/10 shadow-2xl shadow-indigo-500/25 backdrop-blur">
               <ShieldCheck className="h-10 w-10" />
             </div>
-            <p className="text-sm font-semibold uppercase tracking-[0.3em] text-indigo-200">Secure Account Setup</p>
+            <p className="text-sm font-semibold uppercase tracking-[0.3em] text-indigo-200">{copy.heroBadge}</p>
             <h1 className="mt-4 text-4xl font-bold leading-tight">
-              Create your password without sharing credentials by email.
+              {copy.heroTitle}
             </h1>
             <p className="mt-5 text-base leading-7 text-indigo-200">
-              This setup link is one-time use and lets your team onboard staff
-              without exposing a temporary password in inboxes or browser storage.
+              {copy.heroDescription}
             </p>
           </div>
         </section>
@@ -146,9 +181,9 @@ export default function SetupPasswordPage() {
               <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-indigo-500 to-violet-600 text-white shadow-lg shadow-indigo-500/30 lg:mx-0">
                 <Lock className="h-7 w-7" />
               </div>
-              <h1 className="text-3xl font-bold text-slate-900">Set up password</h1>
+              <h1 className="text-3xl font-bold text-slate-900">{copy.pageTitle}</h1>
               <p className="mt-2 text-sm text-slate-500">
-                Finish account setup to access the MSWDO Census dashboard.
+                {copy.pageDescription}
               </p>
             </div>
 
@@ -156,7 +191,7 @@ export default function SetupPasswordPage() {
               <div className="rounded-2xl border border-slate-200 bg-slate-50 p-6">
                 <div className="flex items-center gap-3 text-sm text-slate-600">
                   <div className="h-4 w-4 animate-spin rounded-full border-2 border-slate-300 border-t-indigo-600" />
-                  Validating secure setup link...
+                  {copy.validatingText}
                 </div>
               </div>
             ) : error && !details ? (
@@ -164,7 +199,7 @@ export default function SetupPasswordPage() {
                 <div className="flex items-start gap-3 text-red-700">
                   <AlertTriangle className="mt-0.5 h-5 w-5 flex-shrink-0" />
                   <div>
-                    <p className="font-semibold">Setup link unavailable</p>
+                    <p className="font-semibold">{copy.unavailableTitle}</p>
                     <p className="mt-1 text-sm leading-6">{error}</p>
                   </div>
                 </div>
@@ -233,7 +268,7 @@ export default function SetupPasswordPage() {
                   className="flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-indigo-600 to-violet-600 px-4 py-3 text-sm font-semibold text-white shadow-lg shadow-indigo-500/25 transition hover:opacity-95 disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   {isSubmitting && <div className="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" />}
-                  {isSubmitting ? 'Saving password...' : 'Save password and continue'}
+                  {isSubmitting ? copy.submitBusy : copy.submitIdle}
                 </button>
               </form>
             )}

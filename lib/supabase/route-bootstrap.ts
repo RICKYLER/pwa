@@ -33,6 +33,7 @@ const ROUTE_TABLES: Array<{
 const SKIPPED_PREFIXES = [
   '/',
   '/login',
+  '/forgot-password',
   '/setup-password',
   '/resident/register',
   '/resident/verify-email',

@@ -7,27 +7,59 @@ import {
 } from '@/lib/server/auth-session';
 import {
   completePasswordSetup,
+  completePasswordReset,
   validatePasswordSetupToken,
+  validatePasswordResetToken,
 } from '@/lib/server/auth-store';
 import { writeServerAuditLog } from '@/lib/server/supabase-audit';
 
 export const runtime = 'nodejs';
 
+const passwordFlowSchema = z.enum(['setup', 'reset']);
 const setupPasswordSchema = z.object({
   token: z.string().min(1),
   password: z.string().min(8, 'Password must be at least 8 characters long.'),
+  mode: passwordFlowSchema.default('setup'),
 });
+
+type PasswordFlow = z.infer<typeof passwordFlowSchema>;
+
+function resolvePasswordFlowMode(value: string | null | undefined): PasswordFlow {
+  return value === 'reset' ? 'reset' : 'setup';
+}
+
+async function validatePasswordToken(token: string, mode: PasswordFlow) {
+  return mode === 'reset'
+    ? validatePasswordResetToken(token)
+    : validatePasswordSetupToken(token);
+}
+
+async function completePasswordFlow(token: string, password: string, mode: PasswordFlow) {
+  return mode === 'reset'
+    ? completePasswordReset(token, password)
+    : completePasswordSetup(token, password);
+}
 
 export async function GET(request: NextRequest) {
   const token = request.nextUrl.searchParams.get('token') ?? '';
+  const mode = resolvePasswordFlowMode(request.nextUrl.searchParams.get('mode'));
   if (!token) {
-    return NextResponse.json({ error: 'Missing setup token.' }, { status: 400 });
+    return NextResponse.json(
+      {
+        error: mode === 'reset' ? 'Missing reset token.' : 'Missing setup token.',
+      },
+      { status: 400 },
+    );
   }
 
-  const user = await validatePasswordSetupToken(token);
+  const user = await validatePasswordToken(token, mode);
   if (!user) {
     return NextResponse.json(
-      { error: 'This password setup link is invalid or has expired.' },
+      {
+        error: mode === 'reset'
+          ? 'This password reset link is invalid or has expired.'
+          : 'This password setup link is invalid or has expired.',
+      },
       { status: 400 },
     );
   }
@@ -54,7 +86,7 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const user = await completePasswordSetup(payload.token, payload.password);
+    const user = await completePasswordFlow(payload.token, payload.password, payload.mode);
     try {
       await writeServerAuditLog({
         actor: user,
@@ -62,11 +94,11 @@ export async function POST(request: NextRequest) {
         entity_type: 'user',
         entity_id: user.id,
         changes: {
-          source: 'setup_password',
+          source: payload.mode === 'reset' ? 'forgot_password' : 'setup_password',
         },
       });
     } catch (error) {
-      console.error('[Supabase Mirror] Failed to sync password setup:', error);
+      console.error('[Supabase Mirror] Failed to sync password flow:', error);
     }
 
     const sessionToken = createSessionToken({
@@ -91,7 +123,9 @@ export async function POST(request: NextRequest) {
       {
         error: error instanceof Error
           ? error.message
-          : 'Unable to complete password setup.',
+          : payload.mode === 'reset'
+            ? 'Unable to complete password reset.'
+            : 'Unable to complete password setup.',
       },
       { status: 400 },
     );

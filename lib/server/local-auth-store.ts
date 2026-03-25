@@ -214,6 +214,36 @@ function removeExpiredTokens(store: AuthStore) {
   });
 }
 
+function findUsablePasswordToken(store: AuthStore, rawToken: string) {
+  return store.password_setup_tokens.find((entry) => (
+    entry.token_hash === hashToken(rawToken)
+    && !entry.used_at
+    && new Date(entry.expires_at).getTime() > Date.now()
+  ));
+}
+
+function clearUnusedPasswordTokens(store: AuthStore, userId: string) {
+  store.password_setup_tokens = store.password_setup_tokens.filter((token) => (
+    token.user_id !== userId || Boolean(token.used_at)
+  ));
+}
+
+function createPasswordTokenRecord(userId: string) {
+  const rawToken = createToken();
+  const timestamp = nowIso();
+
+  return {
+    rawToken,
+    record: {
+      id: generateId('setup'),
+      user_id: userId,
+      token_hash: hashToken(rawToken),
+      created_at: timestamp,
+      expires_at: new Date(Date.now() + PASSWORD_TOKEN_TTL_MS).toISOString(),
+    } satisfies PasswordSetupTokenRecord,
+  };
+}
+
 export async function listUsers(): Promise<User[]> {
   const store = await readStore();
   return store.users
@@ -337,23 +367,13 @@ export async function createPasswordSetupToken(userId: string): Promise<string> 
       throw new Error('User not found.');
     }
 
-    const rawToken = createToken();
-    const timestamp = nowIso();
+    const { rawToken, record } = createPasswordTokenRecord(userId);
 
-    store.password_setup_tokens = store.password_setup_tokens.filter((token) => (
-      token.user_id !== userId || Boolean(token.used_at)
-    ));
-
-    store.password_setup_tokens.push({
-      id: generateId('setup'),
-      user_id: userId,
-      token_hash: hashToken(rawToken),
-      created_at: timestamp,
-      expires_at: new Date(Date.now() + PASSWORD_TOKEN_TTL_MS).toISOString(),
-    });
+    clearUnusedPasswordTokens(store, userId);
+    store.password_setup_tokens.push(record);
 
     user.must_change_password = true;
-    user.updatedAt = timestamp;
+    user.updatedAt = record.created_at;
 
     return rawToken;
   });
@@ -363,12 +383,37 @@ export async function validatePasswordSetupToken(rawToken: string): Promise<User
   const store = await readStore();
   removeExpiredTokens(store);
 
-  const token = store.password_setup_tokens.find((entry) => (
-    entry.token_hash === hashToken(rawToken)
-    && !entry.used_at
-    && new Date(entry.expires_at).getTime() > Date.now()
-  ));
+  const token = findUsablePasswordToken(store, rawToken);
 
+  if (!token) return null;
+
+  const user = store.users.find((entry) => entry.id === token.user_id);
+  return user ? toPublicUser(user) : null;
+}
+
+export async function createPasswordResetToken(userId: string): Promise<string> {
+  return withStoreWrite(async (store) => {
+    removeExpiredTokens(store);
+
+    const user = store.users.find((entry) => entry.id === userId);
+    if (!user) {
+      throw new Error('User not found.');
+    }
+
+    const { rawToken, record } = createPasswordTokenRecord(userId);
+
+    clearUnusedPasswordTokens(store, userId);
+    store.password_setup_tokens.push(record);
+
+    return rawToken;
+  });
+}
+
+export async function validatePasswordResetToken(rawToken: string): Promise<User | null> {
+  const store = await readStore();
+  removeExpiredTokens(store);
+
+  const token = findUsablePasswordToken(store, rawToken);
   if (!token) return null;
 
   const user = store.users.find((entry) => entry.id === token.user_id);
@@ -379,14 +424,34 @@ export async function completePasswordSetup(rawToken: string, password: string):
   return withStoreWrite(async (store) => {
     removeExpiredTokens(store);
 
-    const token = store.password_setup_tokens.find((entry) => (
-      entry.token_hash === hashToken(rawToken)
-      && !entry.used_at
-      && new Date(entry.expires_at).getTime() > Date.now()
-    ));
+    const token = findUsablePasswordToken(store, rawToken);
 
     if (!token) {
       throw new Error('This password setup link is invalid or has expired.');
+    }
+
+    const user = store.users.find((entry) => entry.id === token.user_id);
+    if (!user) {
+      throw new Error('User not found.');
+    }
+
+    user.password_hash = await hashPassword(password);
+    user.must_change_password = false;
+    user.updatedAt = nowIso();
+
+    token.used_at = nowIso();
+
+    return toPublicUser(user);
+  });
+}
+
+export async function completePasswordReset(rawToken: string, password: string): Promise<User> {
+  return withStoreWrite(async (store) => {
+    removeExpiredTokens(store);
+
+    const token = findUsablePasswordToken(store, rawToken);
+    if (!token) {
+      throw new Error('This password reset link is invalid or has expired.');
     }
 
     const user = store.users.find((entry) => entry.id === token.user_id);

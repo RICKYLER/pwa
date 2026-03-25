@@ -15,6 +15,9 @@ type AuthStoreApi = {
   createPasswordSetupToken: typeof localStore.createPasswordSetupToken;
   validatePasswordSetupToken: typeof localStore.validatePasswordSetupToken;
   completePasswordSetup: typeof localStore.completePasswordSetup;
+  createPasswordResetToken: typeof localStore.createPasswordResetToken;
+  validatePasswordResetToken: typeof localStore.validatePasswordResetToken;
+  completePasswordReset: typeof localStore.completePasswordReset;
   createEmailVerificationToken: typeof localStore.createEmailVerificationToken;
   completeEmailVerification: typeof localStore.completeEmailVerification;
   authenticateUser: typeof localStore.authenticateUser;
@@ -104,6 +107,18 @@ export async function validatePasswordSetupToken(rawToken: string) {
 
 export async function completePasswordSetup(rawToken: string, password: string) {
   return (await getAuthStore()).completePasswordSetup(rawToken, password);
+}
+
+export async function createPasswordResetToken(userId: string) {
+  return (await getAuthStore()).createPasswordResetToken(userId);
+}
+
+export async function validatePasswordResetToken(rawToken: string) {
+  return (await getAuthStore()).validatePasswordResetToken(rawToken);
+}
+
+export async function completePasswordReset(rawToken: string, password: string) {
+  return (await getAuthStore()).completePasswordReset(rawToken, password);
 }
 
 export async function createEmailVerificationToken(userId: string) {

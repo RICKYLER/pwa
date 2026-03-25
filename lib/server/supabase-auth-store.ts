@@ -31,7 +31,7 @@ type TokenRow = {
   used_at: string | null;
 };
 
-type StatelessTokenKind = 'password_setup' | 'email_verification';
+type StatelessTokenKind = 'password_setup' | 'password_reset' | 'email_verification';
 
 type StatelessTokenPayload = {
   exp: number;
@@ -559,6 +559,75 @@ export async function validatePasswordSetupToken(rawToken: string): Promise<User
   }
 }
 
+export async function createPasswordResetToken(userId: string): Promise<string> {
+  const existing = await getProfileById(userId);
+  if (!existing) {
+    throw new Error('User not found.');
+  }
+
+  try {
+    await deleteUnusedTokens('password_setup_tokens', userId);
+
+    const rawToken = createToken();
+    const supabase = getSupabaseAdminClient();
+    const { error } = await supabase
+      .from('password_setup_tokens')
+      .insert({
+        id: `reset_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`,
+        user_id: userId,
+        token_hash: hashToken(rawToken),
+        created_at: nowIso(),
+        expires_at: new Date(Date.now() + PASSWORD_TOKEN_TTL_MS).toISOString(),
+      });
+
+    if (error) {
+      throw new Error(`Failed to create the password reset token: ${error.message}`);
+    }
+
+    return rawToken;
+  } catch (error) {
+    if (!isMissingTokenTableError(error, 'password_setup_tokens')) {
+      throw error;
+    }
+
+    return createStatelessToken({
+      kind: 'password_reset',
+      ttlMs: PASSWORD_TOKEN_TTL_MS,
+      user: existing,
+    });
+  }
+}
+
+export async function validatePasswordResetToken(rawToken: string): Promise<User | null> {
+  try {
+    const token = await getTokenByHash('password_setup_tokens', rawToken);
+    if (!token || !isTokenUsable(token)) {
+      return null;
+    }
+
+    const user = await getProfileById(token.user_id);
+    return user ? toPublicUser(user) : null;
+  } catch (error) {
+    if (!isMissingTokenTableError(error, 'password_setup_tokens')) {
+      throw error;
+    }
+
+    const token = parseStatelessToken(rawToken, 'password_reset');
+    if (!token) {
+      return null;
+    }
+
+    const user = await getProfileById(token.user_id);
+    if (!user) {
+      return null;
+    }
+
+    return getRecordVersion(user) === token.version
+      ? toPublicUser(user)
+      : null;
+  }
+}
+
 export async function completePasswordSetup(rawToken: string, password: string): Promise<User> {
   try {
     const token = await getTokenByHash('password_setup_tokens', rawToken);
@@ -610,6 +679,83 @@ export async function completePasswordSetup(rawToken: string, password: string):
 
     if (!user.must_change_password || getRecordVersion(user) !== token.version) {
       throw new Error('This password setup link is invalid or has expired.');
+    }
+
+    const supabase = getSupabaseAdminClient();
+    const { error: updateError } = await supabase.auth.admin.updateUserById(user.id, {
+      password,
+    });
+
+    if (updateError) {
+      throw new Error(`Failed to update the Supabase password: ${updateError.message}`);
+    }
+
+    const updatedUser = await writeProfile({
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      role: user.role,
+      barangay_id: user.barangay_id,
+      must_change_password: false,
+      email_verification_required: user.email_verification_required,
+      email_verified_at: user.email_verified_at ?? null,
+    });
+
+    return toPublicUser(updatedUser);
+  }
+}
+
+export async function completePasswordReset(rawToken: string, password: string): Promise<User> {
+  try {
+    const token = await getTokenByHash('password_setup_tokens', rawToken);
+    if (!token || !isTokenUsable(token)) {
+      throw new Error('This password reset link is invalid or has expired.');
+    }
+
+    const user = await getProfileById(token.user_id);
+    if (!user) {
+      throw new Error('User not found.');
+    }
+
+    const supabase = getSupabaseAdminClient();
+    const { error } = await supabase.auth.admin.updateUserById(user.id, {
+      password,
+    });
+
+    if (error) {
+      throw new Error(`Failed to update the Supabase password: ${error.message}`);
+    }
+
+    await markTokenUsed('password_setup_tokens', token.id);
+    const updatedUser = await writeProfile({
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      role: user.role,
+      barangay_id: user.barangay_id,
+      must_change_password: false,
+      email_verification_required: user.email_verification_required,
+      email_verified_at: user.email_verified_at ?? null,
+    });
+
+    return toPublicUser(updatedUser);
+  } catch (error) {
+    if (!isMissingTokenTableError(error, 'password_setup_tokens')) {
+      throw error;
+    }
+
+    const token = parseStatelessToken(rawToken, 'password_reset');
+    if (!token) {
+      throw new Error('This password reset link is invalid or has expired.');
+    }
+
+    const user = await getProfileById(token.user_id);
+    if (!user) {
+      throw new Error('User not found.');
+    }
+
+    if (getRecordVersion(user) !== token.version) {
+      throw new Error('This password reset link is invalid or has expired.');
     }
 
     const supabase = getSupabaseAdminClient();

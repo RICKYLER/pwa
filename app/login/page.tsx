@@ -90,6 +90,9 @@ export default function LoginPage() {
   const verifyPageHref = verificationEmail
     ? `/resident/verify-email?email=${encodeURIComponent(verificationEmail)}`
     : '/resident/verify-email';
+  const forgotPasswordHref = email.trim()
+    ? `/forgot-password?email=${encodeURIComponent(email.trim())}`
+    : '/forgot-password';
 
   return (
     <div className="min-h-screen flex bg-slate-950">
@@ -179,9 +182,17 @@ export default function LoginPage() {
 
               {/* Password */}
               <div>
-                <label htmlFor="password" className="block text-sm font-semibold text-slate-700 mb-1.5">
-                  Password
-                </label>
+                <div className="mb-1.5 flex items-center justify-between gap-3">
+                  <label htmlFor="password" className="block text-sm font-semibold text-slate-700">
+                    Password
+                  </label>
+                  <Link
+                    href={forgotPasswordHref}
+                    className="text-xs font-semibold text-indigo-600 transition hover:text-indigo-700"
+                  >
+                    Forgot password?
+                  </Link>
+                </div>
                 <div className="relative">
                   <input
                     id="password"
