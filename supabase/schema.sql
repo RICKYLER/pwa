@@ -311,6 +311,8 @@ create table if not exists public.inventory_items (
   item_code text unique,
   category text not null
     check (category in ('food', 'medicine', 'hygiene', 'clothing', 'blankets', 'other')),
+  status text not null default 'active'
+    check (status in ('active', 'trashed')),
   quantity_available numeric(14, 2) not null default 0 check (quantity_available >= 0),
   unit text not null check (unit in ('pcs', 'kg', 'box', 'pack', 'bundle')),
   reorder_level numeric(14, 2) default 10 check (reorder_level is null or reorder_level >= 0),
@@ -479,6 +481,7 @@ create index if not exists vulnerability_flags_is_pwd_idx on public.vulnerabilit
 create index if not exists vulnerability_flags_is_pregnant_idx on public.vulnerability_flags (is_pregnant);
 create index if not exists vulnerability_flags_is_low_income_idx on public.vulnerability_flags (is_low_income);
 create index if not exists beneficiaries_resident_id_idx on public.beneficiaries (resident_id);
+create index if not exists inventory_items_status_idx on public.inventory_items (status);
 create index if not exists inventory_movements_item_id_idx on public.inventory_movements (item_id);
 create index if not exists inventory_movements_timestamp_idx on public.inventory_movements ("timestamp" desc);
 create index if not exists distribution_events_scheduled_date_idx on public.distribution_events (scheduled_date);

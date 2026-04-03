@@ -9,33 +9,44 @@ import {
   ArrowUp,
   Boxes,
   CalendarClock,
-  Clock3,
   Package,
   PencilLine,
   Plus,
   RefreshCcw,
   Search,
   Trash2,
-  Warehouse,
   X,
 } from 'lucide-react';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { getCurrentUser, hasPermission } from '@/lib/auth';
 import {
   addStock,
+  archiveInventoryItem,
   adjustInventoryCount,
   bootstrapInventoryFromSupabase,
   createInventoryItem,
   createPackageTemplate,
-  deleteInventoryItem,
   deletePackageTemplate,
   getExpiringSoonItems,
   getInventoryItems,
   getInventoryMovements,
   getInventoryStatusSummary,
+  getInventoryTrashItems,
   getItemStockState,
   getLowStockItems,
   getOutOfStockItems,
   getPackageTemplates,
+  permanentlyDeleteInventoryItem,
+  restoreInventoryItem,
   updateInventoryItem,
 } from '@/lib/db/inventory';
 import type { DistributedItem, InventoryItem, InventoryMovement, PackageTemplate } from '@/lib/db/schema';
@@ -106,12 +117,22 @@ const MOVEMENT_LABELS: Record<
 type StockFilter = 'all' | 'low' | 'out' | 'expiring';
 type TransactionMode = 'add' | 'adjust';
 type MovementScope = 'all' | 'selected';
+type InventoryView = 'active' | 'trash';
+type ItemActionKind = 'archive' | 'restore' | 'delete';
+type ItemActionDialogState = {
+  action: ItemActionKind;
+  itemId: string;
+  itemName: string;
+  quantityAvailable: number;
+  unit: InventoryItem['unit'];
+};
 
 export default function InventoryDesktop() {
   const router = useRouter();
   const user = getCurrentUser();
 
   const [items, setItems] = useState<InventoryItem[]>([]);
+  const [trashItems, setTrashItems] = useState<InventoryItem[]>([]);
   const [lowStock, setLowStock] = useState<InventoryItem[]>([]);
   const [outOfStock, setOutOfStock] = useState<InventoryItem[]>([]);
   const [expiringSoon, setExpiringSoon] = useState<InventoryItem[]>([]);
@@ -124,6 +145,7 @@ export default function InventoryDesktop() {
     outOfStockCount: 0,
     expiringSoonCount: 0,
   });
+  const [inventoryView, setInventoryView] = useState<InventoryView>('active');
   const [filterCat, setFilterCat] = useState('all');
   const [filterStock, setFilterStock] = useState<StockFilter>('all');
   const [search, setSearch] = useState('');
@@ -142,6 +164,10 @@ export default function InventoryDesktop() {
   const [editingItem, setEditingItem] = useState<InventoryItem | null>(null);
   const [isSavingEdit, setIsSavingEdit] = useState(false);
   const [isDeletingItem, setIsDeletingItem] = useState(false);
+  const [isRestoringItem, setIsRestoringItem] = useState(false);
+  const [isPermanentlyDeletingItem, setIsPermanentlyDeletingItem] = useState(false);
+  const [itemActionError, setItemActionError] = useState('');
+  const [itemActionDialog, setItemActionDialog] = useState<ItemActionDialogState | null>(null);
   const [isSavingTemplate, setIsSavingTemplate] = useState(false);
 
   const [form, setForm] = useState({
@@ -174,7 +200,11 @@ export default function InventoryDesktop() {
     notes: '',
   });
 
-  const load = useCallback(async (itemIdForMovements?: string, background = false) => {
+  const load = useCallback(async (
+    itemIdForMovements?: string,
+    background = false,
+    view: InventoryView = inventoryView,
+  ) => {
     if (!background) {
       setIsLoading(true);
     }
@@ -182,8 +212,9 @@ export default function InventoryDesktop() {
     try {
       await bootstrapInventoryFromSupabase();
 
-      const [inv, ls, out, exp, stats, templateList] = await Promise.all([
+      const [inv, trashList, ls, out, exp, stats, templateList] = await Promise.all([
         getInventoryItems(),
+        getInventoryTrashItems(),
         getLowStockItems(),
         getOutOfStockItems(),
         getExpiringSoonItems(),
@@ -192,6 +223,7 @@ export default function InventoryDesktop() {
       ]);
 
       setItems(inv);
+      setTrashItems(trashList);
       setLowStock(ls);
       setOutOfStock(out);
       setExpiringSoon(exp);
@@ -202,16 +234,17 @@ export default function InventoryDesktop() {
         setTemplateForm((current) => ({ ...current, selectedItemId: inv[0].id }));
       }
 
+      const sourceItems = view === 'trash' ? trashList : inv;
       const requestedItemId =
-        itemIdForMovements && inv.some((item) => item.id === itemIdForMovements)
+        itemIdForMovements && sourceItems.some((item) => item.id === itemIdForMovements)
           ? itemIdForMovements
           : null;
       const persistedSelectedItemId =
-        selectedItemId && inv.some((item) => item.id === selectedItemId)
+        selectedItemId && sourceItems.some((item) => item.id === selectedItemId)
           ? selectedItemId
           : null;
       const nextSelectedItemId =
-        requestedItemId || persistedSelectedItemId || (inv.length > 0 ? inv[0].id : null);
+        requestedItemId || persistedSelectedItemId || (sourceItems.length > 0 ? sourceItems[0].id : null);
       setSelectedItemId(nextSelectedItemId);
 
       const nextMovementScope =
@@ -225,7 +258,7 @@ export default function InventoryDesktop() {
         setIsLoading(false);
       }
     }
-  }, [movementScope, selectedItemId, templateForm.selectedItemId]);
+  }, [inventoryView, movementScope, selectedItemId, templateForm.selectedItemId]);
 
   useEffect(() => {
     if (!user || !hasPermission('view_reports')) {
@@ -244,6 +277,10 @@ export default function InventoryDesktop() {
 
     void loadMovements(undefined, 'all');
   }, [movementScope, selectedItemId]);
+
+  useEffect(() => {
+    setItemActionError('');
+  }, [inventoryView, selectedItemId]);
 
   async function loadMovements(itemId?: string, scope: MovementScope = movementScope) {
     const recentMovements = await getInventoryMovements({
@@ -331,6 +368,7 @@ export default function InventoryDesktop() {
   }
 
   function openTransaction(item: InventoryItem, mode: TransactionMode) {
+    setItemActionError('');
     setTransactionItem(item);
     setTransactionMode(mode);
     setTransactionQuantity('1');
@@ -368,6 +406,7 @@ export default function InventoryDesktop() {
   }
 
   function openEditItem(item: InventoryItem) {
+    setItemActionError('');
     setEditingItem(item);
     setEditForm({
       item_name: item.item_name,
@@ -379,6 +418,95 @@ export default function InventoryDesktop() {
       expiration_date: item.expiration_date || '',
       notes: item.notes || '',
     });
+  }
+
+  function openItemActionDialog(item: InventoryItem, action: ItemActionKind) {
+    setItemActionError('');
+    setItemActionDialog({
+      action,
+      itemId: item.id,
+      itemName: item.item_name,
+      quantityAvailable: item.quantity_available,
+      unit: item.unit,
+    });
+  }
+
+  function closeItemActionDialog() {
+    setItemActionDialog(null);
+  }
+
+  function getItemActionBusy(action: ItemActionKind) {
+    switch (action) {
+      case 'archive':
+        return isDeletingItem;
+      case 'restore':
+        return isRestoringItem;
+      case 'delete':
+        return isPermanentlyDeletingItem;
+      default:
+        return false;
+    }
+  }
+
+  function getItemActionDialogMeta(dialog: ItemActionDialogState) {
+    switch (dialog.action) {
+      case 'archive':
+        return {
+          eyebrow: 'Inventory Archive',
+          title: 'Move this item to Trash?',
+          description: `This keeps "${dialog.itemName}" and its movement history, sets stock to 0, and lets you restore it later.`,
+          detailLabel: 'Stock on hand',
+          detailValue: `${dialog.quantityAvailable} ${dialog.unit}`,
+          detailHint: 'Current recorded quantity before archiving',
+          noteTitle: 'What happens next',
+          noteBody: 'The item leaves the active list, stays searchable in Trash, and can be restored whenever you need it again.',
+          icon: Archive,
+          iconTone: 'bg-amber-100 text-amber-700 ring-1 ring-amber-200',
+          surfaceTone: 'from-amber-100 via-white to-rose-100',
+          actionClassName:
+            'border-0 bg-gradient-to-r from-amber-500 to-rose-500 text-white shadow-[0_18px_40px_-20px_rgba(244,114,182,0.45)] hover:from-amber-400 hover:to-rose-400',
+          actionLabel: 'Move To Trash',
+          actionPendingLabel: 'Moving…',
+        };
+      case 'restore':
+        return {
+          eyebrow: 'Restore Item',
+          title: 'Restore this item from Trash?',
+          description: `This will return "${dialog.itemName}" to your active inventory so you can add stock, adjust counts, and include it in workflows again.`,
+          detailLabel: 'Current stock',
+          detailValue: `${dialog.quantityAvailable} ${dialog.unit}`,
+          detailHint: 'Stock stays as-is after restore',
+          noteTitle: 'After restore',
+          noteBody: 'The item moves back to the active inventory list immediately. You can update stock again right after restoring it.',
+          icon: RefreshCcw,
+          iconTone: 'bg-emerald-100 text-emerald-700 ring-1 ring-emerald-200',
+          surfaceTone: 'from-emerald-100 via-white to-teal-100',
+          actionClassName:
+            'border-0 bg-gradient-to-r from-emerald-500 to-teal-600 text-white shadow-[0_18px_40px_-20px_rgba(16,185,129,0.45)] hover:from-emerald-400 hover:to-teal-500',
+          actionLabel: 'Restore Item',
+          actionPendingLabel: 'Restoring…',
+        };
+      case 'delete':
+        return {
+          eyebrow: 'Permanent Delete',
+          title: 'Delete this item permanently?',
+          description: `This permanently removes "${dialog.itemName}" and its stock movement history. This action cannot be undone.`,
+          detailLabel: 'Delete scope',
+          detailValue: 'Item + history',
+          detailHint: 'All related inventory movements will be removed',
+          noteTitle: 'Before you continue',
+          noteBody: 'Permanent delete is only for items already in Trash. If this item is still referenced by a package or distribution event, deletion will be blocked.',
+          icon: Trash2,
+          iconTone: 'bg-rose-100 text-rose-700 ring-1 ring-rose-200',
+          surfaceTone: 'from-rose-100 via-white to-orange-100',
+          actionClassName:
+            'border-0 bg-gradient-to-r from-rose-600 to-red-600 text-white shadow-[0_18px_40px_-20px_rgba(225,29,72,0.45)] hover:from-rose-500 hover:to-red-500',
+          actionLabel: 'Delete Permanently',
+          actionPendingLabel: 'Deleting…',
+        };
+      default:
+        return null;
+    }
   }
 
   async function handleSaveItemEdit(event: React.FormEvent) {
@@ -407,19 +535,83 @@ export default function InventoryDesktop() {
 
   async function handleArchiveSelectedItem() {
     if (!selectedItem) return;
+    openItemActionDialog(selectedItem, 'archive');
+  }
 
-    const approved = window.confirm(
-      `Archive "${selectedItem.item_name}"? This will keep movement history and set its stock to 0 instead of permanently deleting it.`,
-    );
-    if (!approved) return;
-
+  async function confirmArchiveSelectedItem(itemId: string) {
     try {
+      setItemActionError('');
       setIsDeletingItem(true);
-      await deleteInventoryItem(selectedItem.id);
-      await load(selectedItem.id);
+      await archiveInventoryItem(itemId);
+      setInventoryView('trash');
+      await load(itemId, false, 'trash');
+      closeItemActionDialog();
+    } catch (error) {
+      setItemActionError(
+        error instanceof Error ? error.message : 'Unable to move this item to Trash.',
+      );
     } finally {
       setIsDeletingItem(false);
     }
+  }
+
+  async function handleRestoreSelectedItem() {
+    if (!selectedItem) return;
+    openItemActionDialog(selectedItem, 'restore');
+  }
+
+  async function confirmRestoreSelectedItem(itemId: string) {
+    try {
+      setItemActionError('');
+      setIsRestoringItem(true);
+      await restoreInventoryItem(itemId);
+      setInventoryView('active');
+      await load(itemId, false, 'active');
+      closeItemActionDialog();
+    } catch (error) {
+      setItemActionError(
+        error instanceof Error ? error.message : 'Unable to restore this item.',
+      );
+    } finally {
+      setIsRestoringItem(false);
+    }
+  }
+
+  async function handlePermanentlyDeleteSelectedItem() {
+    if (!selectedItem) return;
+    openItemActionDialog(selectedItem, 'delete');
+  }
+
+  async function confirmPermanentlyDeleteSelectedItem(itemId: string) {
+    try {
+      setItemActionError('');
+      setIsPermanentlyDeletingItem(true);
+      await permanentlyDeleteInventoryItem(itemId);
+      await load(undefined, false, 'trash');
+      closeItemActionDialog();
+    } catch (error) {
+      setItemActionError(
+        error instanceof Error ? error.message : 'Unable to permanently delete this item.',
+      );
+    } finally {
+      setIsPermanentlyDeletingItem(false);
+    }
+  }
+
+  async function handleConfirmItemAction() {
+    if (!itemActionDialog) return;
+
+    if (itemActionDialog.action === 'archive') {
+      await confirmArchiveSelectedItem(itemActionDialog.itemId);
+      return;
+    }
+
+    if (itemActionDialog.action === 'restore') {
+      await confirmRestoreSelectedItem(itemActionDialog.itemId);
+      return;
+    }
+
+    await confirmPermanentlyDeleteSelectedItem(itemActionDialog.itemId);
   }
 
   function addTemplateLine() {
@@ -499,8 +691,9 @@ export default function InventoryDesktop() {
 
   if (!user) return null;
 
-  const selectedItem = items.find((item) => item.id === selectedItemId) ?? null;
-  const displayed = items.filter((item) => {
+  const currentItems = inventoryView === 'trash' ? trashItems : items;
+  const selectedItem = currentItems.find((item) => item.id === selectedItemId) ?? null;
+  const displayed = currentItems.filter((item) => {
     const matchesCategory = filterCat === 'all' || item.category === filterCat;
     const searchValue = [
       item.item_name,
@@ -514,7 +707,9 @@ export default function InventoryDesktop() {
     const matchesSearch = !search || searchValue.includes(search.toLowerCase());
 
     const matchesStock =
-      filterStock === 'all'
+      inventoryView === 'trash'
+        ? true
+        : filterStock === 'all'
         ? true
         : filterStock === 'low'
           ? getItemStockState(item) === 'low'
@@ -525,8 +720,8 @@ export default function InventoryDesktop() {
     return matchesCategory && matchesSearch && matchesStock;
   });
 
-  const maxQty = Math.max(...items.map((item) => item.quantity_available), 1);
-  const hasFilters = search || filterCat !== 'all' || filterStock !== 'all';
+  const maxQty = Math.max(...currentItems.map((item) => item.quantity_available), 1);
+  const hasFilters = search || filterCat !== 'all' || (inventoryView === 'active' && filterStock !== 'all');
 
   return (
     <div className="mx-auto max-w-[1500px] space-y-5 p-8">
@@ -534,27 +729,60 @@ export default function InventoryDesktop() {
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Inventory</h1>
           <p className="mt-0.5 text-sm text-slate-500">
-            {summary.totalItemTypes} item types · {summary.totalUnits.toLocaleString()} total units
+            {inventoryView === 'trash'
+              ? `${trashItems.length} item${trashItems.length !== 1 ? 's' : ''} in Trash`
+              : `${summary.totalItemTypes} item types · ${summary.totalUnits.toLocaleString()} total units`}
           </p>
         </div>
-        {hasPermission('manage_inventory') ? (
-          <button
-            onClick={() => {
-              setAddItemError('');
-              setShowForm((value) => !value);
-            }}
-            className={`inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold transition-all shadow-md hover:-translate-y-px ${
-              showForm
-                ? 'bg-slate-200 text-slate-700 shadow-slate-200/50'
-                : 'bg-gradient-to-r from-amber-500 to-orange-600 text-white shadow-amber-500/25'
-            }`}
-          >
-            {showForm ? <X className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
-            {showForm ? 'Cancel' : 'Add Item'}
-          </button>
-        ) : null}
+        <div className="flex items-center gap-3">
+          <div className="inline-flex rounded-2xl border border-slate-200 bg-white p-1 shadow-sm">
+            <button
+              type="button"
+              onClick={() => setInventoryView('active')}
+              className={`rounded-xl px-3 py-2 text-sm font-semibold transition ${
+                inventoryView === 'active'
+                  ? 'bg-slate-900 text-white shadow-sm'
+                  : 'text-slate-500 hover:text-slate-700'
+              }`}
+            >
+              Active <span className="ml-1 text-xs opacity-70">{items.length}</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setFilterStock('all');
+                setInventoryView('trash');
+              }}
+              className={`inline-flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold transition ${
+                inventoryView === 'trash'
+                  ? 'bg-slate-900 text-white shadow-sm'
+                  : 'text-slate-500 hover:text-slate-700'
+              }`}
+            >
+              <Trash2 className="h-4 w-4" />
+              Trash <span className="text-xs opacity-70">{trashItems.length}</span>
+            </button>
+          </div>
+          {hasPermission('manage_inventory') ? (
+            <button
+              onClick={() => {
+                setAddItemError('');
+                setShowForm((value) => !value);
+              }}
+              className={`inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold transition-all shadow-md hover:-translate-y-px ${
+                showForm
+                  ? 'bg-slate-200 text-slate-700 shadow-slate-200/50'
+                  : 'bg-gradient-to-r from-amber-500 to-orange-600 text-white shadow-amber-500/25'
+              }`}
+            >
+              {showForm ? <X className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
+              {showForm ? 'Cancel' : 'Add Item'}
+            </button>
+          ) : null}
+        </div>
       </div>
 
+      {inventoryView === 'active' ? (
       <div className="grid gap-4 xl:grid-cols-5">
         {[
           {
@@ -622,8 +850,21 @@ export default function InventoryDesktop() {
           );
         })}
       </div>
+      ) : (
+        <div className="rounded-2xl border border-slate-200/60 bg-white p-5 shadow-sm">
+          <div className="flex items-start gap-3">
+            <Trash2 className="mt-0.5 h-5 w-5 flex-shrink-0 text-slate-500" />
+            <div className="space-y-1">
+              <p className="text-sm font-semibold text-slate-900">Trash keeps archived inventory items safe.</p>
+              <p className="text-xs text-slate-500">
+                Restore items anytime, or permanently delete them once they are no longer needed.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
 
-      {(lowStock.length > 0 || outOfStock.length > 0 || expiringSoon.length > 0) && !isLoading ? (
+      {inventoryView === 'active' && (lowStock.length > 0 || outOfStock.length > 0 || expiringSoon.length > 0) && !isLoading ? (
         <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4">
           <div className="flex items-start gap-3">
             <AlertTriangle className="mt-0.5 h-5 w-5 flex-shrink-0 text-amber-600" />
@@ -826,10 +1067,10 @@ export default function InventoryDesktop() {
                 : 'border border-slate-200 bg-white text-slate-500 hover:border-slate-300'
             }`}
           >
-            All <span className="ml-1">{items.length}</span>
+            All <span className="ml-1">{currentItems.length}</span>
           </button>
           {Object.entries(CAT_CFG).map(([key, value]) => {
-            const count = items.filter((item) => item.category === key).length;
+            const count = currentItems.filter((item) => item.category === key).length;
             return (
               <button
                 key={key}
@@ -849,6 +1090,7 @@ export default function InventoryDesktop() {
         </div>
       </div>
 
+      {inventoryView === 'active' ? (
       <div className="flex gap-2">
         {[
           { key: 'all', label: 'All Stock' },
@@ -881,6 +1123,25 @@ export default function InventoryDesktop() {
           </button>
         ) : null}
       </div>
+      ) : (
+        <div className="flex items-center justify-between rounded-2xl border border-slate-200/60 bg-slate-50 px-4 py-3">
+          <p className="text-sm font-medium text-slate-600">
+            Archived items stay out of active stock lists and package selection.
+          </p>
+          {hasFilters ? (
+            <button
+              onClick={() => {
+                setSearch('');
+                setFilterCat('all');
+                setFilterStock('all');
+              }}
+              className="text-xs font-semibold text-amber-500 hover:text-amber-700"
+            >
+              Clear
+            </button>
+          ) : null}
+        </div>
+      )}
 
       <div className="grid gap-4 xl:grid-cols-[1.45fr_0.55fr]">
         <div>
@@ -897,6 +1158,7 @@ export default function InventoryDesktop() {
             <div className="grid grid-cols-2 gap-3">
               {displayed.map((item) => {
                 const cfg = CAT_CFG[item.category] || CAT_CFG.other;
+                const isTrashed = item.status === 'trashed';
                 const stockState = getItemStockState(item);
                 const isLow = stockState === 'low';
                 const isOut = stockState === 'out';
@@ -911,6 +1173,8 @@ export default function InventoryDesktop() {
                     className={`text-left rounded-2xl border p-5 transition-all hover:shadow-md ${
                       isSelected
                         ? 'border-slate-900 shadow-md'
+                        : isTrashed
+                          ? 'border-slate-300 bg-slate-50/80'
                         : isOut
                           ? 'border-rose-200 bg-rose-50/40'
                           : isLow
@@ -925,7 +1189,11 @@ export default function InventoryDesktop() {
                       <div className="min-w-0 flex-1">
                         <div className="flex flex-wrap items-center gap-2">
                           <p className="truncate text-sm font-semibold text-slate-900">{item.item_name}</p>
-                          {isOut ? (
+                          {isTrashed ? (
+                            <span className="rounded-full bg-slate-200 px-1.5 py-0.5 text-[10px] font-bold text-slate-600 ring-1 ring-slate-300">
+                              In trash
+                            </span>
+                          ) : isOut ? (
                             <span className="rounded-full bg-rose-50 px-1.5 py-0.5 text-[10px] font-bold text-rose-600 ring-1 ring-rose-200">
                               Out of stock
                             </span>
@@ -1004,8 +1272,14 @@ export default function InventoryDesktop() {
           ) : (
             <div className="rounded-2xl border border-dashed border-slate-300 bg-white py-20 text-center">
               <Package className="mx-auto mb-3 h-8 w-8 text-slate-300" />
-              <p className="mb-1 font-semibold text-slate-700">No items found</p>
-              <p className="mb-5 text-sm text-slate-400">Clear filters or add your first item</p>
+              <p className="mb-1 font-semibold text-slate-700">
+                {inventoryView === 'trash' ? 'Trash is empty' : 'No items found'}
+              </p>
+              <p className="mb-5 text-sm text-slate-400">
+                {inventoryView === 'trash'
+                  ? 'Archived inventory items will appear here.'
+                  : 'Clear filters or add your first item'}
+              </p>
               {hasFilters ? (
                 <button
                   onClick={() => {
@@ -1028,12 +1302,14 @@ export default function InventoryDesktop() {
               <div>
                 <p className="text-sm font-bold text-slate-800">Item Detail</p>
                 <p className="mt-0.5 text-xs text-slate-400">
-                  Inspect the latest stock history and update counts professionally.
+                  {inventoryView === 'trash'
+                    ? 'Review archived items, restore them, or delete them permanently.'
+                    : 'Inspect the latest stock history and update counts professionally.'}
                 </p>
               </div>
               {selectedItem ? (
                 <span className="rounded-full bg-slate-100 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">
-                  Selected
+                  {selectedItem.status === 'trashed' ? 'In Trash' : 'Selected'}
                 </span>
               ) : null}
             </div>
@@ -1043,6 +1319,12 @@ export default function InventoryDesktop() {
                 <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
                   <p className="text-base font-bold text-slate-900">{selectedItem.item_name}</p>
                   <div className="mt-2 grid gap-2 text-xs text-slate-500">
+                    <div className="flex items-center justify-between">
+                      <span>Status</span>
+                      <span className="font-semibold text-slate-800">
+                        {selectedItem.status === 'trashed' ? 'In Trash' : 'Active'}
+                      </span>
+                    </div>
                     <div className="flex items-center justify-between">
                       <span>Current stock</span>
                       <span className="font-semibold text-slate-800">
@@ -1064,43 +1346,82 @@ export default function InventoryDesktop() {
                   </div>
                 </div>
 
-	                {hasPermission('manage_inventory') ? (
-	                  <div className="grid grid-cols-2 gap-2">
-	                    <button
-	                      type="button"
-	                      onClick={() => openTransaction(selectedItem, 'add')}
-                      className="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-600 px-3 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-500"
-                    >
-                      <Plus className="h-4 w-4" />
-                      Add Stock
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => openTransaction(selectedItem, 'adjust')}
-                      className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 px-3 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
-                    >
-	                      <PencilLine className="h-4 w-4" />
-	                      Adjust Count
-	                    </button>
-	                    <button
-	                      type="button"
-	                      onClick={() => openEditItem(selectedItem)}
-	                      className="inline-flex items-center justify-center gap-2 rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-2.5 text-sm font-semibold text-indigo-700 transition hover:bg-indigo-100"
-	                    >
-	                      <PencilLine className="h-4 w-4" />
-	                      Edit Details
-	                    </button>
-	                    <button
-	                      type="button"
-	                      onClick={() => void handleArchiveSelectedItem()}
-	                      disabled={isDeletingItem}
-	                      className="inline-flex items-center justify-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2.5 text-sm font-semibold text-rose-700 transition hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-60"
-	                    >
-	                      <Trash2 className="h-4 w-4" />
-	                      {isDeletingItem ? 'Archiving…' : 'Archive Item'}
-	                    </button>
-	                  </div>
-	                ) : null}
+                {selectedItem.status === 'trashed' ? (
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                    <p className="text-sm font-semibold text-slate-800">This item is currently in Trash.</p>
+                    <p className="mt-1 text-xs text-slate-500">
+                      Restore it to use it in stock operations again, or permanently delete it if you no longer need it.
+                    </p>
+                  </div>
+                ) : null}
+
+                {itemActionError ? (
+                  <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3">
+                    <p className="text-sm font-semibold text-rose-700">Action failed</p>
+                    <p className="mt-1 text-xs text-rose-600">{itemActionError}</p>
+                  </div>
+                ) : null}
+
+                {hasPermission('manage_inventory') ? (
+                  selectedItem.status === 'trashed' ? (
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => void handleRestoreSelectedItem()}
+                        disabled={isRestoringItem}
+                        className="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-600 px-3 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        <RefreshCcw className="h-4 w-4" />
+                        {isRestoringItem ? 'Restoring…' : 'Restore Item'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void handlePermanentlyDeleteSelectedItem()}
+                        disabled={isPermanentlyDeletingItem}
+                        className="inline-flex items-center justify-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2.5 text-sm font-semibold text-rose-700 transition hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                        {isPermanentlyDeletingItem ? 'Deleting…' : 'Delete Permanently'}
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => openTransaction(selectedItem, 'add')}
+                        className="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-600 px-3 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-500"
+                      >
+                        <Plus className="h-4 w-4" />
+                        Add Stock
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => openTransaction(selectedItem, 'adjust')}
+                        className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 px-3 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+                      >
+                        <PencilLine className="h-4 w-4" />
+                        Adjust Count
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => openEditItem(selectedItem)}
+                        className="inline-flex items-center justify-center gap-2 rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-2.5 text-sm font-semibold text-indigo-700 transition hover:bg-indigo-100"
+                      >
+                        <PencilLine className="h-4 w-4" />
+                        Edit Details
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void handleArchiveSelectedItem()}
+                        disabled={isDeletingItem}
+                        className="inline-flex items-center justify-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2.5 text-sm font-semibold text-rose-700 transition hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                        {isDeletingItem ? 'Moving…' : 'Move To Trash'}
+                      </button>
+                    </div>
+                  )
+                ) : null}
 
                 <div className="space-y-2">
                   <div className="flex items-start justify-between gap-3">
@@ -1200,7 +1521,9 @@ export default function InventoryDesktop() {
               </div>
             ) : (
               <div className="mt-4 rounded-2xl border border-dashed border-slate-300 px-4 py-10 text-center text-sm text-slate-400">
-                Select an item card to inspect movements and adjust stock.
+                {inventoryView === 'trash'
+                  ? 'Select a trashed item to review its history, restore it, or delete it permanently.'
+                  : 'Select an item card to inspect movements and adjust stock.'}
               </div>
             )}
           </div>
@@ -1583,6 +1906,118 @@ export default function InventoryDesktop() {
 	          </div>
 	        </div>
 	      ) : null}
+
+        {itemActionDialog ? (
+          <AlertDialog
+            open={Boolean(itemActionDialog)}
+            onOpenChange={(open) => {
+              if (!open && !getItemActionBusy(itemActionDialog.action)) {
+                closeItemActionDialog();
+              }
+            }}
+          >
+            {(() => {
+              const meta = getItemActionDialogMeta(itemActionDialog);
+              if (!meta) return null;
+
+              const Icon = meta.icon;
+              const isBusy = getItemActionBusy(itemActionDialog.action);
+
+              return (
+                <AlertDialogContent className="max-w-xl overflow-hidden rounded-[30px] border border-slate-200/80 bg-white p-0 shadow-[0_32px_90px_-40px_rgba(15,23,42,0.45)]">
+                  <div className="relative overflow-hidden">
+                    <div className={`absolute inset-x-0 top-0 h-32 bg-gradient-to-br ${meta.surfaceTone}`} />
+                    <div className="relative space-y-6 p-6 sm:p-7">
+                      <AlertDialogHeader className="space-y-0 text-left">
+                        <div className="flex items-start gap-4">
+                          <div className={`flex h-14 w-14 shrink-0 items-center justify-center rounded-[20px] ${meta.iconTone}`}>
+                            <Icon className="h-6 w-6" />
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500">
+                              {meta.eyebrow}
+                            </p>
+                            <AlertDialogTitle className="mt-1 text-2xl font-semibold tracking-[-0.02em] text-slate-950">
+                              {meta.title}
+                            </AlertDialogTitle>
+                            <AlertDialogDescription className="mt-2 max-w-lg text-sm leading-6 text-slate-600">
+                              {meta.description}
+                            </AlertDialogDescription>
+                          </div>
+                        </div>
+                      </AlertDialogHeader>
+
+                      <div className="grid gap-3 sm:grid-cols-[minmax(0,1.2fr)_minmax(180px,0.8fr)]">
+                        <div className="rounded-[24px] border border-slate-200/80 bg-white/95 p-4 shadow-[0_18px_40px_-30px_rgba(15,23,42,0.25)] backdrop-blur">
+                          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">
+                            Selected Item
+                          </p>
+                          <p className="mt-2 text-lg font-semibold text-slate-950">
+                            {itemActionDialog.itemName}
+                          </p>
+                          <p className="mt-1 text-sm text-slate-500">
+                            {itemActionDialog.action === 'archive'
+                              ? 'Move this item out of the active stock list while keeping its records.'
+                              : itemActionDialog.action === 'restore'
+                                ? 'Bring this item back into active inventory operations.'
+                                : 'Remove this item completely from your inventory database.'}
+                          </p>
+                        </div>
+
+                        <div className="rounded-[24px] border border-slate-200/80 bg-slate-950 p-4 text-white shadow-[0_18px_40px_-30px_rgba(15,23,42,0.42)]">
+                          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-white/60">
+                            {meta.detailLabel}
+                          </p>
+                          <p className="mt-2 text-xl font-semibold tracking-[-0.02em]">
+                            {meta.detailValue}
+                          </p>
+                          <p className="mt-1 text-sm text-white/70">
+                            {meta.detailHint}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="rounded-[24px] border border-slate-200/80 bg-slate-50/90 p-4">
+                        <p className="text-sm font-semibold text-slate-900">{meta.noteTitle}</p>
+                        <p className="mt-1.5 text-sm leading-6 text-slate-600">{meta.noteBody}</p>
+                      </div>
+
+                      {itemActionError ? (
+                        <div className="flex items-start gap-3 rounded-[22px] border border-rose-200 bg-rose-50 px-4 py-3 text-left">
+                          <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-rose-600" />
+                          <div>
+                            <p className="text-sm font-semibold text-rose-700">Action failed</p>
+                            <p className="mt-1 text-sm text-rose-600">{itemActionError}</p>
+                          </div>
+                        </div>
+                      ) : null}
+
+                      <AlertDialogFooter className="flex-col-reverse gap-3 border-t border-slate-100 pt-5 sm:flex-row sm:items-center sm:justify-end">
+                        <AlertDialogCancel
+                          disabled={isBusy}
+                          onClick={() => closeItemActionDialog()}
+                          className="rounded-2xl border-slate-200 bg-white px-5 py-2.5 text-sm font-semibold text-slate-600 hover:bg-slate-50"
+                        >
+                          Cancel
+                        </AlertDialogCancel>
+                        <AlertDialogAction
+                          disabled={isBusy}
+                          onClick={(event) => {
+                            event.preventDefault();
+                            void handleConfirmItemAction();
+                          }}
+                          className={`rounded-2xl px-5 py-2.5 text-sm font-semibold ${meta.actionClassName}`}
+                        >
+                          {isBusy ? meta.actionPendingLabel : meta.actionLabel}
+                        </AlertDialogAction>
+                      </AlertDialogFooter>
+                    </div>
+                  </div>
+                </AlertDialogContent>
+              );
+            })()}
+          </AlertDialog>
+        ) : null}
 	    </div>
 	  );
 }

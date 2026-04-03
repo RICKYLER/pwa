@@ -4,6 +4,7 @@ import { runServerMutation } from '@/lib/mutations';
 import type {
   DistributedItem,
   InventoryItem,
+  InventoryItemStatus,
   InventoryMovement,
   InventoryMovementType,
   PackageTemplate,
@@ -97,6 +98,7 @@ function normalizeInventoryItem(item: InventoryItem): InventoryItem {
     ...item,
     item_name: item.item_name.trim(),
     item_code: item.item_code?.trim() || undefined,
+    status: item.status === 'trashed' ? 'trashed' : 'active',
     quantity_available: normalizeQuantity(item.quantity_available),
     reorder_level: Math.max(0, normalizeQuantity(item.reorder_level ?? 10)),
     storage_location: item.storage_location?.trim() || undefined,
@@ -140,12 +142,22 @@ function normalizeInventoryMovement(movement: InventoryMovement): InventoryMovem
   };
 }
 
-function mapSnapshotInventoryItem(row: Record<string, unknown>): InventoryItem {
-  return normalizeInventoryItem({
+function mapSnapshotInventoryItem(
+  row: Record<string, unknown>,
+): InventoryItem & { recordVersion?: number } {
+  const recordVersion =
+    typeof row.record_version === 'number'
+      ? row.record_version
+      : typeof row.recordVersion === 'number'
+        ? row.recordVersion
+        : undefined;
+
+  const item = normalizeInventoryItem({
     id: String(row.id ?? ''),
     item_name: String(row.item_name ?? ''),
     item_code: toOptionalString(row.item_code),
     category: String(row.category ?? 'other') as InventoryItem['category'],
+    status: row.status === 'trashed' ? 'trashed' : 'active',
     quantity_available: normalizeQuantity(row.quantity_available),
     unit: String(row.unit ?? 'pcs') as InventoryItem['unit'],
     reorder_level: normalizeQuantity(row.reorder_level ?? 10),
@@ -154,6 +166,11 @@ function mapSnapshotInventoryItem(row: Record<string, unknown>): InventoryItem {
     notes: toOptionalString(row.notes),
     syncStatus: 'synced',
   });
+
+  return {
+    ...item,
+    ...(typeof recordVersion === 'number' ? { recordVersion } : {}),
+  };
 }
 
 function mapSnapshotInventoryMovement(row: Record<string, unknown>): InventoryMovement {
@@ -336,6 +353,10 @@ async function applyInventoryTransaction(params: {
     throw new Error(`Inventory item ${params.item_id} not found`);
   }
 
+  if (item.status === 'trashed') {
+    throw new Error('Restore this item from Trash before updating its stock.');
+  }
+
   const quantity = normalizeQuantity(params.quantity);
   if (quantity <= 0 && params.type !== 'adjustment') {
     throw new Error('Transaction quantity must be greater than zero');
@@ -397,11 +418,16 @@ export async function getInventoryItems(filters?: {
   category?: string;
   stockState?: 'out' | 'low' | 'healthy';
   search?: string;
+  status?: InventoryItemStatus | 'all';
 }): Promise<InventoryItem[]> {
   try {
     const all = (await db.getAll<InventoryItem>(STORE_NAMES.inventory_items)).map(normalizeInventoryItem);
 
-    let filtered = all;
+    let filtered = all.filter((item) =>
+      (filters?.status ?? 'active') === 'all'
+        ? true
+        : item.status === (filters?.status ?? 'active'),
+    );
 
     if (filters?.category) {
       filtered = filtered.filter((item) => item.category === filters.category);
@@ -462,6 +488,7 @@ export async function createInventoryItem(
         item_name: item.item_name,
         item_code: item.item_code,
         category: item.category,
+        status: item.status,
         quantity_available: item.quantity_available,
         unit: item.unit,
         reorder_level: item.reorder_level,
@@ -531,6 +558,10 @@ export async function updateInventoryItem(
         ...updates,
         item_name: typeof updates.item_name === 'string' ? updates.item_name.trim() : updates.item_name,
         item_code: typeof updates.item_code === 'string' ? (updates.item_code.trim() || null) : updates.item_code,
+        status:
+          updates.status === 'active' || updates.status === 'trashed'
+            ? updates.status
+            : updates.status,
         storage_location:
           typeof updates.storage_location === 'string'
             ? (updates.storage_location.trim() || null)
@@ -650,6 +681,10 @@ export async function getLowStockItems(): Promise<InventoryItem[]> {
   }
 }
 
+export async function getInventoryTrashItems(): Promise<InventoryItem[]> {
+  return getInventoryItems({ status: 'trashed' });
+}
+
 export async function getOutOfStockItems(): Promise<InventoryItem[]> {
   try {
     const all = await getInventoryItems();
@@ -758,12 +793,71 @@ export async function deletePackageTemplate(id: string): Promise<void> {
 }
 
 /**
- * Delete inventory item (soft delete by setting quantity to 0)
+ * Remove hydrated inventory movement rows after a permanent delete.
+ */
+async function deleteHydratedInventoryMovementsForItem(itemId: string): Promise<void> {
+  const allMovements = await db.getAll<InventoryMovement>(STORE_NAMES.inventory_movements);
+  const matchingMovements = allMovements.filter((movement) => movement.item_id === itemId);
+
+  await Promise.all(
+    matchingMovements.map((movement) =>
+      deleteHydratedRecord(STORE_NAMES.inventory_movements, movement.id),
+    ),
+  );
+}
+
+export async function archiveInventoryItem(id: string): Promise<InventoryItem> {
+  try {
+    const item = await getInventoryItem(id);
+    if (!item) {
+      throw new Error(`Inventory item ${id} not found`);
+    }
+
+    if (item.status === 'trashed') {
+      return item;
+    }
+
+    if (item.quantity_available > 0) {
+      await adjustInventoryCount(id, 0, 'Moved to trash');
+    }
+
+    return await updateInventoryItem(id, { status: 'trashed' });
+  } catch (error) {
+    console.error('Error archiving inventory item:', error);
+    throw error;
+  }
+}
+
+export async function restoreInventoryItem(id: string): Promise<InventoryItem> {
+  try {
+    return await updateInventoryItem(id, { status: 'active' });
+  } catch (error) {
+    console.error('Error restoring inventory item:', error);
+    throw error;
+  }
+}
+
+export async function permanentlyDeleteInventoryItem(id: string): Promise<void> {
+  try {
+    await runServerMutation({
+      action: 'delete_inventory_item_permanently',
+      itemId: id,
+    });
+    await deleteHydratedInventoryMovementsForItem(id);
+    await deleteHydratedRecord(STORE_NAMES.inventory_items, id);
+    await createAuditLog('DELETE', 'inventory', id, { mode: 'permanent' });
+  } catch (error) {
+    console.error('Error permanently deleting inventory item:', error);
+    throw error;
+  }
+}
+
+/**
+ * Backwards-compatible alias for moving an item into Trash.
  */
 export async function deleteInventoryItem(id: string): Promise<void> {
   try {
-    await adjustInventoryCount(id, 0, 'Marked as inactive');
-    await createAuditLog('DELETE', 'inventory', id, {});
+    await archiveInventoryItem(id);
   } catch (error) {
     console.error('Error deleting inventory item:', error);
     throw error;

@@ -1,0 +1,144 @@
+---
+id: 0f575ddf-b91e-480d-858c-f8daf075f158
+---
+flowchart TB
+  %% =========================
+  %% CIVICCONNECT PWA FLOWCHART
+  %% =========================
+
+  U[User (Staff)] -->|Login| A1[Auth UI /login]
+  A1 -->|POST app/auth/route.ts| A2[Local Auth (Users in IndexedDB)]
+  A2 -->|OK| SESS[Session saved (localStorage)]
+  A2 -->|Fail| AERR[Show error]
+
+  SESS --> MW[Route Guard (Middleware + Auth Context)]
+  MW --> APP[Main App Layout (Sidebar + Header)]
+  APP --> DSH[Dashboard]
+
+  %% -------------------------
+  %% PHASE 1: CORE MVP
+  %% -------------------------
+  subgraph P1["Phase 1 — Core MVP (Household + Vulnerability)"]
+    direction TB
+
+    DSH --> KPI[KPIs & Analytics]
+    KPI --> Q1[Read queries from IndexedDB]
+    Q1 --> IDB[(IndexedDB Database)]
+
+    APP --> HH[Households]
+    HH --> HH_LIST[Household list (search/filter purok/status)]
+    HH_LIST --> HH_NEW[Create household]
+    HH_NEW --> HH_FORM[Household form]
+    HH_FORM --> HH_CRUD[Household CRUD lib/db/households.ts]
+    HH_CRUD -->|Write| IDB
+
+    HH_LIST --> HH_DETAIL[Household details]
+    HH_DETAIL --> HH_MEM[Members table]
+    HH_MEM --> RES_NEW[Add/Update resident]
+    RES_NEW --> RES_FORM[Resident form]
+    RES_FORM --> RES_CRUD[Resident CRUD lib/db/residents.ts]
+    RES_CRUD -->|Write| IDB
+
+    RES_CRUD --> VENG[Vulnerability engine lib/db/vulnerability.ts]
+    VENG -->|Compute flags| VSTORE[Vulnerability flags store]
+    VSTORE -->|Write| IDB
+
+    APP --> VUL[Vulnerability]
+    VUL --> VFILT[Filter panel (group + purok + status)]
+    VFILT --> VLIST[Vulnerable list + CSV export]
+    VLIST -->|Read flags + residents + households| IDB
+
+    APP --> REP[Reports]
+    REP --> R1[Monthly summary]
+    REP --> R2[Vulnerable summary]
+    REP --> R3[Household listing]
+    R1 --> RGEN[Report generators lib/reports/generators.ts]
+    R2 --> RGEN
+    R3 --> RGEN
+    RGEN -->|Read| IDB
+    RGEN -->|Export| EXP[PDF / CSV / HTML]
+  end
+
+  %% -------------------------
+  %% OFFLINE-FIRST + PWA CORE
+  %% -------------------------
+  subgraph PWA["PWA + Offline-First Core"]
+    direction TB
+
+    APP --> SWREG[Service worker registered]
+    SWREG --> SW[Service worker public/service-worker.js]
+    SW --> CACHE[Cache assets (cache-first static)]
+    SW --> NETPOL[Fetch strategy (network-first API, cache-first assets)]
+
+    APP --> OFFQ[Offline queue lib/sync/queue.ts]
+    OFFQ -->|Queue writes| QDB[(IndexedDB sync_queue)]
+    QDB -->|Replay when online| SYNC[Sync worker lib/sync/worker.ts]
+    SYNC -->|Optional Phase 3| SUPA[(Supabase backend)]
+  end
+
+  %% -------------------------
+  %% PHASE 2: INVENTORY + DISTRIBUTION
+  %% -------------------------
+  subgraph P2["Phase 2 — Inventory + Relief Distribution"]
+    direction TB
+
+    APP --> INV[Inventory]
+    INV --> INV_LIST[Inventory list]
+    INV_LIST --> INV_NEW[Add inventory item]
+    INV_NEW --> INV_FORM[Inventory form]
+    INV_FORM --> INV_CRUD[Inventory CRUD lib/db/inventory.ts]
+    INV_CRUD -->|Write| IDB
+
+    APP --> DIST[Distribution]
+    DIST --> DIST_LIST[Distribution events list]
+    DIST_LIST --> DIST_NEW[Create distribution event]
+    DIST_NEW --> DIST_FORM[Event form]
+    DIST_FORM --> DIST_CRUD[Distribution CRUD lib/db/distribution.ts]
+    DIST_CRUD -->|Write| IDB
+
+    DIST_FORM --> ELIG[Eligibility engine lib/distribution/eligibility.ts]
+    ELIG -->|Auto-select| BENLIST[Beneficiary list]
+    BENLIST --> DIST_REC[Distribution records]
+    DIST_REC -->|Write| IDB
+
+    DIST_REC --> DUP[Duplicate prevention (1 resident per event)]
+    DUP --> DIST_REC
+  end
+
+  %% -------------------------
+  %% PHASE 3: MAP + INCIDENTS + PUSH + FULL SYNC
+  %% -------------------------
+  subgraph P3["Phase 3 — Advanced (Map + Incidents + Push + Supabase Sync)"]
+    direction TB
+
+    APP --> MAP[Map]
+    MAP --> LEAF[Leaflet + OpenStreetMap]
+    LEAF --> PINS[Household pins (gps_lat/gps_long)]
+    LEAF --> HEAT[Heatmap by purok (vulnerability count)]
+    PINS -->|Click| HH_DETAIL
+    HEAT -->|Filter| VUL
+
+    APP --> INC[Incidents]
+    INC --> INC_NEW[Report incident]
+    INC_NEW --> INC_FORM[Incident form + photo]
+    INC_FORM --> INC_CRUD[Incidents CRUD lib/db/incidents.ts]
+    INC_CRUD -->|Write| IDB
+    INC_CRUD --> ASSIGN[Responder assignment]
+    ASSIGN --> RESP[Responder panel (update status)]
+
+    APP --> PUSH[Push notifications (optional)]
+    PUSH --> N1[Evacuation alerts]
+    PUSH --> N2[Relief schedule reminders]
+    PUSH --> N3[Incident assignments]
+  end
+
+  %% -------------------------
+  %% RBAC
+  %% -------------------------
+  subgraph RBAC["RBAC — Who can access what"]
+    direction LR
+    RADMIN[Admin] -->|All modules| APP
+    RENC[Encoder] -->|Households + Residents + Vulnerability + Distribution| APP
+    RHEALTH[Health Worker] -->|Update health flags + View vulnerability| APP
+    RRESP[Responder] -->|View vulnerability + Incidents + Map| APP
+  end

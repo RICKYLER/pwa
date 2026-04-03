@@ -153,6 +153,24 @@ function stripUndefined<T extends Record<string, unknown>>(value: T) {
   );
 }
 
+function referencesInventoryItem(
+  items: unknown,
+  itemId: string,
+) {
+  if (!Array.isArray(items)) {
+    return false;
+  }
+
+  return items.some((entry) =>
+    Boolean(
+      entry
+      && typeof entry === 'object'
+      && 'item_id' in entry
+      && (entry as { item_id?: unknown }).item_id === itemId,
+    ),
+  );
+}
+
 function isMissingRpcFunctionError(
   error: { code?: string | null; message?: string | null } | null | undefined,
   functionName: string,
@@ -167,6 +185,25 @@ function isMissingRpcFunctionError(
     || (
       message.includes(functionName)
       && message.toLowerCase().includes('schema cache')
+    )
+  );
+}
+
+function isMissingInventoryTrashSchemaError(
+  error: { code?: string | null; message?: string | null } | null | undefined,
+) {
+  if (!error) {
+    return false;
+  }
+
+  const message = (error.message ?? '').toLowerCase();
+  return (
+    message.includes('inventory_items')
+    && message.includes('status')
+    && (
+      message.includes('schema cache')
+      || message.includes('does not exist')
+      || message.includes('could not find')
     )
   );
 }
@@ -293,6 +330,158 @@ async function createInventoryItemWithoutRpc(
     inventory_item: createdItem,
     inventory_item_id: createdItem?.id ?? item.id,
     inventory_movements: movements,
+  };
+}
+
+async function applyInventoryTransactionWithoutRpc(
+  user: User,
+  params: InventoryTransactionParams,
+  remoteActorId: string,
+) {
+  if (!['admin', 'encoder'].includes(user.role)) {
+    throw new Error('You are not allowed to manage inventory.');
+  }
+
+  if (!['stock_in', 'stock_out', 'adjustment', 'distribution_release', 'transfer'].includes(params.type)) {
+    throw new Error('Unsupported inventory transaction type.');
+  }
+
+  const supabase = getSupabaseAdminClient();
+  const itemId = toOptionalString(params.item_id);
+  const quantity =
+    typeof params.quantity === 'number' && Number.isFinite(params.quantity)
+      ? Math.max(params.quantity, 0)
+      : 0;
+
+  if (!itemId) {
+    throw new Error('Inventory item not found.');
+  }
+
+  if (params.type !== 'adjustment' && quantity <= 0) {
+    throw new Error('Transaction quantity must be greater than zero.');
+  }
+
+  const { data: item, error: itemError } = await supabase
+    .from('inventory_items')
+    .select('*')
+    .eq('id', itemId)
+    .single();
+
+  if (itemError) {
+    throw new Error(itemError.message);
+  }
+
+  if (!item) {
+    throw new Error('Inventory item not found.');
+  }
+
+  if (item.status === 'trashed') {
+    throw new Error('Restore this item from Trash before updating its stock.');
+  }
+
+  const currentQuantity =
+    typeof item.quantity_available === 'number' && Number.isFinite(item.quantity_available)
+      ? item.quantity_available
+      : Math.max(Number(item.quantity_available ?? 0) || 0, 0);
+  const currentRecordVersion =
+    typeof item.record_version === 'number' && Number.isFinite(item.record_version)
+      ? item.record_version
+      : null;
+
+  if (
+    typeof params.expected_record_version === 'number'
+    && currentRecordVersion !== null
+    && currentRecordVersion !== params.expected_record_version
+  ) {
+    throw new Error('Conflict detected while updating inventory. Refresh before retrying.');
+  }
+
+  if (
+    ['stock_out', 'distribution_release', 'transfer'].includes(params.type)
+    && currentQuantity < quantity
+  ) {
+    throw new Error('Not enough stock for this transaction.');
+  }
+
+  const explicitNextQuantity =
+    typeof params.next_quantity === 'number' && Number.isFinite(params.next_quantity)
+      ? Math.max(params.next_quantity, 0)
+      : null;
+  const nextQuantity = explicitNextQuantity ?? (
+    params.type === 'stock_in'
+      ? currentQuantity + quantity
+      : Math.max(currentQuantity - quantity, 0)
+  );
+  const movementQuantity =
+    params.type === 'adjustment'
+      ? Math.abs(nextQuantity - currentQuantity)
+      : quantity;
+
+  let updateQuery = supabase
+    .from('inventory_items')
+    .update({
+      quantity_available: nextQuantity,
+      sync_status: 'synced',
+    })
+    .eq('id', itemId);
+
+  if (
+    typeof params.expected_record_version === 'number'
+    && currentRecordVersion !== null
+  ) {
+    updateQuery = updateQuery.eq('record_version', params.expected_record_version);
+  }
+
+  const { data: updatedItems, error: updateError } = await updateQuery
+    .select('*');
+
+  if (updateError) {
+    throw new Error(updateError.message);
+  }
+
+  const updatedItem = Array.isArray(updatedItems) ? updatedItems[0] : null;
+  if (!updatedItem) {
+    throw new Error('Conflict detected while updating inventory. Refresh before retrying.');
+  }
+
+  const { data: createdMovement, error: createMovementError } = await supabase
+    .from('inventory_movements')
+    .insert({
+      id: `mov_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`,
+      item_id: updatedItem.id,
+      item_name: updatedItem.item_name,
+      type: params.type,
+      quantity: movementQuantity,
+      previous_quantity: currentQuantity,
+      new_quantity: nextQuantity,
+      unit: updatedItem.unit,
+      performed_by: remoteActorId,
+      performed_by_name: toOptionalString(user.name),
+      reference_id: toOptionalString(params.reference_id),
+      reference_type: toOptionalString(params.reference_type),
+      notes: toOptionalString(params.notes),
+      timestamp: new Date().toISOString(),
+      sync_status: 'synced',
+    })
+    .select('*')
+    .single();
+
+  if (createMovementError) {
+    await supabase
+      .from('inventory_items')
+      .update({
+        quantity_available: currentQuantity,
+        sync_status: 'synced',
+      })
+      .eq('id', itemId);
+
+    throw new Error(createMovementError.message);
+  }
+
+  return {
+    inventory_item: updatedItem,
+    inventory_item_id: updatedItem.id,
+    inventory_movement: createdMovement ?? undefined,
   };
 }
 
@@ -702,7 +891,8 @@ export async function applyInventoryTransactionOnServer(
 ) {
   const supabase = getSupabaseAdminClient();
   const remoteActorId = await getRemoteActorId(user);
-  const { data, error } = await supabase.rpc('apply_inventory_transaction_bundle', {
+  let data: unknown = null;
+  const { data: rpcData, error } = await supabase.rpc('apply_inventory_transaction_bundle', {
     p_item_id: params.item_id,
     p_type: params.type,
     p_quantity: params.quantity,
@@ -718,7 +908,13 @@ export async function applyInventoryTransactionOnServer(
   });
 
   if (error) {
-    throw new Error(error.message);
+    if (isMissingRpcFunctionError(error, 'apply_inventory_transaction_bundle')) {
+      data = await applyInventoryTransactionWithoutRpc(user, params, remoteActorId);
+    } else {
+      throw new Error(error.message);
+    }
+  } else {
+    data = rpcData;
   }
 
   await createAuditLogEntry({
@@ -1066,6 +1262,10 @@ export async function updateInventoryItemOnServer(
     item_name: typeof updates.item_name === 'string' ? updates.item_name.trim() : undefined,
     item_code: typeof updates.item_code === 'string' ? updates.item_code.trim() || null : undefined,
     category: updates.category,
+    status:
+      updates.status === 'active' || updates.status === 'trashed'
+        ? updates.status
+        : undefined,
     unit: updates.unit,
     reorder_level: typeof updates.reorder_level === 'number' ? updates.reorder_level : undefined,
     storage_location: typeof updates.storage_location === 'string' ? updates.storage_location.trim() || null : undefined,
@@ -1082,6 +1282,11 @@ export async function updateInventoryItemOnServer(
     .single();
 
   if (error) {
+    if (isMissingInventoryTrashSchemaError(error)) {
+      throw new Error(
+        'Supabase inventory trash schema is missing. Apply migration 20260402093000_inventory_trash_status.sql, then refresh the schema cache.',
+      );
+    }
     throw new Error(error.message);
   }
 
@@ -1094,6 +1299,102 @@ export async function updateInventoryItemOnServer(
   });
 
   return data;
+}
+
+export async function deleteInventoryItemPermanentlyOnServer(
+  user: User,
+  itemId: string,
+) {
+  if (!['admin', 'encoder'].includes(user.role)) {
+    throw new Error('You are not allowed to permanently delete inventory items.');
+  }
+
+  const supabase = getSupabaseAdminClient();
+  const { data: item, error: itemError } = await supabase
+    .from('inventory_items')
+    .select('id, item_name, status')
+    .eq('id', itemId)
+    .single();
+
+  if (itemError) {
+    if (isMissingInventoryTrashSchemaError(itemError)) {
+      throw new Error(
+        'Supabase inventory trash schema is missing. Apply migration 20260402093000_inventory_trash_status.sql, then refresh the schema cache.',
+      );
+    }
+    throw new Error(itemError.message);
+  }
+
+  if (!item) {
+    throw new Error('Inventory item not found.');
+  }
+
+  if (item.status !== 'trashed') {
+    throw new Error('Move this item to Trash before permanently deleting it.');
+  }
+
+  const [
+    packageTemplatesResult,
+    distributionEventsResult,
+  ] = await Promise.all([
+    supabase
+      .from('package_templates')
+      .select('id, name, items'),
+    supabase
+      .from('distribution_events')
+      .select('id, event_name, package_items'),
+  ]);
+
+  const blockingError = packageTemplatesResult.error || distributionEventsResult.error;
+  if (blockingError) {
+    throw new Error(blockingError.message);
+  }
+
+  const blockingTemplates = (packageTemplatesResult.data ?? [])
+    .filter((template) => referencesInventoryItem(template.items, itemId))
+    .map((template) => template.name)
+    .filter((name): name is string => typeof name === 'string' && name.trim().length > 0);
+  const blockingEvents = (distributionEventsResult.data ?? [])
+    .filter((event) => referencesInventoryItem(event.package_items, itemId))
+    .map((event) => event.event_name)
+    .filter((name): name is string => typeof name === 'string' && name.trim().length > 0);
+
+  if (blockingTemplates.length > 0 || blockingEvents.length > 0) {
+    const references = [
+      ...blockingTemplates.slice(0, 2),
+      ...blockingEvents.slice(0, 2),
+    ];
+    const suffix =
+      blockingTemplates.length + blockingEvents.length > references.length
+        ? ' and more'
+        : '';
+
+    throw new Error(
+      `This item is still used by ${references.join(', ')}${suffix}. Remove those references before permanently deleting it.`,
+    );
+  }
+
+  const { error } = await supabase
+    .from('inventory_items')
+    .delete()
+    .eq('id', itemId);
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  await createAuditLogEntry({
+    user,
+    action: 'DELETE',
+    entityType: 'inventory',
+    entityId: itemId,
+    changes: {
+      item_name: item.item_name,
+      mode: 'permanent',
+    },
+  });
+
+  return { item_id: itemId };
 }
 
 export async function createPackageTemplateOnServer(

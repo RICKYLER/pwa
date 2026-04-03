@@ -19,6 +19,7 @@ import {
   createInventoryItemOnServer,
   createPackageTemplateOnServer,
   createResidentOnServer,
+  deleteInventoryItemPermanentlyOnServer,
   deletePackageTemplateOnServer,
   deleteDistributionEventOnServer,
   releaseDistributionPackageOnServer,
@@ -227,6 +228,21 @@ export async function POST(request: NextRequest) {
           authResult.user,
           itemId,
           updates as Partial<InventoryItem>,
+        );
+
+        return NextResponse.json(data, {
+          headers: { 'Cache-Control': 'no-store' },
+        });
+      }
+      case 'delete_inventory_item_permanently': {
+        const itemId = typeof body.itemId === 'string' ? body.itemId : '';
+        if (!itemId) {
+          return badRequest('itemId is required.');
+        }
+
+        const data = await deleteInventoryItemPermanentlyOnServer(
+          authResult.user,
+          itemId,
         );
 
         return NextResponse.json(data, {

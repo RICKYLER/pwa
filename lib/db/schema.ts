@@ -12,6 +12,7 @@ export type DistributionType = 'regular' | 'emergency' | 'disaster_relief';
 export type DistributionStatus = 'planned' | 'ongoing' | 'completed';
 export type DistributionTargetScope = 'household' | 'resident';
 export type DistributionTargetGroup = 'all' | 'senior' | 'pwd' | 'pregnant' | 'minor' | 'low_income';
+export type InventoryItemStatus = 'active' | 'trashed';
 export type InventoryMovementType =
   | 'stock_in'
   | 'stock_out'
@@ -142,6 +143,7 @@ export interface InventoryItem {
   item_name: string;
   item_code?: string;
   category: 'food' | 'medicine' | 'hygiene' | 'clothing' | 'blankets' | 'other';
+  status?: InventoryItemStatus;
   quantity_available: number;
   unit: 'pcs' | 'kg' | 'box' | 'pack' | 'bundle';
   reorder_level?: number;
