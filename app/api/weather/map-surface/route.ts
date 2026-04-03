@@ -5,6 +5,7 @@ import {
 } from '@/lib/weather';
 
 export const runtime = 'nodejs';
+export const maxDuration = 60;
 
 const API_KEY = process.env.OPENWEATHER_API_KEY?.trim() ?? '';
 const SAMPLE_CACHE_TTL_MS = 10 * 60 * 1000;
@@ -124,6 +125,9 @@ async function fetchSurfacePoint(
 
   const payload = await fetchOpenWeatherFieldResponseWeather(lat, lng, API_KEY, {
     next: { revalidate: 600 },
+  }).catch((error) => {
+    console.error(`Weather fetch failed for ${lat},${lng}:`, error.message);
+    throw error;
   });
   const nearestStep = pickNearestWeatherStep(payload, unixTime);
   const value: SurfacePointValue = {
@@ -216,7 +220,7 @@ export async function GET(request: Request) {
   });
 
   try {
-    const samples = await mapWithConcurrency(points, 6, (point) =>
+    const samples = await mapWithConcurrency(points, 20, (point) =>
       fetchSurfacePoint(point.lat, point.lng, unixTime),
     );
 

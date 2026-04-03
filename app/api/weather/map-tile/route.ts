@@ -2,9 +2,11 @@ import { NextResponse } from 'next/server';
 import { getOpenWeatherMapLayer, isOpenWeatherMapLayerId } from '@/lib/openweather-map-layers';
 
 export const runtime = 'nodejs';
+export const maxDuration = 30;
 
 const API_KEY = process.env.OPENWEATHER_API_KEY?.trim() ?? '';
 const FAILURE_LOG_WINDOW_MS = 5 * 60 * 1000;
+const TILE_REQUEST_TIMEOUT_MS = 5000;
 const TRANSPARENT_PNG = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9pY9lWQAAAAASUVORK5CYII=',
   'base64',
@@ -16,7 +18,7 @@ function emptyTile(status = 200) {
     status,
     headers: {
       'Content-Type': 'image/png',
-      'Cache-Control': 'public, max-age=300, s-maxage=300',
+      'Cache-Control': 'public, max-age=600, s-maxage=600, stale-while-revalidate=1800',
     },
   });
 }
@@ -192,30 +194,45 @@ export async function GET(request: Request) {
     let lastFailureText = 'Unknown upstream failure';
 
     for (const attempt of attempts) {
-      const response = await fetch(attempt.url.toString(), {
-        headers: {
-          Accept: 'image/png',
-        },
-        next: { revalidate: 600 },
-      });
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), TILE_REQUEST_TIMEOUT_MS);
 
-      if (response.ok) {
-        const arrayBuffer = await response.arrayBuffer();
-
-        return new NextResponse(arrayBuffer, {
-          status: 200,
+      try {
+        const response = await fetch(attempt.url.toString(), {
           headers: {
-            'Content-Type': response.headers.get('content-type') ?? 'image/png',
-            'Cache-Control': 'public, max-age=600, s-maxage=600, stale-while-revalidate=300',
-            'X-Weather-Tile-Source': attempt.source,
+            Accept: 'image/png',
           },
+          signal: controller.signal,
+          next: { revalidate: 600 },
         });
+
+        clearTimeout(timeoutId);
+
+        if (response.ok) {
+          const arrayBuffer = await response.arrayBuffer();
+
+          return new NextResponse(arrayBuffer, {
+            status: 200,
+            headers: {
+              'Content-Type': response.headers.get('content-type') ?? 'image/png',
+              'Cache-Control': 'public, max-age=600, s-maxage=600, stale-while-revalidate=1800',
+              'X-Weather-Tile-Source': attempt.source,
+            },
+          });
+        }
+
+        lastFailureStatus = response.status;
+        lastFailureText = await response.text().catch(() => '');
+
+        logFailureOnce(attempt.logKey, response.status, lastFailureText);
+      } catch (fetchError: any) {
+        clearTimeout(timeoutId);
+        if (fetchError.name === 'AbortError') {
+          lastFailureText = 'Request timeout after 5s';
+          continue;
+        }
+        throw fetchError;
       }
-
-      lastFailureStatus = response.status;
-      lastFailureText = await response.text().catch(() => '');
-
-      logFailureOnce(attempt.logKey, response.status, lastFailureText);
     }
 
     return emptyTile(lastFailureStatus === 401 || lastFailureStatus === 403 ? 200 : lastFailureStatus);

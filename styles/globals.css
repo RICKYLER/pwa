@@ -123,3 +123,37 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* Smooth weather tile transitions */
+.weather-tile-layer-smooth {
+  transition: opacity 300ms ease-in-out;
+}
+
+.weather-tile-layer-smooth img {
+  transition: opacity 400ms ease-in-out;
+  image-rendering: optimizeQuality;
+  image-rendering: -webkit-optimize-contrast;
+}
+
+/* Leaflet tile fade animation */
+.leaflet-tile {
+  transition: opacity 300ms ease-in-out !important;
+}
+
+.leaflet-tile-loaded {
+  animation: tilesFadeIn 400ms ease-in-out;
+}
+
+@keyframes tilesFadeIn {
+  0% {
+    opacity: 0;
+  }
+  100% {
+    opacity: 1;
+  }
+}
+
+/* Smooth zoom transitions for weather panes */
+.leaflet-pane {
+  transition: opacity 250ms ease-in-out;
+}

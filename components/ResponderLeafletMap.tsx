@@ -1212,6 +1212,13 @@ export default function ResponderLeafletMap({
         weatherTileRefs.current[layerId] = runtime.tileLayer(tileUrl, {
           opacity: overlayOpacity / 100,
           pane: getWeatherPaneName(layerId),
+          maxNativeZoom: 10,
+          keepBuffer: 4,
+          updateWhenIdle: true,
+          updateWhenZooming: false,
+          updateInterval: 200,
+          crossOrigin: true,
+          className: 'weather-tile-layer-smooth',
         });
       } else {
         existingLayer.setUrl?.(tileUrl);

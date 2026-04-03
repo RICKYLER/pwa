@@ -876,7 +876,16 @@ export async function fetchOpenWeatherFieldResponseWeather(
   options: OpenWeatherFetchOptions = {},
 ): Promise<FieldResponseWeatherPayload> {
   const { roundedLat, roundedLng, url } = buildOpenWeatherForecastUrl(lat, lng, apiKey);
-  const response = await fetch(url.toString(), options);
+  
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 8000);
+  
+  try {
+    const response = await fetch(url.toString(), {
+      ...options,
+      signal: controller.signal,
+    });
+    clearTimeout(timeoutId);
 
   if (!response.ok) {
     const errorText = await response.text().catch(() => '');
@@ -964,4 +973,11 @@ export async function fetchOpenWeatherFieldResponseWeather(
     alerts: alerts.length > 0 ? alerts : derivedAlerts,
     summary: buildSummary(current),
   };
+  } catch (error: any) {
+    clearTimeout(timeoutId);
+    if (error.name === 'AbortError') {
+      throw new Error('OpenWeather API request timeout after 8 seconds');
+    }
+    throw error;
+  }
 }
