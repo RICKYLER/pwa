@@ -2,18 +2,21 @@ import 'server-only';
 
 import { createHash, createHmac, randomBytes, randomUUID } from 'node:crypto';
 import { createClient } from '@supabase/supabase-js';
-import type { User, UserRole } from '@/lib/db/schema';
+import type { User, UserAccountStatus, UserRole } from '@/lib/db/schema';
 import type { AuthenticationResult, StoredUserRecord } from '@/lib/server/local-auth-store';
 import { getSupabaseAdminClient, getSupabaseAdminConfig } from '@/lib/server/supabase-admin';
 
 const PASSWORD_TOKEN_TTL_MS = 1000 * 60 * 60 * 24 * 3;
 const EMAIL_VERIFICATION_TOKEN_TTL_MS = 1000 * 60 * 60 * 24 * 3;
+const PROFILE_SELECT_BASE = 'id, email, name, role, barangay_id, must_change_password, email_verification_required, email_verified_at, created_at, updated_at';
+const PROFILE_SELECT_WITH_STATUS = 'id, email, name, role, status, barangay_id, must_change_password, email_verification_required, email_verified_at, created_at, updated_at';
 
 type ProfileRow = {
   id: string;
   email: string;
   name: string;
   role: UserRole;
+  status?: UserAccountStatus | null;
   barangay_id: string;
   must_change_password: boolean;
   email_verification_required: boolean;
@@ -31,6 +34,12 @@ type TokenRow = {
   used_at: string | null;
 };
 
+type UserLinkedTableName =
+  | 'password_setup_tokens'
+  | 'email_verification_tokens'
+  | 'audit_logs'
+  | 'sync_backups';
+
 type StatelessTokenKind = 'password_setup' | 'password_reset' | 'email_verification';
 
 type StatelessTokenPayload = {
@@ -39,6 +48,8 @@ type StatelessTokenPayload = {
   user_id: string;
   version: number;
 };
+
+let userStatusColumnState: 'unknown' | 'available' | 'missing' = 'unknown';
 
 function nowIso() {
   return new Date().toISOString();
@@ -131,9 +142,50 @@ function isMissingTokenTableError(
   error: unknown,
   tableName: 'password_setup_tokens' | 'email_verification_tokens',
 ) {
-  const message = error instanceof Error ? error.message.toLowerCase() : '';
+  const message = typeof error === 'object'
+    && error !== null
+    && 'message' in error
+    && typeof error.message === 'string'
+    ? error.message.toLowerCase()
+    : '';
   return message.includes('could not find the table')
     && message.includes(tableName);
+}
+
+function isMissingTableError(error: unknown, tableName: UserLinkedTableName) {
+  const message = typeof error === 'object'
+    && error !== null
+    && 'message' in error
+    && typeof error.message === 'string'
+    ? error.message.toLowerCase()
+    : '';
+  return message.includes('could not find the table')
+    && message.includes(tableName);
+}
+
+function isMissingUserStatusColumnError(error: unknown) {
+  const message = typeof error === 'object'
+    && error !== null
+    && 'message' in error
+    && typeof error.message === 'string'
+    ? error.message.toLowerCase()
+    : '';
+  return message.includes('users.status')
+    || (
+      message.includes('status')
+      && message.includes('users')
+      && (
+        message.includes('does not exist')
+        || message.includes('schema cache')
+        || message.includes('could not find the')
+      )
+    );
+}
+
+function createMissingUserStatusMigrationError() {
+  return new Error(
+    'Supabase users.status is missing. Run migration 20260404123000_user_account_status.sql before using staff deactivation.',
+  );
 }
 
 function getSupabasePublicAuthConfig() {
@@ -176,6 +228,7 @@ function mapProfileRowToStoredUserRecord(row: ProfileRow): StoredUserRecord {
     email: row.email,
     name: row.name,
     role: row.role,
+    status: row.status === 'inactive' ? 'inactive' : 'active',
     barangay_id: row.barangay_id,
     must_change_password: Boolean(row.must_change_password),
     email_verification_required: Boolean(row.email_verification_required),
@@ -191,6 +244,7 @@ function toPublicUser(record: StoredUserRecord): User {
     email: record.email,
     name: record.name,
     role: record.role,
+    status: record.status,
     barangay_id: record.barangay_id,
     must_change_password: record.must_change_password,
     email_verification_required: record.email_verification_required,
@@ -200,34 +254,78 @@ function toPublicUser(record: StoredUserRecord): User {
   };
 }
 
-async function getProfileById(userId: string): Promise<StoredUserRecord | null> {
-  const supabase = getSupabaseAdminClient();
-  const { data, error } = await supabase
-    .from('users')
-    .select('id, email, name, role, barangay_id, must_change_password, email_verification_required, email_verified_at, created_at, updated_at')
-    .eq('id', userId)
-    .maybeSingle<ProfileRow>();
+async function runProfileQuery<T>(
+  runner: (selectClause: string) => Promise<{ data: T; error: { message: string } | null }>,
+): Promise<T> {
+  const runLegacyQuery = async () => {
+    const { data, error } = await runner(PROFILE_SELECT_BASE);
+    if (error) {
+      throw new Error(error.message);
+    }
 
-  if (error) {
-    throw new Error(`Failed to load Supabase user profile: ${error.message}`);
+    userStatusColumnState = 'missing';
+    return data;
+  };
+
+  if (userStatusColumnState === 'missing') {
+    return runLegacyQuery();
   }
 
-  return data ? mapProfileRowToStoredUserRecord(data) : null;
+  const { data, error } = await runner(PROFILE_SELECT_WITH_STATUS);
+  if (!error) {
+    userStatusColumnState = 'available';
+    return data;
+  }
+
+  if (isMissingUserStatusColumnError(error)) {
+    return runLegacyQuery();
+  }
+
+  throw new Error(error.message);
+}
+
+async function getProfileById(userId: string): Promise<StoredUserRecord | null> {
+  const supabase = getSupabaseAdminClient();
+  try {
+    const data = await runProfileQuery<ProfileRow | null>(async (selectClause) => {
+      const result = await supabase
+        .from('users')
+        .select(selectClause)
+        .eq('id', userId)
+        .maybeSingle<ProfileRow>();
+
+      return {
+        data: (result.data as ProfileRow | null) ?? null,
+        error: result.error ? { message: result.error.message } : null,
+      };
+    });
+
+    return data ? mapProfileRowToStoredUserRecord(data) : null;
+  } catch (error) {
+    throw new Error(`Failed to load Supabase user profile: ${error instanceof Error ? error.message : 'unknown error'}`);
+  }
 }
 
 async function getProfileByEmail(email: string): Promise<StoredUserRecord | null> {
   const supabase = getSupabaseAdminClient();
-  const { data, error } = await supabase
-    .from('users')
-    .select('id, email, name, role, barangay_id, must_change_password, email_verification_required, email_verified_at, created_at, updated_at')
-    .eq('email', normalizeEmail(email))
-    .maybeSingle<ProfileRow>();
+  try {
+    const data = await runProfileQuery<ProfileRow | null>(async (selectClause) => {
+      const result = await supabase
+        .from('users')
+        .select(selectClause)
+        .eq('email', normalizeEmail(email))
+        .maybeSingle<ProfileRow>();
 
-  if (error) {
-    throw new Error(`Failed to load Supabase user profile by email: ${error.message}`);
+      return {
+        data: (result.data as ProfileRow | null) ?? null,
+        error: result.error ? { message: result.error.message } : null,
+      };
+    });
+
+    return data ? mapProfileRowToStoredUserRecord(data) : null;
+  } catch (error) {
+    throw new Error(`Failed to load Supabase user profile by email: ${error instanceof Error ? error.message : 'unknown error'}`);
   }
-
-  return data ? mapProfileRowToStoredUserRecord(data) : null;
 }
 
 async function writeProfile(input: {
@@ -235,6 +333,7 @@ async function writeProfile(input: {
   email: string;
   name: string;
   role: UserRole;
+  status: UserAccountStatus;
   barangay_id: string;
   must_change_password: boolean;
   email_verification_required: boolean;
@@ -243,30 +342,65 @@ async function writeProfile(input: {
   const supabase = getSupabaseAdminClient();
   const existing = await getProfileById(input.id);
   const timestamp = nowIso();
+  const baseRow = {
+    id: input.id,
+    email: normalizeEmail(input.email),
+    name: input.name.trim(),
+    role: input.role,
+    barangay_id: input.barangay_id.trim(),
+    must_change_password: input.must_change_password,
+    email_verification_required: input.email_verification_required,
+    email_verified_at: input.email_verified_at ?? null,
+    created_at: existing?.createdAt ?? timestamp,
+    updated_at: timestamp,
+  };
+
+  const runLegacyUpsert = async () => {
+    if (input.status !== 'active') {
+      throw createMissingUserStatusMigrationError();
+    }
+
+    const { data, error } = await supabase
+      .from('users')
+      .upsert(baseRow, {
+        onConflict: 'id',
+      })
+      .select(PROFILE_SELECT_BASE)
+      .single<ProfileRow>();
+
+    if (error) {
+      throw new Error(`Failed to upsert Supabase user profile: ${error.message}`);
+    }
+
+    userStatusColumnState = 'missing';
+    return mapProfileRowToStoredUserRecord(data);
+  };
+
+  if (userStatusColumnState === 'missing') {
+    return runLegacyUpsert();
+  }
+
   const { data, error } = await supabase
     .from('users')
     .upsert({
-      id: input.id,
-      email: normalizeEmail(input.email),
-      name: input.name.trim(),
-      role: input.role,
-      barangay_id: input.barangay_id.trim(),
-      must_change_password: input.must_change_password,
-      email_verification_required: input.email_verification_required,
-      email_verified_at: input.email_verified_at ?? null,
-      created_at: existing?.createdAt ?? timestamp,
-      updated_at: timestamp,
+      ...baseRow,
+      status: input.status,
     }, {
       onConflict: 'id',
     })
-    .select('id, email, name, role, barangay_id, must_change_password, email_verification_required, email_verified_at, created_at, updated_at')
+    .select(PROFILE_SELECT_WITH_STATUS)
     .single<ProfileRow>();
 
-  if (error) {
-    throw new Error(`Failed to upsert Supabase user profile: ${error.message}`);
+  if (!error) {
+    userStatusColumnState = 'available';
+    return mapProfileRowToStoredUserRecord(data);
   }
 
-  return mapProfileRowToStoredUserRecord(data);
+  if (isMissingUserStatusColumnError(error)) {
+    return runLegacyUpsert();
+  }
+
+  throw new Error(`Failed to upsert Supabase user profile: ${error.message}`);
 }
 
 async function deleteUnusedTokens(tableName: 'password_setup_tokens' | 'email_verification_tokens', userId: string) {
@@ -279,6 +413,22 @@ async function deleteUnusedTokens(tableName: 'password_setup_tokens' | 'email_ve
 
   if (error) {
     throw new Error(`Failed to clear existing ${tableName}: ${error.message}`);
+  }
+}
+
+async function deleteRowsByUserReference(
+  tableName: UserLinkedTableName,
+  columnName: 'user_id' | 'synced_by',
+  userId: string,
+) {
+  const supabase = getSupabaseAdminClient();
+  const { error } = await supabase
+    .from(tableName)
+    .delete()
+    .eq(columnName, userId);
+
+  if (error) {
+    throw new Error(`Failed to clear ${tableName}: ${error.message}`);
   }
 }
 
@@ -324,16 +474,23 @@ async function markTokenUsed(tableName: 'password_setup_tokens' | 'email_verific
 
 export async function listUsers(): Promise<User[]> {
   const supabase = getSupabaseAdminClient();
-  const { data, error } = await supabase
-    .from('users')
-    .select('id, email, name, role, barangay_id, must_change_password, email_verification_required, email_verified_at, created_at, updated_at')
-    .order('name', { ascending: true });
+  try {
+    const data = await runProfileQuery<ProfileRow[] | null>(async (selectClause) => {
+      const result = await supabase
+        .from('users')
+        .select(selectClause)
+        .order('name', { ascending: true });
 
-  if (error) {
-    throw new Error(`Failed to list Supabase users: ${error.message}`);
+      return {
+        data: (result.data as ProfileRow[] | null) ?? null,
+        error: result.error ? { message: result.error.message } : null,
+      };
+    });
+
+    return (data ?? []).map((row) => toPublicUser(mapProfileRowToStoredUserRecord(row)));
+  } catch (error) {
+    throw new Error(`Failed to list Supabase users: ${error instanceof Error ? error.message : 'unknown error'}`);
   }
-
-  return (data ?? []).map((row) => toPublicUser(mapProfileRowToStoredUserRecord(row as ProfileRow)));
 }
 
 export async function getStoredUserById(userId: string): Promise<StoredUserRecord | null> {
@@ -372,6 +529,7 @@ export async function createUserAccount(input: {
     email: normalizedEmail,
     name: input.name,
     role: input.role,
+    status: 'active',
     barangay_id: input.barangay_id,
     must_change_password: true,
     email_verification_required: false,
@@ -409,6 +567,7 @@ export async function createResidentSelfServiceAccount(input: {
     email: normalizedEmail,
     name: input.name,
     role: 'resident',
+    status: 'active',
     barangay_id: input.barangay_id,
     must_change_password: false,
     email_verification_required: true,
@@ -420,7 +579,7 @@ export async function createResidentSelfServiceAccount(input: {
 
 export async function updateUserAccount(
   userId: string,
-  patch: Partial<Pick<User, 'name' | 'role' | 'barangay_id'>>,
+  patch: Partial<Pick<User, 'name' | 'role' | 'status' | 'barangay_id'>>,
 ): Promise<User> {
   const existing = await getProfileById(userId);
   if (!existing) {
@@ -432,6 +591,7 @@ export async function updateUserAccount(
     email: existing.email,
     name: patch.name?.trim() || existing.name,
     role: patch.role || existing.role,
+    status: patch.status || existing.status,
     barangay_id: patch.barangay_id?.trim() || existing.barangay_id,
     must_change_password: existing.must_change_password,
     email_verification_required: existing.email_verification_required,
@@ -462,9 +622,50 @@ export async function deleteUserAccount(userId: string): Promise<void> {
   }
 
   const supabase = getSupabaseAdminClient();
-  const { error } = await supabase.auth.admin.deleteUser(userId);
-  if (error) {
-    throw new Error(`Failed to delete the Supabase user: ${error.message}`);
+
+  const attemptDelete = async () => {
+    const { error } = await supabase.auth.admin.deleteUser(userId);
+    if (error) {
+      throw new Error(error.message);
+    }
+  };
+
+  try {
+    await attemptDelete();
+    return;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown delete failure.';
+
+    // Older schemas keep audit and sync history on restrictive foreign keys.
+    // For resident accounts, clear those history rows and retry the auth delete.
+    if (existing.role === 'resident' && message.toLowerCase().includes('database error deleting user')) {
+      try {
+        await deleteRowsByUserReference('audit_logs', 'user_id', userId);
+      } catch (cleanupError) {
+        if (!isMissingTableError(cleanupError, 'audit_logs')) {
+          throw cleanupError;
+        }
+      }
+
+      try {
+        await deleteRowsByUserReference('sync_backups', 'synced_by', userId);
+      } catch (cleanupError) {
+        if (!isMissingTableError(cleanupError, 'sync_backups')) {
+          throw cleanupError;
+        }
+      }
+
+      await attemptDelete().catch((retryError) => {
+        throw new Error(
+          `Failed to delete the Supabase user after resident cleanup: ${
+            retryError instanceof Error ? retryError.message : 'unknown error'
+          }`,
+        );
+      });
+      return;
+    }
+
+    throw new Error(`Failed to delete the Supabase user: ${message}`);
   }
 }
 
@@ -498,6 +699,7 @@ export async function createPasswordSetupToken(userId: string): Promise<string> 
       email: existing.email,
       name: existing.name,
       role: existing.role,
+      status: existing.status,
       barangay_id: existing.barangay_id,
       must_change_password: true,
       email_verification_required: existing.email_verification_required,
@@ -515,6 +717,7 @@ export async function createPasswordSetupToken(userId: string): Promise<string> 
       email: existing.email,
       name: existing.name,
       role: existing.role,
+      status: existing.status,
       barangay_id: existing.barangay_id,
       must_change_password: true,
       email_verification_required: existing.email_verification_required,
@@ -655,6 +858,7 @@ export async function completePasswordSetup(rawToken: string, password: string):
       email: user.email,
       name: user.name,
       role: user.role,
+      status: user.status,
       barangay_id: user.barangay_id,
       must_change_password: false,
       email_verification_required: user.email_verification_required,
@@ -695,6 +899,7 @@ export async function completePasswordSetup(rawToken: string, password: string):
       email: user.email,
       name: user.name,
       role: user.role,
+      status: user.status,
       barangay_id: user.barangay_id,
       must_change_password: false,
       email_verification_required: user.email_verification_required,
@@ -732,6 +937,7 @@ export async function completePasswordReset(rawToken: string, password: string):
       email: user.email,
       name: user.name,
       role: user.role,
+      status: user.status,
       barangay_id: user.barangay_id,
       must_change_password: false,
       email_verification_required: user.email_verification_required,
@@ -772,6 +978,7 @@ export async function completePasswordReset(rawToken: string, password: string):
       email: user.email,
       name: user.name,
       role: user.role,
+      status: user.status,
       barangay_id: user.barangay_id,
       must_change_password: false,
       email_verification_required: user.email_verification_required,
@@ -826,6 +1033,7 @@ export async function createEmailVerificationToken(userId: string): Promise<stri
       email: user.email,
       name: user.name,
       role: user.role,
+      status: user.status,
       barangay_id: user.barangay_id,
       must_change_password: user.must_change_password,
       email_verification_required: true,
@@ -879,6 +1087,7 @@ export async function completeEmailVerification(rawToken: string): Promise<{ use
           email: user.email,
           name: user.name,
           role: user.role,
+          status: user.status,
           barangay_id: user.barangay_id,
           must_change_password: user.must_change_password,
           email_verification_required: false,
@@ -930,6 +1139,7 @@ export async function completeEmailVerification(rawToken: string): Promise<{ use
           email: user.email,
           name: user.name,
           role: user.role,
+          status: user.status,
           barangay_id: user.barangay_id,
           must_change_password: user.must_change_password,
           email_verification_required: false,
@@ -975,6 +1185,13 @@ export async function authenticateUser(email: string, password: string): Promise
     throw error instanceof Error
       ? error
       : new Error('Supabase public auth is not configured.');
+  }
+
+  if (user.status === 'inactive') {
+    return {
+      status: 'account_inactive',
+      user: toPublicUser(user),
+    };
   }
 
   if (user.role === 'resident' && user.email_verification_required) {

@@ -11,6 +11,7 @@ import { getCurrentUser, getDefaultRouteForUser, hasPermission, isResidentUser }
 import { getHousehold } from '@/lib/db/households';
 import { buildRegistrationTimeline, formatRegistrationStatusLabel, getHouseholdRegistrationStatus } from '@/lib/household-registration';
 import type { Household } from '@/lib/db/schema';
+import { CivicBadge, CivicPanel, CivicSectionHeading } from '@/components/ui/civic-primitives';
 
 function formatDate(value?: Date): string {
   if (!value) {
@@ -98,19 +99,16 @@ export default function RegistrationStatusPage() {
         </div>
 
         {isLoading ? (
-          <div className="rounded-[32px] border border-slate-200 bg-white px-6 py-16 text-center shadow-sm">
+          <div className="rounded-[32px] border border-slate-200 bg-white px-6 py-16 text-center shadow-[0_18px_46px_-36px_rgba(15,23,42,0.24)]">
             <Clock3 className="mx-auto h-8 w-8 animate-pulse text-slate-300" />
             <p className="mt-4 text-sm text-slate-500">Loading registration status...</p>
           </div>
         ) : record ? (
           <>
-            <div className="rounded-[36px] border border-amber-200 bg-gradient-to-br from-amber-50 to-white p-6 shadow-sm sm:p-8">
+            <CivicPanel className="border-amber-200 bg-gradient-to-br from-amber-50 to-white sm:p-8">
               <div className="flex flex-wrap items-start justify-between gap-4">
                 <div>
-                  <div className="inline-flex items-center gap-2 rounded-full bg-white px-3 py-1 text-xs font-semibold uppercase tracking-wide text-amber-700">
-                    <Clock3 className="h-3.5 w-3.5" />
-                    Pending Review
-                  </div>
+                  <CivicBadge label="Pending review" tone="amber" />
                   <h1 className="mt-4 text-3xl font-bold text-slate-900">Your registration is under admin review.</h1>
                   <p className="mt-2 max-w-2xl text-sm text-slate-600">
                     The record was submitted successfully and is now waiting for location review and admin approval.
@@ -124,18 +122,19 @@ export default function RegistrationStatusPage() {
                   <p className="mt-1 text-xs text-slate-500">Submitted {formatDate(record.registration_submitted_at)}</p>
                 </div>
               </div>
-            </div>
+            </CivicPanel>
 
-            <div className="rounded-[32px] border border-slate-200 bg-white p-6 shadow-sm">
-              <div className="flex items-center gap-2">
-                <ShieldCheck className="h-4 w-4 text-indigo-600" />
-                <h2 className="text-lg font-semibold text-slate-900">Progress Timeline</h2>
-              </div>
+            <CivicPanel className="p-6">
+              <CivicSectionHeading
+                icon={ShieldCheck}
+                title="Progress timeline"
+                description="Review status from submission through approval."
+              />
               <div className="mt-5 grid gap-3 md:grid-cols-4">
                 {timeline.map((step) => (
                   <div
                     key={step.key}
-                    className={`rounded-3xl border px-4 py-4 ${
+                    className={`rounded-[28px] border px-4 py-4 ${
                       step.state === 'done'
                         ? 'border-emerald-200 bg-emerald-50'
                         : step.state === 'current'
@@ -148,11 +147,14 @@ export default function RegistrationStatusPage() {
                   </div>
                 ))}
               </div>
-            </div>
+            </CivicPanel>
 
             <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
-              <div className="rounded-[32px] border border-slate-200 bg-white p-6 shadow-sm">
-                <h2 className="text-lg font-semibold text-slate-900">Submitted Summary</h2>
+              <CivicPanel className="p-6">
+                <CivicSectionHeading
+                  title="Submitted summary"
+                  description="The information currently attached to your registration."
+                />
                 <div className="mt-5 grid gap-4 md:grid-cols-2">
                   <div className="rounded-3xl border border-slate-200 bg-slate-50 px-4 py-4">
                     <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Personal info</p>
@@ -171,13 +173,14 @@ export default function RegistrationStatusPage() {
                     </div>
                   </div>
                 </div>
-              </div>
+              </CivicPanel>
 
-              <div className="rounded-[32px] border border-slate-200 bg-white p-6 shadow-sm">
-                <div className="flex items-center gap-2">
-                  <MapPin className="h-4 w-4 text-indigo-600" />
-                  <h2 className="text-lg font-semibold text-slate-900">Location Preview</h2>
-                </div>
+              <CivicPanel className="p-6">
+                <CivicSectionHeading
+                  icon={MapPin}
+                  title="Location preview"
+                  description="Pin review uses the submitted coordinates shown below."
+                />
                 <div className="mt-4">
                   <LocationPicker
                     readonly
@@ -190,7 +193,7 @@ export default function RegistrationStatusPage() {
                   <p><span className="font-semibold text-slate-900">Latitude:</span> {typeof record.gps_lat === 'number' ? record.gps_lat.toFixed(6) : 'Waiting for location review'}</p>
                   <p className="mt-2"><span className="font-semibold text-slate-900">Longitude:</span> {typeof record.gps_long === 'number' ? record.gps_long.toFixed(6) : 'Waiting for location review'}</p>
                 </div>
-              </div>
+              </CivicPanel>
             </div>
 
             <div className="rounded-[32px] border border-emerald-200 bg-emerald-50 px-5 py-4 text-sm text-emerald-800">

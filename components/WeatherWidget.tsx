@@ -533,21 +533,21 @@ export default function WeatherWidget({
 
   if (mode === 'compact') {
     return (
-      <div className={`overflow-hidden rounded-[28px] border border-slate-200/80 bg-white shadow-[0_18px_50px_-32px_rgba(15,23,42,0.35)] ${className}`}>
-        <div className={`bg-gradient-to-r ${condition.panel} px-4 py-4`}>
+      <div className={`overflow-hidden rounded-[30px] border border-slate-200/90 bg-white shadow-[0_24px_60px_-38px_rgba(15,23,42,0.38)] ${className}`}>
+        <div className="border-b border-slate-100 bg-[linear-gradient(180deg,#f8fbff_0%,#eff4ff_100%)] px-4 py-4">
           <div className="flex items-start gap-3">
-            <div className={`flex h-12 w-12 items-center justify-center rounded-2xl ${condition.iconWrap}`}>
+            <div className="flex h-14 w-14 items-center justify-center rounded-[22px] border border-slate-200 bg-[#edf3ff]">
               <ConditionIcon className={`h-6 w-6 ${condition.iconColor}`} />
             </div>
 
             <div className="min-w-0 flex-1">
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0">
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-500">
-                    Field Weather
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.28em] text-[#5870a8]">
+                    OpenWeather Forecast
                   </p>
                   <div className="mt-1 flex items-baseline gap-2">
-                    <span className="text-3xl font-black text-slate-900">
+                    <span className="text-3xl font-black text-slate-950">
                       {formatNumber(current.temperature, '°')}
                     </span>
                     <span className="text-xs text-slate-500">
@@ -555,13 +555,17 @@ export default function WeatherWidget({
                     </span>
                   </div>
                   <p className="text-sm font-semibold text-slate-800">{current.weatherLabel}</p>
-                  <p className="mt-1 flex items-center gap-1 text-[11px] text-slate-500">
-                    <MapPin className="h-3.5 w-3.5" />
-                    <span className="truncate">
-                      {locationLabel}
-                      {weather.location.rounded ? ' · area forecast' : ''}
+                  <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
+                    <span className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-2.5 py-1">
+                      <MapPin className="h-3.5 w-3.5" />
+                      <span className="truncate">
+                        {locationLabel}
+                      </span>
                     </span>
-                  </p>
+                    <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-slate-500">
+                      Updated {updatedTime}
+                    </span>
+                  </div>
                 </div>
 
                 <div className="flex items-center gap-1.5">
@@ -569,7 +573,7 @@ export default function WeatherWidget({
                     type="button"
                     onClick={fetchWeather}
                     disabled={loading}
-                    className="rounded-full bg-white/80 p-2 text-slate-600 shadow-sm transition hover:bg-white"
+                    className="rounded-full border border-slate-200 bg-white p-2 text-slate-600 shadow-sm transition hover:bg-slate-50"
                     title="Refresh weather"
                   >
                     <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
@@ -577,7 +581,7 @@ export default function WeatherWidget({
                   <button
                     type="button"
                     onClick={handleToggleMinimized}
-                    className="inline-flex items-center gap-1 rounded-full border border-white/80 bg-white/80 px-2.5 py-1 text-[10px] font-semibold text-slate-700 shadow-sm"
+                    className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[10px] font-semibold text-slate-700 shadow-sm"
                     aria-expanded={!isMinimized}
                     title={toggleLabel}
                   >
@@ -592,7 +596,7 @@ export default function WeatherWidget({
 
         {!isMinimized && (
           <div className="space-y-3 px-4 py-4">
-            <div className={`rounded-2xl border px-3 py-2 ${leadTone.frame}`}>
+            <div className={`rounded-[22px] border px-3 py-3 ${leadTone.frame}`}>
               <div className="flex items-start gap-2">
                 <ShieldAlert className={`mt-0.5 h-4 w-4 flex-shrink-0 ${leadTone.text}`} />
                 <div>
@@ -603,19 +607,19 @@ export default function WeatherWidget({
             </div>
 
             <div className="grid grid-cols-3 gap-2">
-              <div className="rounded-2xl border border-slate-200/80 bg-slate-50 px-3 py-2">
+              <div className="rounded-[20px] border border-slate-200/80 bg-slate-50 px-3 py-2.5">
                 <p className="text-[10px] text-slate-500">Rain</p>
                 <p className="mt-1 text-sm font-bold text-slate-800">
                   {formatNumber(current.rainChance, '%')}
                 </p>
               </div>
-              <div className="rounded-2xl border border-slate-200/80 bg-slate-50 px-3 py-2">
+              <div className="rounded-[20px] border border-slate-200/80 bg-slate-50 px-3 py-2.5">
                 <p className="text-[10px] text-slate-500">Wind</p>
                 <p className="mt-1 text-sm font-bold text-slate-800">
                   {formatNumber(current.windSpeed, ' km/h')}
                 </p>
               </div>
-              <div className="rounded-2xl border border-slate-200/80 bg-slate-50 px-3 py-2">
+              <div className="rounded-[20px] border border-slate-200/80 bg-slate-50 px-3 py-2.5">
                 <p className="text-[10px] text-slate-500">Visibility</p>
                 <p className="mt-1 text-sm font-bold text-slate-800">
                   {formatDecimal(current.visibility, ' km')}
@@ -635,10 +639,10 @@ export default function WeatherWidget({
   }
 
   return (
-    <div ref={rootRef} className={`overflow-hidden rounded-[26px] border border-slate-200/80 bg-white shadow-[0_22px_70px_-35px_rgba(15,23,42,0.38)] sm:rounded-[30px] ${className}`}>
-      <div className={`bg-gradient-to-br ${condition.panel} px-4 py-4 sm:px-5 sm:py-5`}>
+    <div ref={rootRef} className={`overflow-hidden rounded-[28px] border border-slate-200/90 bg-white shadow-[0_28px_80px_-40px_rgba(15,23,42,0.42)] sm:rounded-[32px] ${className}`}>
+      <div className="border-b border-slate-100 bg-[linear-gradient(180deg,#f8fbff_0%,#eff4ff_42%,#eef3ff_100%)] px-4 py-4 sm:px-5 sm:py-5">
         <div className={isTightFull ? 'flex flex-col gap-4' : 'flex flex-col gap-4 sm:flex-row sm:items-start'}>
-          <div className={`flex h-14 w-14 items-center justify-center rounded-[22px] sm:h-16 sm:w-16 sm:rounded-[24px] ${condition.iconWrap}`}>
+          <div className="flex h-14 w-14 items-center justify-center rounded-[22px] border border-slate-200 bg-[#edf3ff] sm:h-16 sm:w-16 sm:rounded-[24px]">
             <ConditionIcon className={`h-8 w-8 ${condition.iconColor}`} />
           </div>
 
@@ -646,7 +650,7 @@ export default function WeatherWidget({
             <div className={isTightFull ? 'flex flex-col gap-3' : 'flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between'}>
               <div className="space-y-2">
                 <div>
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-500">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-[#5870a8]">
                     OpenWeather Forecast
                   </p>
                   <h3 className="mt-1 text-[2rem] font-black tracking-tight text-slate-950 sm:text-3xl">
@@ -658,16 +662,16 @@ export default function WeatherWidget({
                 </div>
 
                 <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600">
-                  <span className="inline-flex items-center gap-1 rounded-full border border-white/80 bg-white/80 px-2.5 py-1">
+                  <span className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-2.5 py-1">
                     <MapPin className="h-3.5 w-3.5" />
                     {locationLabel}
                   </span>
                   {weather.location.rounded && (
-                    <span className="rounded-full border border-slate-200 bg-white/70 px-2.5 py-1 text-slate-500">
+                    <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-slate-500">
                       Rounded area query to save API calls
                     </span>
                   )}
-                  <span className="rounded-full border border-slate-200 bg-white/70 px-2.5 py-1 text-slate-500">
+                  <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-slate-500">
                     Updated {updatedTime}
                   </span>
                 </div>
@@ -678,7 +682,7 @@ export default function WeatherWidget({
                   type="button"
                   onClick={fetchWeather}
                   disabled={loading}
-                  className="inline-flex items-center justify-center gap-2 rounded-2xl border border-white/80 bg-white/80 px-3 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-white"
+                  className="inline-flex items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50"
                   title="Refresh weather"
                 >
                   <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
@@ -687,7 +691,7 @@ export default function WeatherWidget({
                 <button
                   type="button"
                   onClick={handleToggleMinimized}
-                  className="inline-flex items-center justify-center gap-2 rounded-2xl border border-white/80 bg-white/80 px-3 py-2 text-sm font-semibold text-slate-700 shadow-sm"
+                  className="inline-flex items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 shadow-sm"
                   aria-expanded={!isMinimized}
                   title={toggleLabel}
                 >
@@ -698,7 +702,7 @@ export default function WeatherWidget({
             </div>
 
             <div className={isTightFull ? 'mt-4 grid gap-3' : 'mt-4 grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto]'}>
-              <div className={`rounded-2xl border px-3 py-3 sm:px-4 ${leadTone.frame}`}>
+              <div className={`rounded-[22px] border px-3 py-3 sm:px-4 ${leadTone.frame}`}>
                 <div className="flex flex-wrap items-start gap-2">
                   <span className={`inline-flex rounded-full border px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.18em] ${leadTone.chip}`}>
                     {severityLabel(leadAlert.severity)}
@@ -710,17 +714,17 @@ export default function WeatherWidget({
                 </div>
               </div>
 
-              <div className="rounded-2xl border border-white/80 bg-white/75 px-3 py-3 sm:px-4">
+              <div className="rounded-[22px] border border-slate-200 bg-white px-3 py-3 shadow-[0_14px_30px_-24px_rgba(15,23,42,0.35)] sm:px-4">
                 <p className="text-[11px] text-slate-500">Today</p>
                 <p className="mt-1 text-sm font-bold text-slate-800">
                   High {formatNumber(weather.today.high, '°')} · Low {formatNumber(weather.today.low, '°')}
                 </p>
                 <div className="mt-2 flex flex-wrap gap-2 text-[11px] text-slate-500">
-                  <span className="inline-flex items-center gap-1 rounded-full bg-white/80 px-2 py-1">
+                  <span className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2 py-1">
                     <Sunrise className="h-3 w-3" />
                     {formatTime(weather.today.sunrise)}
                   </span>
-                  <span className="inline-flex items-center gap-1 rounded-full bg-white/80 px-2 py-1">
+                  <span className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2 py-1">
                     <Sunset className="h-3 w-3" />
                     {formatTime(weather.today.sunset)}
                   </span>

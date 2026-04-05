@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSessionUser } from '@/lib/server/auth-guards';
+import { inspectSessionUser } from '@/lib/server/auth-guards';
 
 export const runtime = 'nodejs';
 
 export async function GET(request: NextRequest) {
-  const user = await getSessionUser(request);
+  const { user, reason } = await inspectSessionUser(request);
   return NextResponse.json(
-    { user },
+    { user, reason },
     {
       headers: {
         'Cache-Control': 'no-store',

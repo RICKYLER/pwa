@@ -16,6 +16,13 @@ const SEVERITY_ORDER: Record<string, number> = {
     low: 3,
 };
 
+const INCIDENT_STATUS_PROGRESS: Record<IncidentStatus, number> = {
+    reported: 0,
+    verified: 1,
+    responding: 2,
+    resolved: 3,
+};
+
 const DEMO_INCIDENT_COORDINATES: Record<string, { gps_lat: number; gps_lng: number }> = {
     'Purok 3, Sitio Malabog': { gps_lat: DEFAULT_BARANGAY_CENTER.lat - 0.0026, gps_lng: DEFAULT_BARANGAY_CENTER.lng - 0.0018 },
     'Purok 1, Zone A — House #114': { gps_lat: DEFAULT_BARANGAY_CENTER.lat + 0.0017, gps_lng: DEFAULT_BARANGAY_CENTER.lng + 0.0014 },
@@ -24,8 +31,117 @@ const DEMO_INCIDENT_COORDINATES: Record<string, { gps_lat: number; gps_lng: numb
     'Purok 2, Central Zone': { gps_lat: DEFAULT_BARANGAY_CENTER.lat - 0.0012, gps_lng: DEFAULT_BARANGAY_CENTER.lng + 0.0006 },
 };
 
+type DemoIncidentSeed = {
+    id: string;
+    type: Incident['type'];
+    location: string;
+    severity: Incident['severity'];
+    status: IncidentStatus;
+    minutesAgo: number;
+    description: string;
+    archived?: boolean;
+};
+
+const DEMO_INCIDENT_SEEDS: DemoIncidentSeed[] = [
+    {
+        id: 'demo_incident_flood_purok_3',
+        type: 'flood',
+        location: 'Purok 3, Sitio Malabog',
+        severity: 'critical',
+        status: 'reported',
+        minutesAgo: 15,
+        description: 'Floodwater rising — 12 families need immediate evacuation. Road impassable.',
+    },
+    {
+        id: 'demo_incident_medical_zone_a',
+        type: 'medical',
+        location: 'Purok 1, Zone A — House #114',
+        severity: 'high',
+        status: 'verified',
+        minutesAgo: 45,
+        description: 'Elderly resident with chest pain. Family unable to transport to hospital.',
+    },
+    {
+        id: 'demo_incident_fire_barangay_hall',
+        type: 'fire',
+        location: 'Purok 5, Barangay Hall Area',
+        severity: 'high',
+        status: 'responding',
+        minutesAgo: 90,
+        description: 'Cooking fire spread to adjacent structure. BFP en-route. 3 families displaced.',
+        archived: true,
+    },
+    {
+        id: 'demo_incident_typhoon_coastal',
+        type: 'typhoon',
+        location: 'Coastal Purok 7',
+        severity: 'medium',
+        status: 'verified',
+        minutesAgo: 180,
+        description: 'Pre-emptive evacuation advisory. 8 families in low-lying areas.',
+    },
+    {
+        id: 'demo_incident_power_outage_central',
+        type: 'other',
+        location: 'Purok 2, Central Zone',
+        severity: 'low',
+        status: 'resolved',
+        minutesAgo: 300,
+        description: 'Power outage affecting 22 households. VECO notified — ETA 2 hours.',
+    },
+];
+
+const ACTIVE_DEMO_INCIDENT_SEEDS = DEMO_INCIDENT_SEEDS.filter((seed) => !seed.archived);
+
 function resolveIncidentCoordinates(location: string) {
     return DEMO_INCIDENT_COORDINATES[location] ?? null;
+}
+
+function resolveDemoSeed(incident: Pick<Incident, 'type' | 'location' | 'description'>) {
+    return DEMO_INCIDENT_SEEDS.find((seed) => (
+        seed.type === incident.type
+        && seed.location === incident.location
+        && seed.description === incident.description
+    )) ?? null;
+}
+
+function choosePreferredDuplicateIncident(current: Incident, candidate: Incident) {
+    const currentProgress = INCIDENT_STATUS_PROGRESS[current.status] ?? -1;
+    const candidateProgress = INCIDENT_STATUS_PROGRESS[candidate.status] ?? -1;
+
+    if (candidateProgress !== currentProgress) {
+        return candidateProgress > currentProgress ? candidate : current;
+    }
+
+    return new Date(candidate.reported_at).getTime() > new Date(current.reported_at).getTime()
+        ? candidate
+        : current;
+}
+
+function collapseDemoIncidents(incidents: Incident[]) {
+    const dedupedDemoIncidents = new Map<string, Incident>();
+    const liveIncidents: Incident[] = [];
+
+    incidents.forEach((incident) => {
+        const demoSeed = resolveDemoSeed(incident);
+
+        if (!demoSeed) {
+            liveIncidents.push(incident);
+            return;
+        }
+
+        if (demoSeed.archived) {
+            return;
+        }
+
+        const existing = dedupedDemoIncidents.get(demoSeed.id);
+        dedupedDemoIncidents.set(
+            demoSeed.id,
+            existing ? choosePreferredDuplicateIncident(existing, incident) : incident,
+        );
+    });
+
+    return [...liveIncidents, ...dedupedDemoIncidents.values()];
 }
 
 function hasIncidentCoordinates(incident: Pick<Incident, 'gps_lat' | 'gps_lng'>): incident is Incident & {
@@ -58,7 +174,9 @@ export async function getIncidents(filters?: {
     status?: IncidentStatus;
 }): Promise<Incident[]> {
     try {
-        const all = (await db.getAll<Incident>(STORE_NAMES.incidents)).map(withResolvedIncidentCoordinates);
+        const all = collapseDemoIncidents(
+            (await db.getAll<Incident>(STORE_NAMES.incidents)).map(withResolvedIncidentCoordinates),
+        );
         let result = all;
         if (filters?.status) result = result.filter(i => i.status === filters.status);
         return result.sort((a, b) => {
@@ -91,10 +209,17 @@ export async function getIncident(id: string): Promise<Incident | undefined> {
 export async function createIncident(
     data: Omit<Incident, 'id' | 'syncStatus'>,
 ): Promise<Incident> {
+    return createIncidentWithId(generateId(), data);
+}
+
+async function createIncidentWithId(
+    id: string,
+    data: Omit<Incident, 'id' | 'syncStatus'>,
+): Promise<Incident> {
     try {
         const incident: Incident = {
             ...data,
-            id: generateId(),
+            id,
             syncStatus: 'synced',
         };
         await runServerMutation({
@@ -149,71 +274,44 @@ export async function updateIncidentStatus(
  */
 export async function seedDemoIncidents(reporterId: string): Promise<void> {
     try {
+        await bootstrapCurrentPathData(true);
+
         const existing = await db.getAll<Incident>(STORE_NAMES.incidents);
-        if (existing.length > 0) {
-            return; // already seeded
+        const existingDemoIds = new Set(
+            existing
+                .map((incident) => resolveDemoSeed(incident))
+                .filter((seed): seed is DemoIncidentSeed => Boolean(seed && !seed.archived))
+                .map((seed) => seed.id),
+        );
+        const missingSeeds = ACTIVE_DEMO_INCIDENT_SEEDS.filter((seed) => !existingDemoIds.has(seed.id));
+
+        if (missingSeeds.length === 0) {
+            return;
         }
 
-        const demos: Omit<Incident, 'id' | 'syncStatus'>[] = [
-            {
-                type: 'flood',
-                location: 'Purok 3, Sitio Malabog',
-                gps_lat: DEMO_INCIDENT_COORDINATES['Purok 3, Sitio Malabog']!.gps_lat,
-                gps_lng: DEMO_INCIDENT_COORDINATES['Purok 3, Sitio Malabog']!.gps_lng,
-                severity: 'critical',
-                status: 'reported',
-                reported_by: reporterId,
-                reported_at: new Date(Date.now() - 1000 * 60 * 15),
-                description: 'Floodwater rising — 12 families need immediate evacuation. Road impassable.',
-            },
-            {
-                type: 'medical',
-                location: 'Purok 1, Zone A — House #114',
-                gps_lat: DEMO_INCIDENT_COORDINATES['Purok 1, Zone A — House #114']!.gps_lat,
-                gps_lng: DEMO_INCIDENT_COORDINATES['Purok 1, Zone A — House #114']!.gps_lng,
-                severity: 'high',
-                status: 'verified',
-                reported_by: reporterId,
-                reported_at: new Date(Date.now() - 1000 * 60 * 45),
-                description: 'Elderly resident with chest pain. Family unable to transport to hospital.',
-            },
-            {
-                type: 'fire',
-                location: 'Purok 5, Barangay Hall Area',
-                gps_lat: DEMO_INCIDENT_COORDINATES['Purok 5, Barangay Hall Area']!.gps_lat,
-                gps_lng: DEMO_INCIDENT_COORDINATES['Purok 5, Barangay Hall Area']!.gps_lng,
-                severity: 'high',
-                status: 'responding',
-                reported_by: reporterId,
-                reported_at: new Date(Date.now() - 1000 * 60 * 90),
-                description: 'Cooking fire spread to adjacent structure. BFP en-route. 3 families displaced.',
-            },
-            {
-                type: 'typhoon',
-                location: 'Coastal Purok 7',
-                gps_lat: DEMO_INCIDENT_COORDINATES['Coastal Purok 7']!.gps_lat,
-                gps_lng: DEMO_INCIDENT_COORDINATES['Coastal Purok 7']!.gps_lng,
-                severity: 'medium',
-                status: 'verified',
-                reported_by: reporterId,
-                reported_at: new Date(Date.now() - 1000 * 60 * 180),
-                description: 'Pre-emptive evacuation advisory. 8 families in low-lying areas.',
-            },
-            {
-                type: 'other',
-                location: 'Purok 2, Central Zone',
-                gps_lat: DEMO_INCIDENT_COORDINATES['Purok 2, Central Zone']!.gps_lat,
-                gps_lng: DEMO_INCIDENT_COORDINATES['Purok 2, Central Zone']!.gps_lng,
-                severity: 'low',
-                status: 'resolved',
-                reported_by: reporterId,
-                reported_at: new Date(Date.now() - 1000 * 60 * 300),
-                description: 'Power outage affecting 22 households. VECO notified — ETA 2 hours.',
-            },
-        ];
+        for (const seed of missingSeeds) {
+            try {
+                await createIncidentWithId(seed.id, {
+                    type: seed.type,
+                    location: seed.location,
+                    gps_lat: DEMO_INCIDENT_COORDINATES[seed.location]!.gps_lat,
+                    gps_lng: DEMO_INCIDENT_COORDINATES[seed.location]!.gps_lng,
+                    severity: seed.severity,
+                    status: seed.status,
+                    reported_by: reporterId,
+                    reported_at: new Date(Date.now() - (1000 * 60 * seed.minutesAgo)),
+                    description: seed.description,
+                });
+            } catch (error) {
+                const message = error instanceof Error ? error.message.toLowerCase() : '';
+                if (!message.includes('duplicate') && !message.includes('already exists')) {
+                    throw error;
+                }
+            }
+        }
 
-        await Promise.all(demos.map(d => createIncident(d)));
-        console.log('Demo incidents seeded:', demos.length);
+        await bootstrapCurrentPathData(true);
+        console.log('Demo incidents ensured:', missingSeeds.length);
     } catch (error) {
         console.error('Error seeding demo incidents:', error);
     }

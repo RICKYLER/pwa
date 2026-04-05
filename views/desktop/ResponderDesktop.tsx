@@ -1,493 +1,522 @@
 'use client';
 
-// ─── ResponderDesktop ─────────────────────────────────────────────────────────
-// Two-column layout:
-//  Left (40%): Status header, Incident Command cards, Priority check-in list
-//  Right (60%): Full-height Google Map with incident/household pins + detail overlay
-
-import { useEffect, useState, useCallback } from 'react';
+import { useCallback, useEffect, useState, type KeyboardEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { getCurrentUser, hasRole } from '@/lib/auth';
 import { getIncidents, updateIncidentStatus, seedDemoIncidents } from '@/lib/db/incidents';
 import { getDistributionEvents } from '@/lib/db/distribution';
 import { db, STORE_NAMES } from '@/lib/db/indexeddb';
 import { getHouseholds } from '@/lib/db/households';
-import type { Incident, IncidentStatus, Household, Resident, VulnerabilityFlags, DistributionEvent } from '@/lib/db/schema';
-import {
-    Zap, MapPin, Navigation, CheckCircle2,
-    ShieldAlert, Package, Calendar, Loader2, RefreshCw,
-    Users, X
-} from 'lucide-react';
+import type { DistributionEvent, Household, Incident, IncidentStatus, Resident, VulnerabilityFlags } from '@/lib/db/schema';
+import { CheckCircle2, Package, Radio, RefreshCw, ShieldAlert, Users, Zap } from 'lucide-react';
 import WeatherWidget from '@/components/WeatherWidget';
 import ResponderLeafletMap from '@/components/ResponderLeafletMap';
+import ResponderMapControlPanel from '@/components/ResponderMapControlPanel';
+import ResponderSelectionSummary from '@/components/ResponderSelectionSummary';
+import { CivicBadge, CivicChipButton, CivicPanel } from '@/components/ui/civic-primitives';
 import { openResponderMapLocation } from '@/lib/responder-map-links';
-
+import { useResponderMapControls } from '@/hooks/useResponderMapControls';
 
 const SEVERITY_CFG = {
-    critical: { label: 'Critical', dot: 'bg-red-500', badge: 'bg-red-100 text-red-700', ring: 'border-red-200', pulse: true },
-    high: { label: 'High', dot: 'bg-orange-500', badge: 'bg-orange-100 text-orange-700', ring: 'border-orange-200', pulse: false },
-    medium: { label: 'Medium', dot: 'bg-amber-400', badge: 'bg-amber-100 text-amber-700', ring: 'border-amber-200', pulse: false },
-    low: { label: 'Low', dot: 'bg-slate-400', badge: 'bg-slate-100 text-slate-600', ring: 'border-slate-200', pulse: false },
-    
+  critical: { label: 'Critical', dot: 'bg-red-500', badge: 'bg-red-50 text-red-700 border-red-200' },
+  high: { label: 'High', dot: 'bg-orange-500', badge: 'bg-orange-50 text-orange-700 border-orange-200' },
+  medium: { label: 'Medium', dot: 'bg-amber-400', badge: 'bg-amber-50 text-amber-700 border-amber-200' },
+  low: { label: 'Low', dot: 'bg-slate-400', badge: 'bg-slate-100 text-slate-600 border-slate-200' },
 } as const;
+
 const STATUS_FLOW: { value: IncidentStatus; label: string; color: string }[] = [
-    { value: 'reported', label: 'Reported', color: 'bg-slate-100 text-slate-700 hover:bg-slate-200' },
-    { value: 'verified', label: 'Verified', color: 'bg-blue-100 text-blue-700 hover:bg-blue-200' },
-    { value: 'responding', label: 'Responding', color: 'bg-amber-100 text-amber-700 hover:bg-amber-200' },
-    { value: 'resolved', label: 'Resolved', color: 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200' },
+  { value: 'reported', label: 'Reported', color: 'bg-slate-100 text-slate-700 hover:bg-slate-200' },
+  { value: 'verified', label: 'Verified', color: 'bg-blue-100 text-blue-700 hover:bg-blue-200' },
+  { value: 'responding', label: 'Responding', color: 'bg-amber-100 text-amber-700 hover:bg-amber-200' },
+  { value: 'resolved', label: 'Resolved', color: 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200' },
 ];
 
 const INCIDENT_TYPE_ICONS: Record<string, string> = {
-    flood: '🌊', fire: '🔥', medical: '🏥', landslide: '⛰️', typhoon: '🌀', other: '⚡',
+  flood: '🌊',
+  fire: '🔥',
+  medical: '🏥',
+  landslide: '⛰️',
+  typhoon: '🌀',
+  other: '⚡',
 };
-function openMaps(lat?: number, lng?: number, address?: string) {
-    openResponderMapLocation(lat, lng, address);
+
+interface PriorityHousehold {
+  household: Household;
+  residents: Resident[];
+  flags: VulnerabilityFlags[];
+  score: number;
 }
 
 function timeAgo(date: Date): string {
-    const mins = Math.floor((Date.now() - new Date(date).getTime()) / 60000);
-    if (mins < 1) return 'just now';
-    if (mins < 60) return `${mins}m ago`;
-    const hrs = Math.floor(mins / 60);
-    if (hrs < 24) return `${hrs}h ago`;
-    return `${Math.floor(hrs / 24)}d ago`;
-}
-
-interface PriorityHousehold {
-    household: Household;
-    residents: Resident[];
-    flags: VulnerabilityFlags[];
-    score: number;
+  const mins = Math.floor((Date.now() - new Date(date).getTime()) / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  return `${Math.floor(hrs / 24)}d ago`;
 }
 
 function vulnTags(flags: VulnerabilityFlags[]): string[] {
-    const tags: string[] = [];
-    if (flags.some(f => f.is_senior)) tags.push('Senior');
-    if (flags.some(f => f.is_pwd)) tags.push('PWD');
-    if (flags.some(f => f.is_pregnant)) tags.push('Pregnant');
-    if (flags.some(f => f.has_chronic_illness)) tags.push('Chronic');
-    if (flags.some(f => f.is_child)) tags.push('Child');
-    return tags;
+  const tags: string[] = [];
+  if (flags.some((flag) => flag.is_senior)) tags.push('Senior');
+  if (flags.some((flag) => flag.is_pwd)) tags.push('PWD');
+  if (flags.some((flag) => flag.is_pregnant)) tags.push('Pregnant');
+  if (flags.some((flag) => flag.has_chronic_illness)) tags.push('Chronic');
+  if (flags.some((flag) => flag.is_child)) tags.push('Child');
+  return tags;
 }
 
-function DesktopMap({
-    households,
-    incidents,
-    selectedHousehold,
-    onSelectHousehold,
-}: {
-    households: Household[];
-    incidents: Incident[];
-    selectedHousehold: Household | null;
-    onSelectHousehold: (h: Household | null) => void;
-}) {
-    return (
-        <ResponderLeafletMap
-            households={households}
-            incidents={incidents}
-            selectedHousehold={selectedHousehold}
-            onSelectHousehold={onSelectHousehold}
-        />
-    );
+function navigateToHousehold(household: Household) {
+  openResponderMapLocation(household.gps_lat, household.gps_long, household.street_address);
 }
 
-// ─── Main Component ───────────────────────────────────────────────────────────
+function navigateToIncident(incident: Incident) {
+  openResponderMapLocation(incident.gps_lat, incident.gps_lng, incident.location);
+}
+
+function navigateToEvent(event: DistributionEvent) {
+  openResponderMapLocation(event.gps_lat, event.gps_lng, event.location);
+}
+
+function activateOnEnterOrSpace(
+  event: KeyboardEvent<HTMLDivElement>,
+  activate: () => void,
+) {
+  if (event.key !== 'Enter' && event.key !== ' ') {
+    return;
+  }
+
+  event.preventDefault();
+  activate();
+}
+
 export default function ResponderDesktop() {
-    const router = useRouter();
-    const user = getCurrentUser();
+  const router = useRouter();
+  const user = getCurrentUser();
+  const mapControls = useResponderMapControls();
 
-    const [incidents, setIncidents] = useState<Incident[]>([]);
-    const [priorities, setPriorities] = useState<PriorityHousehold[]>([]);
-    const [events, setEvents] = useState<DistributionEvent[]>([]);
-    const [mapHouseholds, setMapHouseholds] = useState<Household[]>([]);
-    const [loading, setLoading] = useState(true);
-    const [selectedHousehold, setSelectedHousehold] = useState<Household | null>(null);
-    const [activeTab, setActiveTab] = useState<'incidents' | 'priorities' | 'events'>('incidents');
-    const [updatingId, setUpdatingId] = useState<string | null>(null);
-    const [visitedIds, setVisitedIds] = useState<Set<string>>(new Set());
+  const [incidents, setIncidents] = useState<Incident[]>([]);
+  const [priorities, setPriorities] = useState<PriorityHousehold[]>([]);
+  const [events, setEvents] = useState<DistributionEvent[]>([]);
+  const [mapHouseholds, setMapHouseholds] = useState<Household[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [selectedHousehold, setSelectedHousehold] = useState<Household | null>(null);
+  const [selectedIncident, setSelectedIncident] = useState<Incident | null>(null);
+  const [activeTab, setActiveTab] = useState<'incidents' | 'priorities' | 'events'>('incidents');
+  const [updatingId, setUpdatingId] = useState<string | null>(null);
+  const [visitedIds, setVisitedIds] = useState<Set<string>>(new Set());
 
-    useEffect(() => {
-        if (!user) { router.push('/login'); return; }
-        if (!hasRole(['responder', 'admin'])) { router.push('/dashboard'); return; }
-        load();
-    }, [user, router]);
-
-    const load = useCallback(async () => {
-        setLoading(true);
-        try {
-            await seedDemoIncidents(user!.id);
-            const [incs, households, residents, flags, evts] = await Promise.all([
-                getIncidents(),
-                getHouseholds({
-                    barangay_id: user!.barangay_id,
-                    registration_status: 'approved',
-                }),
-                db.getAll<Resident>(STORE_NAMES.residents),
-                db.getAll<VulnerabilityFlags>(STORE_NAMES.vulnerability_flags),
-                getDistributionEvents({ status: 'ongoing' }),
-            ]);
-
-            setIncidents(incs);
-            setEvents(evts);
-            setMapHouseholds(
-                households.filter(
-                    h =>
-                        h.status === 'active' &&
-                        h.gps_lat !== undefined &&
-                        h.gps_long !== undefined
-                )
-            );
-
-            const scored: PriorityHousehold[] = households
-                .filter(h => h.status === 'active')
-                .map(h => {
-                    const res = residents.filter(r => r.household_id === h.id && r.status === 'active');
-                    const fl = flags.filter(f => res.some(r => r.id === f.resident_id));
-                    let score = 0;
-                    fl.forEach(f => {
-                        if (f.is_senior) score += 3;
-                        if (f.is_pwd) score += 3;
-                        if (f.is_pregnant) score += 3;
-                        if (f.has_chronic_illness) score += 2;
-                        if (f.is_child) score += 1;
-                    });
-                    return { household: h, residents: res, flags: fl, score };
-                })
-                .filter(p => p.score > 0)
-                .sort((a, b) => b.score - a.score);
-
-            setPriorities(scored);
-        } catch (e) {
-            console.error(e);
-        } finally {
-            setLoading(false);
-        }
-    }, [user]);
-
-    async function handleStatusUpdate(id: string, status: IncidentStatus) {
-        setUpdatingId(id);
-        try {
-            const updated = await updateIncidentStatus(id, status);
-            setIncidents(prev => prev.map(i => i.id === id ? updated : i));
-        } finally {
-            setUpdatingId(null);
-        }
+  useEffect(() => {
+    if (!user) {
+      router.push('/login');
+      return;
     }
 
-    const activeIncidents = incidents.filter(i => i.status !== 'resolved');
-    const resolvedCount = incidents.filter(i => i.status === 'resolved').length;
+    if (!hasRole(['responder', 'admin'])) {
+      router.push('/dashboard');
+      return;
+    }
 
-    if (!user) return null;
+    void load();
+  }, [router, user]);
 
-    const firstName = user.name.split(' ')[0];
+  const load = useCallback(async () => {
+    if (!user) return;
+    setLoading(true);
 
-    return (
-        // h-full fills the desktop shell's main area (which is h-screen overflow-y-auto in AppShell)
-        // overflow-hidden here ensures page-level scrolling is disabled — each panel controls its own
-        <div className="flex h-full overflow-hidden">
-            {/* ── LEFT PANEL (40%) ─────────────────────────────────────── */}
-            <div className="w-[420px] flex-shrink-0 bg-white border-r border-slate-200/70 overflow-y-auto scrollbar-thin scrollbar-thumb-slate-200 hover:scrollbar-thumb-slate-300 scrollbar-track-transparent">
+    try {
+      await seedDemoIncidents(user.id);
+      const [allIncidents, households, residents, flags, ongoingEvents] = await Promise.all([
+        getIncidents(),
+        getHouseholds({
+          barangay_id: user.barangay_id,
+          registration_status: 'approved',
+        }),
+        db.getAll<Resident>(STORE_NAMES.residents),
+        db.getAll<VulnerabilityFlags>(STORE_NAMES.vulnerability_flags),
+        getDistributionEvents({ status: 'ongoing' }),
+      ]);
 
-                {/* Header */}
-                <div className="px-6 py-5 border-b border-slate-100 bg-gradient-to-br from-indigo-600 to-violet-700">
-                    <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-3">
-                            <div className="w-10 h-10 rounded-xl bg-white/15 flex items-center justify-center font-bold text-sm text-white">
-                                {user.name.charAt(0)}
-                            </div>
-                            <div>
-                                <p className="font-bold text-white text-sm">{user.name}</p>
-                                <p className="text-[11px] text-indigo-200">Field Responder · {user.barangay_id}</p>
-                            </div>
-                        </div>
-                        <div className="flex flex-col items-end gap-1.5">
-                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-emerald-400/20 rounded-full text-[10px] font-bold text-emerald-300 border border-emerald-400/30">
-                                <span className="w-1.5 h-1.5 bg-emerald-400 rounded-full animate-pulse" />Online
-                            </span>
-                            <button onClick={load} className="text-[10px] text-indigo-300 flex items-center gap-0.5 hover:text-white transition-colors">
-                                <RefreshCw className="w-3 h-3" />Refresh
-                            </button>
-                        </div>
-                    </div>
+      setIncidents(allIncidents);
+      setEvents(ongoingEvents);
+      setMapHouseholds(
+        households.filter(
+          (household) =>
+            household.status === 'active'
+            && household.gps_lat !== undefined
+            && household.gps_long !== undefined,
+        ),
+      );
 
-                    {/* KPI row */}
-                    {!loading && (
-                        <div className="grid grid-cols-3 gap-2 mt-4">
-                            {[
-                                { label: 'Active', value: activeIncidents.length, color: 'text-red-300' },
-                                { label: 'Priority HH', value: priorities.length, color: 'text-amber-300' },
-                                { label: 'Resolved', value: resolvedCount, color: 'text-emerald-300' },
-                            ].map(k => (
-                                <div key={k.label} className="bg-white/10 rounded-xl px-3 py-2 text-center">
-                                    <p className={`text-lg font-bold ${k.color}`}>{k.value}</p>
-                                    <p className="text-[10px] text-indigo-200">{k.label}</p>
-                                </div>
-                            ))}
-                        </div>
-                    )}
+      const scored: PriorityHousehold[] = households
+        .filter((household) => household.status === 'active')
+        .map((household) => {
+          const residentsInHousehold = residents.filter(
+            (resident) => resident.household_id === household.id && resident.status === 'active',
+          );
+          const householdFlags = flags.filter((flag) => residentsInHousehold.some((resident) => resident.id === flag.resident_id));
+          let score = 0;
+          householdFlags.forEach((flag) => {
+            if (flag.is_senior) score += 3;
+            if (flag.is_pwd) score += 3;
+            if (flag.is_pregnant) score += 3;
+            if (flag.has_chronic_illness) score += 2;
+            if (flag.is_child) score += 1;
+          });
+          return { household, residents: residentsInHousehold, flags: householdFlags, score };
+        })
+        .filter((priority) => priority.score > 0)
+        .sort((a, b) => b.score - a.score);
+
+      setPriorities(scored);
+    } catch (error) {
+      console.error(error);
+    } finally {
+      setLoading(false);
+    }
+  }, [user]);
+
+  async function handleStatusUpdate(id: string, status: IncidentStatus) {
+    setUpdatingId(id);
+    try {
+      const updated = await updateIncidentStatus(id, status);
+      setIncidents((current) => current.map((incident) => incident.id === id ? updated : incident));
+      if (selectedIncident?.id === id) {
+        setSelectedIncident(updated);
+      }
+    } finally {
+      setUpdatingId(null);
+    }
+  }
+
+  if (!user) return null;
+
+  const activeIncidents = incidents.filter((incident) => incident.status !== 'resolved');
+  const resolvedCount = incidents.filter((incident) => incident.status === 'resolved').length;
+
+  return (
+    <div className="flex h-full min-h-0 gap-5 p-5">
+      <aside className="w-[410px] shrink-0 overflow-y-auto pr-1">
+        <div className="space-y-4">
+          <CivicPanel className="overflow-hidden border-cyan-100 bg-[linear-gradient(135deg,#083344,#164e63)] text-white shadow-[0_28px_60px_-36px_rgba(8,47,73,0.7)]">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-cyan-100/70">Response Operations</p>
+                <h2 className="mt-3 text-2xl font-black tracking-tight">{user.name}</h2>
+                <p className="mt-1 text-sm text-cyan-100/80">Field responder for {user.barangay_id}</p>
+              </div>
+              <button
+                onClick={() => void load()}
+                className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/10 px-3 py-2 text-xs font-semibold text-white transition hover:bg-white/15"
+              >
+                <RefreshCw className="h-3.5 w-3.5" />
+                Refresh
+              </button>
+            </div>
+            <div className="mt-5 grid grid-cols-3 gap-2">
+              {[
+                { label: 'Active', value: activeIncidents.length },
+                { label: 'Priority', value: priorities.length },
+                { label: 'Resolved', value: resolvedCount },
+              ].map((metric) => (
+                <div key={metric.label} className="rounded-[20px] border border-white/10 bg-white/10 px-3 py-3">
+                  <p className="text-2xl font-black">{loading ? '—' : metric.value}</p>
+                  <p className="mt-1 text-[11px] uppercase tracking-[0.14em] text-cyan-100/70">{metric.label}</p>
                 </div>
+              ))}
+            </div>
+          </CivicPanel>
 
-                {/* Live weather — helps responders plan around conditions in the field */}
-                <div className="px-4 py-3 border-b border-slate-100">
-                    <WeatherWidget
-                        mode="full"
-                        defaultMinimized
-                        autoMinimizeInTightPanel
-                    />
-                </div>
+          <WeatherWidget mode="compact" className="civic-card-shadow" />
 
-                {/* Tab bar */}
-                <div className="flex border-b border-slate-100">
-                    {([
-                        { key: 'incidents', label: 'Incidents', icon: Zap, count: activeIncidents.length },
-                        { key: 'priorities', label: 'Check-ins', icon: ShieldAlert, count: priorities.length },
-                        { key: 'events', label: 'Events', icon: Package, count: events.length },
-                    ] as const).map(t => {
-                        const Icon = t.icon;
-                        return (
+          <ResponderMapControlPanel
+            activeBaseLayerId={mapControls.activeBaseLayerId}
+            activeLayerIds={mapControls.activeLayerIds}
+            activeLayerSummary={mapControls.activeLayerSummary}
+            allLayersSelected={mapControls.allLayersSelected}
+            overlayOpacity={mapControls.overlayOpacity}
+            showAdvancedLayers={mapControls.showAdvancedLayers}
+            showWeather={mapControls.showWeather}
+            weatherOverlayVisible={mapControls.weatherOverlayVisible}
+            windLayerSelected={mapControls.windLayerSelected}
+            onActiveBaseLayerChange={mapControls.handleActiveBaseLayerChange}
+            onOverlayOpacityChange={mapControls.handleOverlayOpacityChange}
+            onShowAdvancedLayersChange={mapControls.handleShowAdvancedLayersChange}
+            onToggleLayer={mapControls.handleLayerToggle}
+            onToggleWeatherVisibility={mapControls.handleWeatherVisibilityToggle}
+            onOpenAllLayers={mapControls.handleOpenAllLayers}
+            onClearAllLayers={mapControls.handleClearAllLayers}
+          />
+
+          <ResponderSelectionSummary
+            household={selectedHousehold}
+            incident={selectedIncident}
+            onClear={() => {
+              setSelectedHousehold(null);
+              setSelectedIncident(null);
+            }}
+            onNavigateHousehold={navigateToHousehold}
+            onNavigateIncident={navigateToIncident}
+          />
+
+          <CivicPanel className="space-y-4">
+            <div className="flex flex-wrap gap-2">
+              {([
+                { key: 'incidents', label: 'Incidents', count: activeIncidents.length },
+                { key: 'priorities', label: 'Check-ins', count: priorities.length },
+                { key: 'events', label: 'Events', count: events.length },
+              ] as const).map((tab) => (
+                <CivicChipButton
+                  key={tab.key}
+                  active={activeTab === tab.key}
+                  onClick={() => setActiveTab(tab.key)}
+                >
+                  {tab.label}
+                  <span className={`rounded-full px-2 py-0.5 text-[10px] ${activeTab === tab.key ? 'bg-white/12 text-white' : 'bg-slate-100 text-slate-500'}`}>
+                    {loading ? '—' : tab.count}
+                  </span>
+                </CivicChipButton>
+              ))}
+            </div>
+
+            {activeTab === 'incidents' ? (
+              <div className="space-y-3">
+                {loading ? (
+                  [...Array(3)].map((_, index) => (
+                    <div key={index} className="h-28 animate-pulse rounded-[24px] bg-slate-100" />
+                  ))
+                ) : activeIncidents.length === 0 ? (
+                  <div className="rounded-[24px] border border-dashed border-slate-300 bg-slate-50 px-5 py-10 text-center">
+                    <CheckCircle2 className="mx-auto h-8 w-8 text-emerald-500" />
+                    <p className="mt-3 text-sm font-semibold text-slate-900">No active incidents</p>
+                    <p className="mt-1 text-sm text-slate-500">The response area is currently clear.</p>
+                  </div>
+                ) : (
+                  activeIncidents.map((incident) => {
+                    const cfg = SEVERITY_CFG[incident.severity as keyof typeof SEVERITY_CFG] ?? SEVERITY_CFG.low;
+                    const selectIncident = () => {
+                      setSelectedIncident(incident);
+                      setSelectedHousehold(null);
+                    };
+                    return (
+                      <div
+                        key={incident.id}
+                        role="button"
+                        tabIndex={0}
+                        onClick={selectIncident}
+                        onKeyDown={(event) => activateOnEnterOrSpace(event, selectIncident)}
+                        className={`w-full cursor-pointer rounded-[24px] border bg-white p-4 text-left transition hover:-translate-y-px hover:border-slate-300 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-cyan-900/20 ${
+                          selectedIncident?.id === incident.id ? 'border-cyan-900/20 shadow-md' : 'border-slate-200/80'
+                        }`}
+                      >
+                        <div className="flex items-start gap-3">
+                          <div className="text-2xl">{INCIDENT_TYPE_ICONS[incident.type] ?? '⚡'}</div>
+                          <div className="min-w-0 flex-1">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-1 text-[10px] font-bold uppercase ${cfg.badge}`}>
+                                <span className={`h-1.5 w-1.5 rounded-full ${cfg.dot}`} />
+                                {cfg.label}
+                              </span>
+                              <span className="text-xs font-bold uppercase tracking-[0.12em] text-slate-500">{incident.type.replaceAll('_', ' ')}</span>
+                            </div>
+                            <p className="mt-2 text-sm font-bold text-slate-950">{incident.location}</p>
+                            <p className="mt-1 text-xs leading-relaxed text-slate-500">{incident.description}</p>
+                            <p className="mt-2 text-[11px] font-medium text-slate-400">{timeAgo(incident.reported_at)}</p>
+                          </div>
+                        </div>
+
+                        <div className="mt-3 grid grid-cols-4 gap-1">
+                          {STATUS_FLOW.map((status) => (
                             <button
-                                key={t.key}
-                                onClick={() => setActiveTab(t.key)}
-                                className={`flex-1 flex flex-col items-center gap-0.5 py-3 text-xs font-semibold transition-all border-b-2 ${activeTab === t.key ? 'border-indigo-500 text-indigo-600' : 'border-transparent text-slate-400 hover:text-slate-600'
-                                    }`}
+                              key={status.value}
+                              type="button"
+                              disabled={updatingId === incident.id}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                void handleStatusUpdate(incident.id, status.value);
+                              }}
+                              className={`rounded-xl py-2 text-[10px] font-bold transition ${
+                                incident.status === status.value
+                                  ? `${status.color} ring-1 ring-inset ring-current`
+                                  : 'bg-slate-50 text-slate-400 hover:bg-slate-100'
+                              }`}
                             >
-                                <Icon className="w-3.5 h-3.5" />
-                                {t.label}
-                                {t.count > 0 && <span className={`text-[9px] font-bold px-1 rounded-full ${activeTab === t.key ? 'bg-indigo-100 text-indigo-600' : 'bg-slate-100 text-slate-500'}`}>{t.count}</span>}
+                              {updatingId === incident.id ? '…' : status.label}
                             </button>
-                        );
-                    })}
-                </div>
-
-                {/* Tab content now scrolls with the full left panel instead of pinning the weather card */}
-                <div className="pb-5">
-
-                    {/* ── Tab: Incidents ─────────────────────────── */}
-                    {activeTab === 'incidents' && (
-                        <div className="p-4 space-y-3">
-                            {loading ? (
-                                [...Array(3)].map((_, i) => <div key={i} className="h-28 bg-slate-100 rounded-2xl animate-pulse" />)
-                            ) : activeIncidents.length === 0 ? (
-                                <div className="py-16 flex flex-col items-center gap-2 text-slate-400">
-                                    <CheckCircle2 className="w-10 h-10" />
-                                    <p className="text-sm font-semibold">No active incidents</p>
-                                    <p className="text-xs">All clear in the area</p>
-                                </div>
-                            ) : activeIncidents.map(inc => {
-                                const cfg = SEVERITY_CFG[inc.severity as keyof typeof SEVERITY_CFG] ?? SEVERITY_CFG.low;
-                                return (
-                                    <div key={inc.id} className={`bg-white border rounded-2xl p-4 shadow-sm ${cfg.ring}`}>
-                                        <div className="flex items-start gap-3 mb-3">
-                                            <span className="text-2xl flex-shrink-0">{INCIDENT_TYPE_ICONS[inc.type] ?? '⚡'}</span>
-                                            <div className="flex-1 min-w-0">
-                                                <div className="flex items-center gap-2 flex-wrap">
-                                                    <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full ${cfg.badge} flex items-center gap-1`}>
-                                                        <span className={`w-1.5 h-1.5 rounded-full ${cfg.dot} ${cfg.pulse ? 'animate-pulse' : ''}`} />
-                                                        {cfg.label}
-                                                    </span>
-                                                    <span className="text-xs font-bold text-slate-800 capitalize">{inc.type.replace('_', ' ')}</span>
-                                                </div>
-                                                <p className="text-xs text-slate-500 flex items-center gap-1 mt-1 truncate">
-                                                    <MapPin className="w-3 h-3 flex-shrink-0" />{inc.location}
-                                                </p>
-                                                <p className="text-[10px] text-slate-400 mt-0.5">{timeAgo(inc.reported_at)}</p>
-                                            </div>
-                                        </div>
-                                        <p className="text-xs text-slate-600 leading-relaxed mb-3 line-clamp-2">{inc.description}</p>
-
-                                        {/* Status pipeline */}
-                                        <div className="grid grid-cols-4 gap-1 mb-3">
-                                            {STATUS_FLOW.map(s => (
-                                                <button
-                                                    key={s.value}
-                                                    disabled={updatingId === inc.id}
-                                                    onClick={() => handleStatusUpdate(inc.id, s.value)}
-                                                    className={`py-1.5 rounded-lg text-[10px] font-bold transition-all ${inc.status === s.value
-                                                        ? s.color.split(' ').slice(0, 2).join(' ') + ' ring-1 ring-inset ring-current scale-[1.04]'
-                                                        : 'bg-slate-50 text-slate-400 hover:bg-slate-100'
-                                                        }`}
-                                                >
-                                                    {updatingId === inc.id ? '…' : s.label}
-                                                </button>
-                                            ))}
-                                        </div>
-
-                                        <button
-                                            onClick={() => openMaps(inc.gps_lat, inc.gps_lng, inc.location)}
-                                            className="w-full py-2 rounded-xl text-xs font-semibold bg-indigo-50 text-indigo-600 hover:bg-indigo-100 flex items-center justify-center gap-1.5 transition-all"
-                                        >
-                                            <Navigation className="w-3.5 h-3.5" />Navigate to Location
-                                        </button>
-                                    </div>
-                                );
-                            })}
-
-                            {resolvedCount > 0 && (
-                                <div className="flex items-center gap-2 px-4 py-3 bg-emerald-50 rounded-2xl border border-emerald-100">
-                                    <CheckCircle2 className="w-4 h-4 text-emerald-500 flex-shrink-0" />
-                                    <p className="text-xs font-semibold text-emerald-700">{resolvedCount} incident{resolvedCount !== 1 ? 's' : ''} resolved today</p>
-                                </div>
-                            )}
+                          ))}
                         </div>
-                    )}
-
-                    {/* ── Tab: Priority Check-ins ────────────────── */}
-                    {activeTab === 'priorities' && (
-                        <div className="p-4 space-y-2">
-                            {loading ? (
-                                [...Array(4)].map((_, i) => <div key={i} className="h-20 bg-slate-100 rounded-2xl animate-pulse" />)
-                            ) : priorities.length === 0 ? (
-                                <div className="py-16 flex flex-col items-center gap-2 text-slate-400">
-                                    <Users className="w-10 h-10" />
-                                    <p className="text-sm font-semibold">No priority households</p>
-                                </div>
-                            ) : priorities.map((p, idx) => {
-                                const tags = vulnTags(p.flags);
-                                const isVisited = visitedIds.has(p.household.id);
-                                return (
-                                    <div
-                                        key={p.household.id}
-                                        onClick={() => setSelectedHousehold(p.household)}
-                                        className={`bg-white border rounded-2xl p-3.5 cursor-pointer transition-all hover:shadow-md ${isVisited ? 'border-emerald-200 bg-emerald-50/40' : 'border-slate-200/60 hover:border-slate-300'
-                                            }`}
-                                    >
-                                        <div className="flex items-start gap-3">
-                                            <div className={`w-6 h-6 rounded-lg flex items-center justify-center text-[10px] font-black flex-shrink-0 ${idx === 0 ? 'bg-red-100 text-red-600' : idx === 1 ? 'bg-orange-100 text-orange-600' : 'bg-slate-100 text-slate-500'
-                                                }`}>
-                                                {idx + 1}
-                                            </div>
-                                            <div className="flex-1 min-w-0">
-                                                <p className="text-sm font-bold text-slate-900 truncate">{p.household.head_name}</p>
-                                                <div className="flex items-center gap-2 min-w-0 mt-0.5">
-                                                    <p className="text-xs text-slate-400 truncate">{p.household.purok_sitio} · {p.household.street_address}</p>
-                                                    {p.household.gps_lat !== undefined && p.household.gps_long !== undefined && (
-                                                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[9px] font-bold bg-indigo-50 text-indigo-600 border border-indigo-300 flex-shrink-0">
-                                                            📍 Pinned
-                                                        </span>
-                                                    )}
-                                                </div>
-                                                <div className="flex flex-wrap gap-1 mt-1.5">
-                                                    {tags.map(t => <span key={t} className="text-[9px] font-bold px-1.5 py-0.5 bg-rose-50 text-rose-600 rounded-full border border-rose-100">{t}</span>)}
-                                                    <span className="text-[9px] text-slate-400">{p.residents.length} resident{p.residents.length !== 1 ? 's' : ''}</span>
-                                                </div>
-                                            </div>
-                                            <div className="flex flex-col items-end gap-1.5">
-                                                <button
-                                                    onClick={e => { e.stopPropagation(); openMaps(p.household.gps_lat, p.household.gps_long, p.household.street_address); }}
-                                                    className="p-1.5 rounded-lg bg-indigo-50 text-indigo-600 hover:bg-indigo-100 transition-all"
-                                                >
-                                                    <Navigation className="w-3 h-3" />
-                                                </button>
-                                                <button
-                                                    onClick={e => {
-                                                        e.stopPropagation();
-                                                        setVisitedIds(prev => {
-                                                            const next = new Set(prev);
-                                                            isVisited ? next.delete(p.household.id) : next.add(p.household.id);
-                                                            return next;
-                                                        });
-                                                    }}
-                                                    className={`text-[9px] font-bold px-2 py-0.5 rounded-lg transition-all ${isVisited ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
-                                                >
-                                                    {isVisited ? '✓ Done' : 'Check-in'}
-                                                </button>
-                                            </div>
-                                        </div>
-                                    </div>
-                                );
-                            })}
-                        </div>
-                    )}
-
-                    {/* ── Tab: Events ────────────────────────────── */}
-                    {activeTab === 'events' && (
-                        <div className="p-4 space-y-3">
-                            {loading ? (
-                                [...Array(2)].map((_, i) => <div key={i} className="h-20 bg-slate-100 rounded-2xl animate-pulse" />)
-                            ) : events.length === 0 ? (
-                                <div className="py-16 flex flex-col items-center gap-2 text-slate-400">
-                                    <Package className="w-10 h-10" />
-                                    <p className="text-sm font-semibold">No active distribution events</p>
-                                </div>
-                            ) : events.map(ev => (
-                                <div key={ev.id} className="bg-white border border-emerald-100 rounded-2xl p-4 shadow-sm">
-                                    <div className="flex items-start gap-3">
-                                        <div className="w-9 h-9 rounded-xl bg-emerald-50 flex items-center justify-center flex-shrink-0">
-                                            <Package className="w-4 h-4 text-emerald-600" />
-                                        </div>
-                                        <div className="flex-1 min-w-0">
-                                            <p className="text-sm font-bold text-slate-900">{ev.event_name}</p>
-                                            <p className="text-xs text-slate-400 flex items-center gap-1 truncate mt-0.5">
-                                                <MapPin className="w-3 h-3 flex-shrink-0" />{ev.location}
-                                            </p>
-                                            <p className="text-[10px] text-slate-400 mt-0.5 flex items-center gap-1">
-                                                <Calendar className="w-2.5 h-2.5" />
-                                                {new Date(ev.scheduled_date).toLocaleDateString('en-PH', { month: 'long', day: 'numeric', year: 'numeric' })}
-                                            </p>
-                                        </div>
-                                    </div>
-                                    <button
-                                        onClick={() => openMaps(ev.gps_lat, ev.gps_lng, ev.location)}
-                                        className="w-full mt-3 py-2 rounded-xl text-xs font-semibold bg-emerald-50 text-emerald-700 hover:bg-emerald-100 flex items-center justify-center gap-1.5 transition-all"
-                                    >
-                                        <Navigation className="w-3.5 h-3.5" />Navigate to Event
-                                    </button>
-                                </div>
-                            ))}
-                        </div>
-                    )}
-                </div>
-            </div>
-
-            {/* ── RIGHT PANEL — Map (60%) ────────────────────────────── */}
-            <div className="flex-1 relative overflow-hidden">
-                <DesktopMap
-                    households={mapHouseholds}
-                    incidents={incidents}
-                    selectedHousehold={selectedHousehold}
-                    onSelectHousehold={setSelectedHousehold}
-                />
-
-                {/* Map legend overlay */}
-                <div className="absolute bottom-4 right-4 bg-white/90 backdrop-blur-sm rounded-2xl px-4 py-3 shadow-lg border border-slate-200/60 text-xs space-y-1.5">
-                    <p className="font-bold text-slate-600 text-[10px] uppercase tracking-wider mb-1">Legend</p>
-                    {[
-                        { color: 'bg-indigo-500', label: 'Household' },
-                        { color: 'bg-red-500', label: 'Critical' },
-                        { color: 'bg-orange-500', label: 'High' },
-                        { color: 'bg-amber-400', label: 'Medium' },
-                    ].map(l => (
-                        <div key={l.label} className="flex items-center gap-2">
-                            <span className={`w-3 h-3 rounded-full ${l.color} flex-shrink-0`} />
-                            <span className="text-slate-600">{l.label}</span>
-                        </div>
-                    ))}
-                </div>
-
-                {/* Selected household panel */}
-                {selectedHousehold && (
-                    <div className="absolute top-4 right-4 bg-white rounded-2xl shadow-xl border border-slate-200/60 p-4 w-64">
-                        <div className="flex items-start justify-between mb-2">
-                            <p className="font-bold text-slate-900 text-sm">{selectedHousehold.head_name}</p>
-                            <button onClick={() => setSelectedHousehold(null)} className="text-slate-400 hover:text-slate-700">
-                                <X className="w-4 h-4" />
-                            </button>
-                        </div>
-                        <p className="text-xs text-slate-500 flex items-center gap-1">
-                            <MapPin className="w-3 h-3" />{selectedHousehold.purok_sitio} · {selectedHousehold.street_address}
-                        </p>
-                        {selectedHousehold.contact_number && (
-                            <p className="text-xs text-indigo-600 mt-1">📞 {selectedHousehold.contact_number}</p>
-                        )}
-                        <button
-                            onClick={() => openMaps(selectedHousehold.gps_lat, selectedHousehold.gps_long, selectedHousehold.street_address)}
-                            className="mt-3 w-full py-2 rounded-xl text-xs font-semibold bg-indigo-600 text-white hover:bg-indigo-700 flex items-center justify-center gap-1.5 transition-all"
-                        >
-                            <Navigation className="w-3.5 h-3.5" />Navigate Here
-                        </button>
-                    </div>
+                      </div>
+                    );
+                  })
                 )}
-            </div>
+              </div>
+            ) : null}
+
+            {activeTab === 'priorities' ? (
+              <div className="space-y-3">
+                {loading ? (
+                  [...Array(4)].map((_, index) => (
+                    <div key={index} className="h-24 animate-pulse rounded-[24px] bg-slate-100" />
+                  ))
+                ) : priorities.length === 0 ? (
+                  <div className="rounded-[24px] border border-dashed border-slate-300 bg-slate-50 px-5 py-10 text-center">
+                    <Users className="mx-auto h-8 w-8 text-slate-400" />
+                    <p className="mt-3 text-sm font-semibold text-slate-900">No priority households</p>
+                  </div>
+                ) : (
+                  priorities.map((priority, index) => {
+                    const tags = vulnTags(priority.flags);
+                    const isVisited = visitedIds.has(priority.household.id);
+                    const selectHousehold = () => {
+                      setSelectedHousehold(priority.household);
+                      setSelectedIncident(null);
+                    };
+                    return (
+                      <div
+                        key={priority.household.id}
+                        role="button"
+                        tabIndex={0}
+                        onClick={selectHousehold}
+                        onKeyDown={(event) => activateOnEnterOrSpace(event, selectHousehold)}
+                        className={`w-full cursor-pointer rounded-[24px] border px-4 py-4 text-left transition hover:-translate-y-px hover:border-slate-300 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-cyan-900/20 ${
+                          isVisited ? 'border-emerald-200 bg-emerald-50/60' : 'border-slate-200/80 bg-white'
+                        }`}
+                      >
+                        <div className="flex items-start gap-3">
+                          <div className="flex h-8 w-8 items-center justify-center rounded-2xl bg-slate-100 text-xs font-black text-slate-600">
+                            {index + 1}
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <p className="truncate text-sm font-bold text-slate-950">{priority.household.head_name}</p>
+                            <p className="mt-1 truncate text-xs text-slate-500">{priority.household.purok_sitio} · {priority.household.street_address}</p>
+                            <div className="mt-2 flex flex-wrap gap-1">
+                              {tags.map((tag) => (
+                                <CivicBadge key={tag} label={tag} tone="rose" className="text-[10px]" />
+                              ))}
+                              <CivicBadge label={`${priority.residents.length} residents`} tone="slate" className="text-[10px]" />
+                            </div>
+                          </div>
+                        </div>
+                        <div className="mt-3 flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              navigateToHousehold(priority.household);
+                            }}
+                            className="rounded-full border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50"
+                          >
+                            Navigate
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              setVisitedIds((current) => {
+                                const next = new Set(current);
+                                if (next.has(priority.household.id)) {
+                                  next.delete(priority.household.id);
+                                } else {
+                                  next.add(priority.household.id);
+                                }
+                                return next;
+                              });
+                            }}
+                            className={`rounded-full px-3 py-2 text-xs font-semibold transition ${
+                              isVisited ? 'bg-emerald-600 text-white' : 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                            }`}
+                          >
+                            {isVisited ? 'Checked in' : 'Mark check-in'}
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            ) : null}
+
+            {activeTab === 'events' ? (
+              <div className="space-y-3">
+                {loading ? (
+                  [...Array(2)].map((_, index) => (
+                    <div key={index} className="h-24 animate-pulse rounded-[24px] bg-slate-100" />
+                  ))
+                ) : events.length === 0 ? (
+                  <div className="rounded-[24px] border border-dashed border-slate-300 bg-slate-50 px-5 py-10 text-center">
+                    <Package className="mx-auto h-8 w-8 text-slate-400" />
+                    <p className="mt-3 text-sm font-semibold text-slate-900">No active distribution events</p>
+                  </div>
+                ) : (
+                  events.map((event) => (
+                    <div key={event.id} className="rounded-[24px] border border-slate-200/80 bg-white px-4 py-4">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className="text-sm font-bold text-slate-950">{event.event_name}</p>
+                          <p className="mt-1 text-xs text-slate-500">{event.location}</p>
+                          <p className="mt-2 text-[11px] font-medium text-slate-400">
+                            {new Date(event.scheduled_date).toLocaleDateString('en-PH', { month: 'long', day: 'numeric', year: 'numeric' })}
+                          </p>
+                        </div>
+                        <CivicBadge label="Active" tone="emerald" />
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => navigateToEvent(event)}
+                        className="mt-3 rounded-full border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50"
+                      >
+                        Navigate
+                      </button>
+                    </div>
+                  ))
+                )}
+              </div>
+            ) : null}
+          </CivicPanel>
         </div>
-    );
+      </aside>
+
+      <section className="min-w-0 flex-1">
+        <div className="flex h-full min-h-[720px] flex-col gap-4">
+          <CivicPanel className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Map workspace</p>
+              <h2 className="mt-1 text-xl font-black tracking-tight text-slate-950">Clean field map canvas</h2>
+              <p className="mt-1 text-sm text-slate-500">Weather, basemap, and selected-item detail now stay in the operations rail.</p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <CivicBadge label={`${mapControls.activeBaseLayer.label} base`} tone="navy" />
+              <CivicBadge
+                label={mapControls.weatherOverlayVisible ? mapControls.activeLayerSummary : 'Weather hidden'}
+                tone={mapControls.weatherOverlayVisible ? 'teal' : 'slate'}
+              />
+            </div>
+          </CivicPanel>
+
+          <div className="min-h-0 flex-1">
+            <ResponderLeafletMap
+              households={mapHouseholds}
+              incidents={incidents}
+              selectedHousehold={selectedHousehold}
+              onSelectHousehold={(household) => {
+                setSelectedHousehold(household);
+                if (household) setSelectedIncident(null);
+              }}
+              selectedIncident={selectedIncident}
+              onSelectIncident={(incident) => {
+                setSelectedIncident(incident);
+                if (incident) setSelectedHousehold(null);
+              }}
+              activeBaseLayerId={mapControls.activeBaseLayerId}
+              activeLayerIds={mapControls.activeLayerIds}
+              showWeather={mapControls.showWeather}
+              overlayOpacity={mapControls.overlayOpacity}
+              refreshVersion={mapControls.mapRefreshVersion}
+              containerClassName="h-full"
+            />
+          </div>
+        </div>
+      </section>
+    </div>
+  );
 }

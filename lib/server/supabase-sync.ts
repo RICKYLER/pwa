@@ -75,6 +75,25 @@ const UPSERT_ORDER: SupportedEntityType[] = [
 
 let syncActorIdPromise: Promise<string> | null = null;
 
+function isMissingUserStatusColumnError(error: unknown) {
+  const message = typeof error === 'object'
+    && error !== null
+    && 'message' in error
+    && typeof error.message === 'string'
+    ? error.message.toLowerCase()
+    : '';
+  return message.includes('users.status')
+    || (
+      message.includes('status')
+      && message.includes('users')
+      && (
+        message.includes('does not exist')
+        || message.includes('schema cache')
+        || message.includes('could not find the')
+      )
+    );
+}
+
 function isSupportedEntityType(value: string): value is SupportedEntityType {
   return (SUPPORTED_ENTITY_TYPES as readonly string[]).includes(value);
 }
@@ -459,23 +478,40 @@ async function ensureSyncActorId() {
         syncActorId = createdUser.user.id;
       }
 
+      const baseProfile = {
+        id: syncActorId,
+        email: SYNC_AGENT_EMAIL,
+        name: SYNC_AGENT_NAME,
+        role: 'admin' as const,
+        barangay_id: DEFAULT_BARANGAY_ID,
+        must_change_password: false,
+        email_verification_required: false,
+        email_verified_at: new Date().toISOString(),
+      };
+
       const { error: upsertProfileError } = await supabase
         .from('users')
         .upsert({
-          id: syncActorId,
-          email: SYNC_AGENT_EMAIL,
-          name: SYNC_AGENT_NAME,
-          role: 'admin',
-          barangay_id: DEFAULT_BARANGAY_ID,
-          must_change_password: false,
-          email_verification_required: false,
-          email_verified_at: new Date().toISOString(),
+          ...baseProfile,
+          status: 'active',
         }, {
           onConflict: 'id',
         });
 
       if (upsertProfileError) {
-        throw new Error(`Failed to upsert sync actor profile: ${upsertProfileError.message}`);
+        if (!isMissingUserStatusColumnError(upsertProfileError)) {
+          throw new Error(`Failed to upsert sync actor profile: ${upsertProfileError.message}`);
+        }
+
+        const { error: legacyUpsertProfileError } = await supabase
+          .from('users')
+          .upsert(baseProfile, {
+            onConflict: 'id',
+          });
+
+        if (legacyUpsertProfileError) {
+          throw new Error(`Failed to upsert sync actor profile: ${legacyUpsertProfileError.message}`);
+        }
       }
 
       return syncActorId;

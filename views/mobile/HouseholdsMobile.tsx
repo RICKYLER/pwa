@@ -3,181 +3,211 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+import { Activity, Home, Plus, Users, X } from 'lucide-react';
 import { getCurrentUser, hasPermission } from '@/lib/auth';
-import { getHouseholds, getAllPuroks } from '@/lib/db/households';
+import { getAllPuroks, getHouseholds } from '@/lib/db/households';
 import { getResidentsInHousehold } from '@/lib/db/residents';
-import { Household } from '@/lib/db/schema';
-import { Plus, Search, Users, Home, ChevronRight, MapPin, Activity, X } from 'lucide-react';
+import type { Household } from '@/lib/db/schema';
 import { formatRegistrationStatusLabel, getHouseholdRegistrationStatus, isHouseholdApproved } from '@/lib/household-registration';
 import { hasHouseholdPin } from '@/lib/map-pins';
+import {
+  CivicBadge,
+  CivicChipButton,
+  CivicEmptyState,
+  CivicHero,
+  CivicPage,
+  CivicPanel,
+  CivicSearchInput,
+} from '@/components/ui/civic-primitives';
 
 const STATUS_CFG = {
-    active: { label: 'Active', dot: 'bg-emerald-400', badge: 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-500/20' },
-    moved_out: { label: 'Moved Out', dot: 'bg-amber-400', badge: 'bg-amber-50 text-amber-700 ring-1 ring-amber-500/20' },
-    deceased: { label: 'Deceased', dot: 'bg-slate-400', badge: 'bg-slate-100 text-slate-600 ring-1 ring-slate-200' },
+  active: { label: 'Active', tone: 'emerald' as const },
+  moved_out: { label: 'Moved out', tone: 'amber' as const },
+  deceased: { label: 'Deceased', tone: 'slate' as const },
 };
 
 export default function HouseholdsMobile() {
-    const router = useRouter();
-    const user = getCurrentUser();
-    const [households, setHouseholds] = useState<Household[]>([]);
-    const [filtered, setFiltered] = useState<Household[]>([]);
-    const [puroks, setPuroks] = useState<string[]>([]);
-    const [search, setSearch] = useState('');
-    const [filterPurok, setFilterPurok] = useState('all');
-    const [filterStatus, setFilterStatus] = useState<'all' | 'active' | 'moved_out' | 'deceased'>('active');
-    const [isLoading, setIsLoading] = useState(true);
-    const [memberCounts, setMemberCounts] = useState<Record<string, number>>({});
+  const router = useRouter();
+  const user = getCurrentUser();
+  const [households, setHouseholds] = useState<Household[]>([]);
+  const [filtered, setFiltered] = useState<Household[]>([]);
+  const [puroks, setPuroks] = useState<string[]>([]);
+  const [search, setSearch] = useState('');
+  const [filterPurok, setFilterPurok] = useState('all');
+  const [filterStatus, setFilterStatus] = useState<'all' | 'active' | 'moved_out' | 'deceased'>('active');
+  const [isLoading, setIsLoading] = useState(true);
+  const [memberCounts, setMemberCounts] = useState<Record<string, number>>({});
 
-    const loadHouseholdsData = useCallback(async (background = false) => {
-        if (!user || !hasPermission('view_households')) { router.push('/dashboard'); return; }
-        const u = user;
+  const loadHouseholdsData = useCallback(async (background = false) => {
+    if (!user || !hasPermission('view_households')) {
+      router.push('/dashboard');
+      return;
+    }
 
-        if (!background) {
-            setIsLoading(true);
-        }
+    if (!background) {
+      setIsLoading(true);
+    }
 
-        const all = await getHouseholds({ barangay_id: u.barangay_id });
-        setHouseholds(all);
-        const counts: Record<string, number> = {};
-        for (const h of all) counts[h.id] = (await getResidentsInHousehold(h.id)).length;
-        setMemberCounts(counts);
-        setPuroks(await getAllPuroks(u.barangay_id));
+    const allHouseholds = await getHouseholds({ barangay_id: user.barangay_id });
+    setHouseholds(allHouseholds);
+    const counts: Record<string, number> = {};
+    for (const household of allHouseholds) {
+      counts[household.id] = (await getResidentsInHousehold(household.id)).length;
+    }
+    setMemberCounts(counts);
+    setPuroks(await getAllPuroks(user.barangay_id));
 
-        if (!background) {
-            setIsLoading(false);
-        }
-    }, [user, router]);
+    if (!background) {
+      setIsLoading(false);
+    }
+  }, [router, user]);
 
-    useEffect(() => {
-        void loadHouseholdsData();
-    }, [loadHouseholdsData]);
+  useEffect(() => {
+    void loadHouseholdsData();
+  }, [loadHouseholdsData]);
 
-    useEffect(() => {
-        function handleDataChanged(event: WindowEventMap['mswdo-data-changed']) {
-            if (!['households', 'residents'].includes(event.detail.table)) {
-                return;
-            }
+  useEffect(() => {
+    function handleDataChanged(event: WindowEventMap['mswdo-data-changed']) {
+      if (!['households', 'residents'].includes(event.detail.table)) {
+        return;
+      }
 
-            void loadHouseholdsData(true);
-        }
+      void loadHouseholdsData(true);
+    }
 
-        window.addEventListener('mswdo-data-changed', handleDataChanged);
+    window.addEventListener('mswdo-data-changed', handleDataChanged);
+    return () => window.removeEventListener('mswdo-data-changed', handleDataChanged);
+  }, [loadHouseholdsData]);
 
-        return () => {
-            window.removeEventListener('mswdo-data-changed', handleDataChanged);
-        };
-    }, [loadHouseholdsData]);
+  useEffect(() => {
+    let result = households;
+    if (filterStatus !== 'all') result = result.filter((household) => household.status === filterStatus);
+    if (filterPurok !== 'all') result = result.filter((household) => household.purok_sitio === filterPurok);
+    if (search) {
+      const query = search.toLowerCase();
+      result = result.filter((household) =>
+        household.head_name.toLowerCase().includes(query)
+        || household.street_address.toLowerCase().includes(query),
+      );
+    }
+    setFiltered(result);
+  }, [households, search, filterPurok, filterStatus]);
 
-    useEffect(() => {
-        let r = households;
-        if (filterStatus !== 'all') r = r.filter(h => h.status === filterStatus);
-        if (filterPurok !== 'all') r = r.filter(h => h.purok_sitio === filterPurok);
-        if (search) { const q = search.toLowerCase(); r = r.filter(h => h.head_name.toLowerCase().includes(q) || h.street_address.toLowerCase().includes(q)); }
-        setFiltered(r);
-    }, [households, search, filterPurok, filterStatus]);
+  if (!user) return null;
 
-    if (!user) return null;
+  const pendingCount = households.filter((household) => getHouseholdRegistrationStatus(household) === 'pending').length;
+  const hasFilters = search || filterPurok !== 'all' || filterStatus !== 'all';
 
-    const tabs = [
-        { key: 'all' as const, label: 'All', count: households.length },
-        { key: 'active' as const, label: 'Active', count: households.filter(h => h.status === 'active').length },
-        { key: 'moved_out' as const, label: 'Moved', count: households.filter(h => h.status === 'moved_out').length },
-    ];
-    const pendingCount = households.filter(h => getHouseholdRegistrationStatus(h) === 'pending').length;
+  return (
+    <CivicPage className="space-y-4 px-4 py-4">
+      <CivicHero
+        eyebrow="Census Records"
+        title="Households"
+        description={isLoading ? 'Loading household records...' : `${households.length} records currently tracked.`}
+        aside={hasPermission('create_household') ? (
+          <Link href="/households/register" className="inline-flex items-center gap-2 rounded-full bg-cyan-950 px-4 py-2 text-sm font-semibold text-white">
+            <Plus className="h-4 w-4" />
+            Add
+          </Link>
+        ) : null}
+      >
+        {pendingCount > 0 ? <CivicBadge label={`${pendingCount} pending review`} tone="amber" /> : null}
+      </CivicHero>
 
-    return (
-        <div className="p-4 space-y-4">
-            {/* Header */}
-            <div className="flex items-center justify-between">
-                <div>
-                    <h1 className="text-lg font-bold text-slate-900">Households</h1>
-                    <p className="text-xs text-slate-400">{isLoading ? 'Loading…' : `${households.length} total · ${pendingCount} pending`}</p>
-                </div>
-                {hasPermission('create_household') && (
-                    <Link href="/households/register" className="w-9 h-9 bg-gradient-to-r from-blue-600 to-indigo-600 rounded-xl flex items-center justify-center shadow-md shadow-blue-500/25">
-                        <Plus className="w-4 h-4 text-white" />
-                    </Link>
-                )}
-            </div>
-
-            {/* Search */}
-            <div className="relative">
-                <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-                <input type="text" placeholder="Search households…" value={search} onChange={e => setSearch(e.target.value)}
-                    className="w-full pl-10 pr-9 py-2.5 text-sm border border-slate-200 rounded-xl bg-white text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/30 shadow-sm" />
-                {search && <button onClick={() => setSearch('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400"><X className="w-4 h-4" /></button>}
-            </div>
-
-            {/* Status Tabs */}
-            <div className="flex gap-1 bg-slate-100 p-1 rounded-xl">
-                {tabs.map(t => (
-                    <button key={t.key} onClick={() => setFilterStatus(t.key)}
-                        className={`flex-1 flex items-center justify-center gap-1 py-2 rounded-lg text-xs font-semibold transition-all ${filterStatus === t.key ? 'bg-white shadow text-slate-800' : 'text-slate-500'}`}>
-                        {t.label}
-                        <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${filterStatus === t.key ? 'bg-slate-100' : 'text-slate-400'}`}>{isLoading ? '–' : t.count}</span>
-                    </button>
-                ))}
-            </div>
-
-            {/* List */}
-            {isLoading ? (
-                <div className="space-y-2">
-                    {[...Array(5)].map((_, i) => (
-                        <div key={i} className="bg-white rounded-2xl border border-slate-200/60 p-4 animate-pulse flex items-center gap-3">
-                            <div className="w-10 h-10 rounded-xl bg-slate-100 flex-shrink-0" />
-                            <div className="flex-1 space-y-2"><div className="h-4 bg-slate-100 rounded w-1/3" /><div className="h-3 bg-slate-100 rounded w-1/2" /></div>
-                        </div>
-                    ))}
-                </div>
-            ) : filtered.length > 0 ? (
-                <div className="space-y-2">
-                    {filtered.map(h => {
-                        const cfg = STATUS_CFG[h.status as keyof typeof STATUS_CFG] || STATUS_CFG.active;
-                        const registrationStatus = getHouseholdRegistrationStatus(h);
-                        return (
-                            <Link key={h.id} href={`/households/${h.id}`}
-                                className="group flex items-center justify-between bg-white border border-slate-200/60 rounded-2xl p-4 hover:border-blue-200 hover:shadow-md transition-all">
-                                <div className="flex items-center gap-3 min-w-0">
-                                    <div className="w-10 h-10 flex-shrink-0 rounded-xl bg-blue-50 flex items-center justify-center text-blue-700 font-bold text-sm">
-                                        {h.head_name.charAt(0).toUpperCase()}
-                                    </div>
-                                    <div className="min-w-0">
-                                        <p className="font-semibold text-slate-900 text-sm truncate">{h.head_name}</p>
-                                        <div className="flex items-center gap-2 min-w-0 mt-0.5">
-                                            <p className="text-xs text-slate-400 flex items-center gap-1 truncate">
-                                                <MapPin className="w-2.5 h-2.5 flex-shrink-0" />{h.purok_sitio}
-                                            </p>
-                                            {!isHouseholdApproved(h) && (
-                                                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[9px] font-bold bg-violet-50 text-violet-700 border border-violet-200 flex-shrink-0">
-                                                    {formatRegistrationStatusLabel(registrationStatus)}
-                                                </span>
-                                            )}
-                                            {hasHouseholdPin(h) && (
-                                                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[9px] font-bold bg-indigo-50 text-indigo-600 border border-indigo-200 flex-shrink-0">
-                                                    Pinned
-                                                </span>
-                                            )}
-                                        </div>
-                                    </div>
-                                </div>
-                                <div className="flex items-center gap-2 flex-shrink-0 ml-2">
-                                    <span className="flex items-center gap-1 text-xs text-slate-400 bg-slate-50 px-2 py-1 rounded-lg">
-                                        <Users className="w-3 h-3" />{memberCounts[h.id] || 0}
-                                    </span>
-                                    <ChevronRight className="w-4 h-4 text-slate-300 group-hover:text-blue-400 transition-colors" />
-                                </div>
-                            </Link>
-                        );
-                    })}
-                </div>
-            ) : (
-                <div className="text-center py-16 bg-white rounded-2xl border border-dashed border-slate-300">
-                    <Activity className="w-8 h-8 text-slate-300 mx-auto mb-3" />
-                    <p className="text-slate-600 font-semibold mb-1">No households found</p>
-                    <p className="text-slate-400 text-sm">Try adjusting your filters</p>
-                </div>
-            )}
+      <CivicPanel className="space-y-4">
+        <CivicSearchInput
+          value={search}
+          onChange={(event) => setSearch(event.target.value)}
+          placeholder="Search households..."
+        />
+        <div className="flex gap-2 overflow-x-auto pb-1">
+          {[
+            { key: 'all' as const, label: 'All', count: households.length },
+            { key: 'active' as const, label: 'Active', count: households.filter((household) => household.status === 'active').length },
+            { key: 'moved_out' as const, label: 'Moved', count: households.filter((household) => household.status === 'moved_out').length },
+            { key: 'deceased' as const, label: 'Deceased', count: households.filter((household) => household.status === 'deceased').length },
+          ].map((tab) => (
+            <CivicChipButton key={tab.key} active={filterStatus === tab.key} onClick={() => setFilterStatus(tab.key)}>
+              {tab.label}
+              <span className={`rounded-full px-2 py-0.5 text-[10px] ${filterStatus === tab.key ? 'bg-white/12 text-white' : 'bg-slate-100 text-slate-500'}`}>
+                {isLoading ? '—' : tab.count}
+              </span>
+            </CivicChipButton>
+          ))}
         </div>
-    );
+        {puroks.length > 0 ? (
+          <select
+            value={filterPurok}
+            onChange={(event) => setFilterPurok(event.target.value)}
+            className="h-11 rounded-2xl border border-slate-200 bg-white px-4 text-sm text-slate-700 outline-none focus:border-cyan-900"
+          >
+            <option value="all">All puroks</option>
+            {puroks.map((purok) => (
+              <option key={purok} value={purok}>{purok}</option>
+            ))}
+          </select>
+        ) : null}
+        {hasFilters ? (
+          <button
+            type="button"
+            onClick={() => {
+              setSearch('');
+              setFilterPurok('all');
+              setFilterStatus('all');
+            }}
+            className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-600"
+          >
+            <X className="h-3.5 w-3.5" />
+            Clear filters
+          </button>
+        ) : null}
+      </CivicPanel>
+
+      {isLoading ? (
+        <div className="space-y-2">
+          {[...Array(5)].map((_, index) => (
+            <div key={index} className="h-24 animate-pulse rounded-[24px] bg-slate-100" />
+          ))}
+        </div>
+      ) : filtered.length > 0 ? (
+        <div className="space-y-2">
+          {filtered.map((household) => {
+            const status = STATUS_CFG[household.status as keyof typeof STATUS_CFG] ?? STATUS_CFG.active;
+            const registrationStatus = getHouseholdRegistrationStatus(household);
+            return (
+              <Link
+                key={household.id}
+                href={`/households/${household.id}`}
+                className="rounded-[24px] border border-slate-200/80 bg-white px-4 py-4 shadow-[0_18px_46px_-36px_rgba(15,23,42,0.24)]"
+              >
+                <div className="flex items-start gap-3">
+                  <div className="flex h-11 w-11 items-center justify-center rounded-[18px] bg-slate-100 text-sm font-bold text-slate-800">
+                    {household.head_name.charAt(0).toUpperCase()}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-bold text-slate-950">{household.head_name}</p>
+                    <p className="mt-1 truncate text-xs text-slate-500">{household.purok_sitio} · {household.street_address}</p>
+                    <div className="mt-2 flex flex-wrap gap-1">
+                      <CivicBadge label={status.label} tone={status.tone} className="text-[10px]" />
+                      {!isHouseholdApproved(household) ? (
+                        <CivicBadge label={formatRegistrationStatusLabel(registrationStatus)} tone="amber" className="text-[10px]" />
+                      ) : null}
+                      {hasHouseholdPin(household) ? <CivicBadge label="Pinned" tone="navy" className="text-[10px]" /> : null}
+                    </div>
+                  </div>
+                  <CivicBadge label={`${memberCounts[household.id] || 0}`} tone="slate" className="text-[10px]" />
+                </div>
+              </Link>
+            );
+          })}
+        </div>
+      ) : (
+        <CivicEmptyState
+          icon={Activity}
+          title="No households found"
+          description={hasFilters ? 'No household matches the current filters.' : 'Household records will appear here after registration.'}
+        />
+      )}
+    </CivicPage>
+  );
 }

@@ -9,6 +9,7 @@ function makeUser(overrides: Partial<User>): User {
     email: overrides.email ?? 'user@example.com',
     name: overrides.name ?? 'Default User',
     role: overrides.role ?? 'encoder',
+    status: overrides.status ?? 'active',
     barangay_id: overrides.barangay_id ?? 'barangay-1',
     must_change_password: overrides.must_change_password ?? false,
     createdAt: overrides.createdAt ?? new Date('2025-01-01T00:00:00.000Z'),

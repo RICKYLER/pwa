@@ -51,6 +51,17 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  if (result.status === 'account_inactive') {
+    return NextResponse.json(
+      {
+        error: 'This account has been deactivated. Contact MSWDO if you need access restored.',
+        code: 'ACCOUNT_INACTIVE',
+        email: result.user.email,
+      },
+      { status: 403 },
+    );
+  }
+
   const { user } = result;
 
   const sessionToken = createSessionToken({

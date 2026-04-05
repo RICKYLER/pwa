@@ -2,7 +2,7 @@ import { promises as fs } from 'fs';
 import path from 'path';
 import { createHash, randomBytes, scrypt as scryptCallback, timingSafeEqual } from 'crypto';
 import { promisify } from 'util';
-import type { User, UserRole } from '@/lib/db/schema';
+import type { User, UserAccountStatus, UserRole } from '@/lib/db/schema';
 import { resolveWritableFilePath } from '@/lib/server/runtime-storage';
 
 const scrypt = promisify(scryptCallback);
@@ -18,6 +18,7 @@ export interface StoredUserRecord {
   password_hash?: string;
   name: string;
   role: UserRole;
+  status: UserAccountStatus;
   barangay_id: string;
   must_change_password: boolean;
   email_verification_required: boolean;
@@ -53,6 +54,7 @@ interface AuthStore {
 export type AuthenticationResult =
   | { status: 'success'; user: User }
   | { status: 'invalid_credentials' }
+  | { status: 'account_inactive'; user: User }
   | { status: 'email_not_verified'; user: User };
 
 let writeQueue = Promise.resolve();
@@ -76,6 +78,7 @@ function hashToken(token: string) {
 function normalizeUserRecord(record: StoredUserRecord): StoredUserRecord {
   return {
     ...record,
+    status: record.status === 'inactive' ? 'inactive' : 'active',
     email_verification_required: typeof record.email_verification_required === 'boolean'
       ? record.email_verification_required
       : false,
@@ -119,6 +122,7 @@ function toPublicUser(record: StoredUserRecord): User {
     email: record.email,
     name: record.name,
     role: record.role,
+    status: record.status,
     barangay_id: record.barangay_id,
     must_change_password: record.must_change_password,
     email_verification_required: record.email_verification_required,
@@ -144,6 +148,7 @@ async function createSeedUser(input: {
     password_hash: await hashPassword(input.password),
     name: input.name,
     role: input.role,
+    status: 'active',
     barangay_id: input.barangay_id,
     must_change_password: false,
     email_verification_required: false,
@@ -281,6 +286,7 @@ export async function createUserAccount(input: {
       password_hash: undefined,
       name: input.name.trim(),
       role: input.role,
+      status: 'active',
       barangay_id: input.barangay_id.trim(),
       must_change_password: true,
       email_verification_required: false,
@@ -313,6 +319,7 @@ export async function createResidentSelfServiceAccount(input: {
       password_hash: await hashPassword(input.password),
       name: input.name.trim(),
       role: 'resident',
+      status: 'active',
       barangay_id: input.barangay_id.trim(),
       must_change_password: false,
       email_verification_required: true,
@@ -328,7 +335,7 @@ export async function createResidentSelfServiceAccount(input: {
 
 export async function updateUserAccount(
   userId: string,
-  patch: Partial<Pick<User, 'name' | 'role' | 'barangay_id'>>,
+  patch: Partial<Pick<User, 'name' | 'role' | 'status' | 'barangay_id'>>,
 ): Promise<User> {
   return withStoreWrite(async (store) => {
     const user = store.users.find((entry) => entry.id === userId);
@@ -338,6 +345,7 @@ export async function updateUserAccount(
 
     user.name = patch.name?.trim() || user.name;
     user.role = patch.role || user.role;
+    user.status = patch.status || user.status;
     user.barangay_id = patch.barangay_id?.trim() || user.barangay_id;
     user.updatedAt = nowIso();
 
@@ -549,6 +557,13 @@ export async function authenticateUser(email: string, password: string): Promise
   const valid = await verifyPassword(password, user.password_hash);
   if (!valid) {
     return { status: 'invalid_credentials' };
+  }
+
+  if (user.status === 'inactive') {
+    return {
+      status: 'account_inactive',
+      user: toPublicUser(user),
+    };
   }
 
   if (user.role === 'resident' && user.email_verification_required) {

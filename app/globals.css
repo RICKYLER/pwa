@@ -4,86 +4,83 @@
 @custom-variant dark (&:is(.dark *));
 
 :root {
-  /* Light mode: Professional civic tech palette */
-  --background: oklch(0.98 0.001 0);
-  --foreground: oklch(0.2 0.01 260);
+  /* Light mode: Civic operations palette */
+  --background: oklch(0.985 0.003 225);
+  --foreground: oklch(0.23 0.03 246);
   --card: oklch(1 0 0);
-  --card-foreground: oklch(0.2 0.01 260);
+  --card-foreground: oklch(0.23 0.03 246);
   --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.2 0.01 260);
-  /* Primary: Deep blue (government/trust) */
-  --primary: oklch(0.35 0.12 260);
+  --popover-foreground: oklch(0.23 0.03 246);
+  /* Primary: civic navy */
+  --primary: oklch(0.34 0.07 235);
   --primary-foreground: oklch(0.98 0.001 0);
-  /* Secondary: Teal accent (healthcare) */
-  --secondary: oklch(0.55 0.12 200);
+  /* Secondary: service teal */
+  --secondary: oklch(0.58 0.09 195);
   --secondary-foreground: oklch(1 0 0);
-  --muted: oklch(0.92 0.005 0);
-  --muted-foreground: oklch(0.55 0.01 260);
-  --accent: oklch(0.55 0.12 200);
+  --muted: oklch(0.955 0.01 230);
+  --muted-foreground: oklch(0.5 0.02 240);
+  --accent: oklch(0.71 0.09 83);
   --accent-foreground: oklch(1 0 0);
-  --destructive: oklch(0.63 0.25 27);
+  --destructive: oklch(0.62 0.2 25);
   --destructive-foreground: oklch(1 0 0);
-  --border: oklch(0.92 0.005 0);
-  --input: oklch(0.97 0.005 0);
-  --ring: oklch(0.35 0.12 260);
-  /* Chart colors for data visualization */
-  --chart-1: oklch(0.35 0.12 260);
-  --chart-2: oklch(0.55 0.12 200);
-  --chart-3: oklch(0.62 0.15 46);
-  --chart-4: oklch(0.72 0.12 170);
-  --chart-5: oklch(0.45 0.14 50);
-  --radius: 0.625rem;
-  /* Sidebar: Deeper blue for navigation */
-  --sidebar: oklch(0.25 0.08 260);
+  --border: oklch(0.91 0.01 240);
+  --input: oklch(0.975 0.006 230);
+  --ring: oklch(0.34 0.07 235);
+  /* Chart colors for civic dashboards */
+  --chart-1: oklch(0.34 0.07 235);
+  --chart-2: oklch(0.58 0.09 195);
+  --chart-3: oklch(0.72 0.12 83);
+  --chart-4: oklch(0.63 0.12 160);
+  --chart-5: oklch(0.6 0.16 25);
+  --radius: 0.95rem;
+  /* Sidebar */
+  --sidebar: oklch(0.25 0.04 236);
   --sidebar-foreground: oklch(0.98 0.001 0);
-  --sidebar-primary: oklch(0.55 0.12 200);
+  --sidebar-primary: oklch(0.63 0.07 195);
   --sidebar-primary-foreground: oklch(0.98 0.001 0);
-  --sidebar-accent: oklch(0.6 0.12 46);
+  --sidebar-accent: oklch(0.39 0.04 232);
   --sidebar-accent-foreground: oklch(0.98 0.001 0);
-  --sidebar-border: oklch(0.35 0.08 260);
-  --sidebar-ring: oklch(0.55 0.12 200);
+  --sidebar-border: oklch(0.31 0.02 236);
+  --sidebar-ring: oklch(0.63 0.07 195);
 }
 
 .dark {
-  --background: oklch(0.12 0.01 260);
+  --background: oklch(0.17 0.02 235);
   --foreground: oklch(0.95 0.001 0);
-  --card: oklch(0.18 0.01 260);
+  --card: oklch(0.2 0.02 235);
   --card-foreground: oklch(0.95 0.001 0);
-  --popover: oklch(0.18 0.01 260);
+  --popover: oklch(0.2 0.02 235);
   --popover-foreground: oklch(0.95 0.001 0);
-  /* Primary: Light blue for dark mode */
-  --primary: oklch(0.65 0.12 260);
+  --primary: oklch(0.68 0.09 200);
   --foreground: oklch(0.95 0.001 0);
-  /* Secondary: Bright teal */
-  --secondary: oklch(0.7 0.12 200);
+  --secondary: oklch(0.72 0.08 170);
   --secondary-foreground: oklch(0.12 0.01 260);
-  --muted: oklch(0.35 0.01 0);
-  --muted-foreground: oklch(0.7 0.01 0);
-  --accent: oklch(0.7 0.12 200);
+  --muted: oklch(0.28 0.015 230);
+  --muted-foreground: oklch(0.74 0.02 240);
+  --accent: oklch(0.72 0.12 83);
   --accent-foreground: oklch(0.12 0.01 260);
-  --destructive: oklch(0.7 0.18 27);
+  --destructive: oklch(0.7 0.16 25);
   --destructive-foreground: oklch(0.12 0.01 260);
-  --border: oklch(0.35 0.01 0);
-  --input: oklch(0.25 0.01 0);
-  --ring: oklch(0.65 0.12 260);
-  /* Chart colors for dark mode */
-  --chart-1: oklch(0.65 0.12 260);
-  --chart-2: oklch(0.7 0.12 200);
-  --chart-3: oklch(0.72 0.15 46);
-  --chart-4: oklch(0.68 0.12 170);
-  --chart-5: oklch(0.73 0.14 50);
-  --sidebar: oklch(0.15 0.02 260);
+  --border: oklch(0.32 0.015 240);
+  --input: oklch(0.24 0.015 235);
+  --ring: oklch(0.68 0.09 200);
+  --chart-1: oklch(0.68 0.09 200);
+  --chart-2: oklch(0.72 0.08 170);
+  --chart-3: oklch(0.72 0.12 83);
+  --chart-4: oklch(0.66 0.11 25);
+  --chart-5: oklch(0.76 0.05 240);
+  --sidebar: oklch(0.18 0.02 236);
   --sidebar-foreground: oklch(0.95 0.001 0);
-  --sidebar-primary: oklch(0.7 0.12 200);
+  --sidebar-primary: oklch(0.68 0.09 200);
   --sidebar-primary-foreground: oklch(0.95 0.001 0);
-  --sidebar-accent: oklch(0.75 0.12 46);
+  --sidebar-accent: oklch(0.27 0.02 236);
   --sidebar-accent-foreground: oklch(0.12 0.01 260);
-  --sidebar-border: oklch(0.3 0.02 260);
-  --sidebar-ring: oklch(0.7 0.12 200);
+  --sidebar-border: oklch(0.27 0.015 236);
+  --sidebar-ring: oklch(0.68 0.09 200);
 }
 
 @theme inline {
-  --font-sans: 'Segoe UI', 'Helvetica Neue', 'Arial', sans-serif;
+  --font-sans: 'Aptos', 'Segoe UI Variable', 'Segoe UI', 'Helvetica Neue', 'Arial', sans-serif;
   --font-mono: 'SFMono-Regular', 'Consolas', 'Liberation Mono', monospace;
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -210,12 +207,41 @@
     @apply bg-background text-foreground;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+    background-image:
+      radial-gradient(circle at top right, rgba(14, 116, 144, 0.08), transparent 28%),
+      radial-gradient(circle at bottom left, rgba(13, 148, 136, 0.08), transparent 24%),
+      linear-gradient(180deg, rgba(248, 252, 255, 1), rgba(244, 249, 255, 1));
+    min-height: 100vh;
   }
 
   ::selection {
     background: oklch(0.51 0.22 264 / 0.2);
     color: oklch(0.25 0.12 264);
   }
+}
+
+.civic-shell-noise {
+  background-image:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.92), rgba(244, 249, 255, 0.86)),
+    radial-gradient(circle at top left, rgba(8, 47, 73, 0.08), transparent 28%),
+    radial-gradient(circle at bottom right, rgba(13, 148, 136, 0.08), transparent 24%);
+}
+
+.civic-topbar {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(255, 255, 255, 0.82));
+  backdrop-filter: blur(18px);
+}
+
+.civic-hairline {
+  box-shadow: inset 0 -1px 0 rgba(148, 163, 184, 0.18);
+}
+
+.civic-soft-shadow {
+  box-shadow: 0 22px 54px -34px rgba(15, 23, 42, 0.28);
+}
+
+.civic-card-shadow {
+  box-shadow: 0 20px 52px -36px rgba(15, 23, 42, 0.24);
 }
 
 .pac-container {

@@ -2,140 +2,152 @@
 
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { Home, Users, ShieldAlert, FileText, Package, Truck, LogOut, TrendingUp, UserCog, Radio, Activity, MapPinned } from 'lucide-react';
+import { ArrowUpRight, LogOut, ShieldCheck } from 'lucide-react';
 import { getCurrentUser, hasPermission, logout } from '@/lib/auth';
+import { ADMIN_NAV_ITEMS, isPathActive, STAFF_NAV_ITEMS } from '@/lib/navigation';
+import { cn } from '@/lib/utils';
 
-const NAV_ITEMS = [
-    { href: '/dashboard', icon: Home, label: 'Dashboard', desc: 'Overview & KPIs', perm: null },
-    { href: '/households', icon: Users, label: 'Households', desc: 'Manage households', perm: 'view_households' },
-    { href: '/vulnerability', icon: ShieldAlert, label: 'Vulnerability', desc: 'At-risk residents', perm: 'view_vulnerability' },
-    { href: '/responder', icon: Radio, label: 'Field Response', desc: 'Incidents & check-ins', perm: 'view_incidents' },
-    { href: '/distribution', icon: Truck, label: 'Distribution', desc: 'Relief events', perm: 'view_reports' },
-    { href: '/reports', icon: FileText, label: 'Reports', desc: 'Generate reports', perm: 'view_reports' },
-    { href: '/inventory', icon: Package, label: 'Inventory', desc: 'Track supplies', perm: 'view_reports' },
-] as const;
+function SidebarLink({
+  href,
+  label,
+  description,
+  Icon,
+  active,
+}: {
+  href: string;
+  label: string;
+  description: string;
+  Icon: React.ComponentType<{ className?: string; strokeWidth?: number }>;
+  active: boolean;
+}) {
+  return (
+    <Link
+      href={href}
+      className={cn(
+        'group flex items-center gap-3 rounded-[22px] border px-3 py-3 transition',
+        active
+          ? 'border-cyan-900/15 bg-cyan-950 text-white shadow-[0_18px_42px_-24px_rgba(8,47,73,0.8)]'
+          : 'border-transparent bg-white/65 text-slate-600 hover:border-slate-200 hover:bg-white hover:text-slate-900',
+      )}
+    >
+      <div
+        className={cn(
+          'flex h-10 w-10 items-center justify-center rounded-2xl border transition',
+          active
+            ? 'border-white/15 bg-white/12 text-white'
+            : 'border-slate-200 bg-slate-50 text-slate-500 group-hover:border-cyan-100 group-hover:bg-cyan-50 group-hover:text-cyan-900',
+        )}
+      >
+        <Icon className="h-4 w-4" strokeWidth={active ? 2.3 : 1.9} />
+      </div>
+      <div className="min-w-0 flex-1">
+        <p className={cn('truncate text-sm font-semibold', active && 'text-white')}>{label}</p>
+        <p className={cn('mt-1 truncate text-[11px]', active ? 'text-cyan-100/80' : 'text-slate-400')}>
+          {description}
+        </p>
+      </div>
+      {active ? <ArrowUpRight className="h-4 w-4 flex-shrink-0 text-cyan-100" /> : null}
+    </Link>
+  );
+}
 
 export default function DesktopSidebar() {
-    const pathname = usePathname();
-    const router = useRouter();
-    const user = getCurrentUser();
-    const visible = NAV_ITEMS.filter(n => !n.perm || hasPermission(n.perm as any));
+  const pathname = usePathname();
+  const router = useRouter();
+  const user = getCurrentUser();
 
-    function handleLogout() {
-        logout();
-        router.push('/login');
-    }
+  const visibleItems = STAFF_NAV_ITEMS.filter((item) => !item.perm || hasPermission(item.perm as never));
+  const adminItems = user?.role === 'admin' ? ADMIN_NAV_ITEMS : [];
 
-    return (
-        <aside className="fixed inset-y-0 left-0 z-30 w-64 flex flex-col bg-white border-r border-slate-200/70">
-            {/* Branding */}
-            <div className="flex items-center gap-3 px-5 py-5 border-b border-slate-100">
-                <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-indigo-600 to-violet-700 flex items-center justify-center shadow-md shadow-indigo-500/30 flex-shrink-0">
-                    <TrendingUp className="w-4 h-4 text-white" />
-                </div>
-                <div className="min-w-0">
-                    <p className="text-sm font-bold text-slate-900 leading-tight">MSWDO Census</p>
-                    <p className="text-[11px] text-slate-400 truncate">{user?.barangay_id}</p>
-                </div>
+  function handleLogout() {
+    logout();
+    router.push('/login');
+  }
+
+  return (
+    <aside className="fixed inset-y-0 left-0 z-30 flex w-72 flex-col border-r border-slate-200/70 bg-[linear-gradient(180deg,rgba(248,251,255,0.98),rgba(239,246,255,0.96))] shadow-[22px_0_60px_-42px_rgba(15,23,42,0.35)] backdrop-blur">
+      <div className="border-b border-slate-200/70 px-5 pb-5 pt-6">
+        <div className="flex items-center gap-3">
+          <div className="flex h-12 w-12 items-center justify-center rounded-[20px] bg-cyan-950 text-white shadow-[0_20px_42px_-24px_rgba(8,47,73,0.7)]">
+            <ShieldCheck className="h-5 w-5" />
+          </div>
+          <div className="min-w-0">
+            <p className="text-sm font-bold text-slate-950">MSWDO Civic Console</p>
+            <p className="truncate text-[11px] text-slate-500">{user?.barangay_id || 'Municipal workspace'}</p>
+          </div>
+        </div>
+        <div className="mt-4 rounded-[22px] border border-white/70 bg-white/90 px-4 py-3 shadow-[0_16px_44px_-34px_rgba(15,23,42,0.35)]">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Active Profile</p>
+          <p className="mt-2 truncate text-sm font-bold text-slate-900">{user?.name}</p>
+          <p className="mt-1 text-[11px] capitalize text-slate-500">{user?.role?.replace('_', ' ')}</p>
+        </div>
+      </div>
+
+      <nav className="flex-1 space-y-6 overflow-y-auto px-4 py-5">
+        <div>
+          <p className="px-2 text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-400">Core</p>
+          <div className="mt-3 space-y-2">
+            {visibleItems
+              .filter((item) => item.group === 'Core')
+              .map((item) => (
+                <SidebarLink
+                  key={item.href}
+                  href={item.href}
+                  label={item.label}
+                  description={item.description}
+                  Icon={item.icon}
+                  active={isPathActive(pathname, item.href)}
+                />
+              ))}
+          </div>
+        </div>
+
+        <div>
+          <p className="px-2 text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-400">Operations</p>
+          <div className="mt-3 space-y-2">
+            {visibleItems
+              .filter((item) => item.group === 'Operations')
+              .map((item) => (
+                <SidebarLink
+                  key={item.href}
+                  href={item.href}
+                  label={item.label}
+                  description={item.description}
+                  Icon={item.icon}
+                  active={isPathActive(pathname, item.href)}
+                />
+              ))}
+          </div>
+        </div>
+
+        {adminItems.length > 0 ? (
+          <div>
+            <p className="px-2 text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-400">Administration</p>
+            <div className="mt-3 space-y-2">
+              {adminItems.map((item) => (
+                <SidebarLink
+                  key={item.href}
+                  href={item.href}
+                  label={item.label}
+                  description={item.description}
+                  Icon={item.icon}
+                  active={isPathActive(pathname, item.href)}
+                />
+              ))}
             </div>
+          </div>
+        ) : null}
+      </nav>
 
-            {/* Navigation */}
-            <nav className="flex-1 px-3 py-4 space-y-0.5 overflow-y-auto">
-                {visible.map(item => {
-                    const Icon = item.icon;
-                    const active = pathname === item.href || (item.href !== '/dashboard' && pathname.startsWith(item.href));
-                    return (
-                        <Link
-                            key={item.href}
-                            href={item.href}
-                            className={`group flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all ${active
-                                ? 'bg-indigo-50 text-indigo-700'
-                                : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
-                                }`}
-                        >
-                            <Icon
-                                className={`w-4 h-4 flex-shrink-0 ${active ? 'text-indigo-600' : 'text-slate-400 group-hover:text-slate-600'}`}
-                                strokeWidth={active ? 2.5 : 1.8}
-                            />
-                            <div className="flex-1 min-w-0">
-                                <p className={`text-sm font-semibold leading-none ${active ? 'text-indigo-700' : ''}`}>{item.label}</p>
-                                <p className="text-[10px] text-slate-400 mt-0.5 leading-none">{item.desc}</p>
-                            </div>
-                            {active && <div className="w-1.5 h-1.5 rounded-full bg-indigo-500 flex-shrink-0" />}
-                        </Link>
-                    );
-                })}
-                {/* Admin section */}
-                {user?.role === 'admin' && (
-                    <>
-                        <div className="px-3 pt-4 pb-1">
-                            <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Administration</p>
-                        </div>
-                        <Link
-                            href="/admin/users"
-                            className={`group flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all ${pathname.startsWith('/admin/users')
-                                ? 'bg-violet-50 text-violet-700'
-                                : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
-                                }`}
-                        >
-                            <UserCog className={`w-4 h-4 flex-shrink-0 ${pathname.startsWith('/admin/users') ? 'text-violet-600' : 'text-slate-400 group-hover:text-slate-600'}`} strokeWidth={pathname.startsWith('/admin/users') ? 2.5 : 1.8} />
-                            <div className="flex-1 min-w-0">
-                                <p className={`text-sm font-semibold leading-none ${pathname.startsWith('/admin/users') ? 'text-violet-700' : ''}`}>User Accounts</p>
-                                <p className="text-[10px] text-slate-400 mt-0.5 leading-none">Create & manage users</p>
-                            </div>
-                            {pathname.startsWith('/admin/users') && <div className="w-1.5 h-1.5 rounded-full bg-violet-500 flex-shrink-0" />}
-                        </Link>
-                        <Link
-                            href="/admin/location-review"
-                            className={`group flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all ${pathname.startsWith('/admin/location-review')
-                                ? 'bg-violet-50 text-violet-700'
-                                : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
-                                }`}
-                        >
-                            <MapPinned className={`w-4 h-4 flex-shrink-0 ${pathname.startsWith('/admin/location-review') ? 'text-violet-600' : 'text-slate-400 group-hover:text-slate-600'}`} strokeWidth={pathname.startsWith('/admin/location-review') ? 2.5 : 1.8} />
-                            <div className="flex-1 min-w-0">
-                                <p className={`text-sm font-semibold leading-none ${pathname.startsWith('/admin/location-review') ? 'text-violet-700' : ''}`}>Location Review</p>
-                                <p className="text-[10px] text-slate-400 mt-0.5 leading-none">Master list & pin QA</p>
-                            </div>
-                            {pathname.startsWith('/admin/location-review') && <div className="w-1.5 h-1.5 rounded-full bg-violet-500 flex-shrink-0" />}
-                        </Link>
-                        <Link
-                            href="/admin/api-health"
-                            className={`group flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all ${pathname.startsWith('/admin/api-health')
-                                ? 'bg-violet-50 text-violet-700'
-                                : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
-                                }`}
-                        >
-                            <Activity className={`w-4 h-4 flex-shrink-0 ${pathname.startsWith('/admin/api-health') ? 'text-violet-600' : 'text-slate-400 group-hover:text-slate-600'}`} strokeWidth={pathname.startsWith('/admin/api-health') ? 2.5 : 1.8} />
-                            <div className="flex-1 min-w-0">
-                                <p className={`text-sm font-semibold leading-none ${pathname.startsWith('/admin/api-health') ? 'text-violet-700' : ''}`}>API Health</p>
-                                <p className="text-[10px] text-slate-400 mt-0.5 leading-none">Check service status</p>
-                            </div>
-                            {pathname.startsWith('/admin/api-health') && <div className="w-1.5 h-1.5 rounded-full bg-violet-500 flex-shrink-0" />}
-                        </Link>
-                    </>
-                )}
-            </nav>
-
-            {/* User + Logout */}
-            <div className="px-3 py-4 border-t border-slate-100 space-y-2">
-                <div className="flex items-center gap-3 px-3 py-3 rounded-xl bg-slate-50">
-                    <div className="w-8 h-8 rounded-full bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center text-white text-xs font-bold flex-shrink-0 select-none">
-                        {user?.name?.charAt(0) ?? 'U'}
-                    </div>
-                    <div className="min-w-0 flex-1">
-                        <p className="text-xs font-semibold text-slate-900 truncate">{user?.name}</p>
-                        <p className="text-[10px] text-slate-400 capitalize">{user?.role?.replace('_', ' ')}</p>
-                    </div>
-                </div>
-                <button
-                    onClick={handleLogout}
-                    className="w-full flex items-center gap-2 px-3 py-2.5 text-sm font-medium text-slate-500 hover:text-red-600 hover:bg-red-50 rounded-xl transition-all"
-                >
-                    <LogOut className="w-4 h-4" />
-                    Sign out
-                </button>
-            </div>
-        </aside>
-    );
+      <div className="border-t border-slate-200/70 px-4 py-4">
+        <button
+          onClick={handleLogout}
+          className="flex w-full items-center justify-center gap-2 rounded-[18px] border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-600 transition hover:border-rose-200 hover:bg-rose-50 hover:text-rose-700"
+        >
+          <LogOut className="h-4 w-4" />
+          Sign out
+        </button>
+      </div>
+    </aside>
+  );
 }

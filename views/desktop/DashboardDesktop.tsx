@@ -3,266 +3,255 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { getCurrentUser, getDefaultRouteForUser, hasPermission, restoreSession } from '@/lib/auth';
+import { AlertTriangle, Baby, FileText, Home, Package, ShieldAlert, Users } from 'lucide-react';
 import { db } from '@/lib/db/indexeddb';
 import { getDashboardStats, getTopPuroksByPopulation, getTopPuroksByVulnerability } from '@/lib/db/queries';
-import { Users, Home, Baby, ShieldAlert, Package, FileText, ChevronRight, AlertTriangle, Activity } from 'lucide-react';
+import { getDefaultRouteForUser, hasPermission, restoreSession } from '@/lib/auth';
+import {
+  CivicBadge,
+  CivicHero,
+  CivicKpiCard,
+  CivicPage,
+  CivicPanel,
+  CivicSectionHeading,
+} from '@/components/ui/civic-primitives';
 
 interface Stats {
-    total_households: number;
-    total_population: number;
-    children_count: number;
-    seniors_count: number;
-    pwd_count: number;
-    pregnant_count: number;
-    chronic_count: number;
-    low_income_count: number;
+  total_households: number;
+  total_population: number;
+  children_count: number;
+  seniors_count: number;
+  pwd_count: number;
+  pregnant_count: number;
+  chronic_count: number;
+  low_income_count: number;
 }
 
 function greeting() {
-    const h = new Date().getHours();
-    if (h < 12) return 'Good morning';
-    if (h < 17) return 'Good afternoon';
-    return 'Good evening';
+  const hour = new Date().getHours();
+  if (hour < 12) return 'Good morning';
+  if (hour < 17) return 'Good afternoon';
+  return 'Good evening';
 }
 
 export default function DashboardDesktop() {
   const router = useRouter();
-  const [user, setUser] = useState<ReturnType<typeof getCurrentUser>>(null);
-    const [stats, setStats] = useState<Stats | null>(null);
-    const [topVulnerable, setTopVulnerable] = useState<Array<{ purok: string; vulnerable_count: number }>>([]);
+  const [user, setUser] = useState<ReturnType<typeof restoreSession>>(null);
+  const [stats, setStats] = useState<Stats | null>(null);
+  const [topVulnerable, setTopVulnerable] = useState<Array<{ purok: string; vulnerable_count: number }>>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
 
-    const loadDashboard = useCallback(async (background = false) => {
-        try {
-            if (!background) {
-                setIsLoading(true);
-            }
+  const loadDashboard = useCallback(async (background = false) => {
+    try {
+      if (!background) {
+        setIsLoading(true);
+      }
 
-            await db.init();
-            const u = restoreSession();
-            if (!u) { router.push('/login'); return; }
-            if (getDefaultRouteForUser(u) !== '/dashboard') { router.push(getDefaultRouteForUser(u)); return; }
-            setUser(u);
-            const [s, , vuln] = await Promise.all([
-                getDashboardStats(u.barangay_id),
-                getTopPuroksByPopulation(u.barangay_id),
-                getTopPuroksByVulnerability(u.barangay_id),
-            ]);
-            setStats(s);
-            setTopVulnerable(vuln);
-            setError('');
-        } catch (e) {
-            setError(e instanceof Error ? e.message : 'Failed to load');
-        } finally {
-            if (!background) {
-                setIsLoading(false);
-            }
-        }
-    }, [router]);
+      await db.init();
+      const restoredUser = restoreSession();
+      if (!restoredUser) {
+        router.push('/login');
+        return;
+      }
+      if (getDefaultRouteForUser(restoredUser) !== '/dashboard') {
+        router.push(getDefaultRouteForUser(restoredUser));
+        return;
+      }
 
-    useEffect(() => {
-        void loadDashboard();
-    }, [loadDashboard]);
+      setUser(restoredUser);
+      const [dashboardStats, , vulnerable] = await Promise.all([
+        getDashboardStats(restoredUser.barangay_id),
+        getTopPuroksByPopulation(restoredUser.barangay_id),
+        getTopPuroksByVulnerability(restoredUser.barangay_id),
+      ]);
 
-    useEffect(() => {
-        function handleDataChanged(event: WindowEventMap['mswdo-data-changed']) {
-            if (!['households', 'residents', 'vulnerability_flags'].includes(event.detail.table)) {
-                return;
-            }
+      setStats(dashboardStats);
+      setTopVulnerable(vulnerable);
+      setError('');
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : 'Failed to load');
+    } finally {
+      if (!background) {
+        setIsLoading(false);
+      }
+    }
+  }, [router]);
 
-            void loadDashboard(true);
-        }
+  useEffect(() => {
+    void loadDashboard();
+  }, [loadDashboard]);
 
-        window.addEventListener('mswdo-data-changed', handleDataChanged);
+  useEffect(() => {
+    function handleDataChanged(event: WindowEventMap['mswdo-data-changed']) {
+      if (!['households', 'residents', 'vulnerability_flags'].includes(event.detail.table)) {
+        return;
+      }
 
-        return () => {
-            window.removeEventListener('mswdo-data-changed', handleDataChanged);
-        };
-    }, [loadDashboard]);
+      void loadDashboard(true);
+    }
 
-    if (!user) return null;
+    window.addEventListener('mswdo-data-changed', handleDataChanged);
+    return () => window.removeEventListener('mswdo-data-changed', handleDataChanged);
+  }, [loadDashboard]);
 
-    const firstName = user.name?.split(' ')[0] ?? 'there';
-    const totalVulnerable = stats
-        ? stats.children_count + stats.seniors_count + stats.pwd_count + stats.pregnant_count + stats.chronic_count
-        : 0;
+  if (!user) return null;
 
-    const kpiCards = stats ? [
-        { label: 'Total Households', value: stats.total_households, icon: Home, light: 'bg-blue-50 text-blue-600', gradient: 'from-blue-600 to-indigo-600', href: '/households' },
-        { label: 'Total Population', value: stats.total_population, icon: Users, light: 'bg-emerald-50 text-emerald-600', gradient: 'from-emerald-500 to-teal-600', href: '/households' },
-        { label: 'Children (0–17)', value: stats.children_count, icon: Baby, light: 'bg-violet-50 text-violet-600', gradient: 'from-violet-500 to-purple-600', href: '/vulnerability' },
-        { label: 'Vulnerable Total', value: totalVulnerable, icon: ShieldAlert, light: 'bg-rose-50 text-rose-600', gradient: 'from-rose-500 to-pink-600', href: '/vulnerability' },
-    ] : [];
+  const totalVulnerable = stats
+    ? stats.children_count + stats.seniors_count + stats.pwd_count + stats.pregnant_count + stats.chronic_count
+    : 0;
 
-    const vulnBreakdown = stats ? [
-        { label: 'Children', value: stats.children_count, color: 'bg-blue-500' },
-        { label: 'Seniors', value: stats.seniors_count, color: 'bg-orange-500' },
-        { label: 'PWD', value: stats.pwd_count, color: 'bg-red-500' },
-        { label: 'Pregnant', value: stats.pregnant_count, color: 'bg-pink-500' },
-        { label: 'Chronic', value: stats.chronic_count, color: 'bg-purple-500' },
-        { label: 'Low-Income', value: stats.low_income_count, color: 'bg-amber-500' },
-    ] : [];
+  const quickLinks = [
+    { href: '/households/new', label: 'Add household', description: 'Create a new record', icon: Home, tone: 'navy' as const, perm: 'create_household' },
+    { href: '/vulnerability', label: 'Risk profiles', description: 'Review priority residents', icon: ShieldAlert, tone: 'rose' as const, perm: 'view_vulnerability' },
+    { href: '/distribution', label: 'Distribution', description: 'Manage relief events', icon: Package, tone: 'emerald' as const, perm: 'view_reports' },
+    { href: '/reports', label: 'Reports center', description: 'Open exports and summaries', icon: FileText, tone: 'amber' as const, perm: 'view_reports' },
+  ].filter((link) => hasPermission(link.perm as never));
 
-    const quickLinks = [
-        { href: '/households/new', label: 'Add Household', icon: Home, color: 'from-blue-600 to-indigo-600', perm: 'create_household' },
-        { href: '/vulnerability', label: 'Risk Profiles', icon: ShieldAlert, color: 'from-rose-500 to-pink-600', perm: 'view_vulnerability' },
-        { href: '/distribution', label: 'Distribution', icon: Package, color: 'from-emerald-500 to-teal-600', perm: 'view_reports' },
-        { href: '/reports', label: 'Reports Center', icon: FileText, color: 'from-violet-500 to-purple-600', perm: 'view_reports' },
-    ].filter(l => hasPermission(l.perm as any));
-
-    return (
-        <div className="p-8 space-y-6 max-w-[1400px] mx-auto">
-
-            {/* Greeting Banner */}
-            <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-indigo-600 via-violet-600 to-purple-700 p-8 text-white shadow-xl shadow-indigo-500/20">
-                <div className="absolute inset-0 opacity-10" style={{ backgroundImage: 'radial-gradient(circle, white 1px, transparent 1px)', backgroundSize: '24px 24px' }} />
-                <div className="absolute -top-12 -right-12 w-48 h-48 bg-violet-400/30 rounded-full blur-3xl" />
-                <div className="absolute -bottom-10 -left-10 w-36 h-36 bg-indigo-400/20 rounded-full blur-2xl" />
-                <div className="relative z-10 flex items-end justify-between">
-                    <div>
-                        <p className="text-indigo-200 text-sm font-medium">{greeting()}, {firstName} 👋</p>
-                        <h2 className="text-3xl font-bold mt-1 mb-3">
-                            {isLoading ? 'Loading census…' : `${(stats?.total_population ?? 0).toLocaleString()} residents tracked`}
-                        </h2>
-                        <div className="flex items-center gap-3">
-                            <span className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white/15 backdrop-blur-sm rounded-full text-xs font-medium border border-white/20">
-                                <span className="w-1.5 h-1.5 bg-emerald-400 rounded-full animate-pulse" />
-                                System online
-                            </span>
-                            <span className="text-xs text-indigo-300">
-                                {new Date().toLocaleDateString('en-PH', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
-                            </span>
-                        </div>
-                    </div>
-                    {stats && (
-                        <div className="flex gap-8 text-center">
-                            {[
-                                { label: 'Households', value: stats.total_households },
-                                { label: 'Vulnerable', value: totalVulnerable },
-                                { label: 'Children', value: stats.children_count },
-                            ].map(s => (
-                                <div key={s.label}>
-                                    <div className="w-px bg-white/20 absolute" />
-                                    <p className="text-4xl font-bold text-white">{s.value}</p>
-                                    <p className="text-xs text-indigo-200 mt-1">{s.label}</p>
-                                </div>
-                            ))}
-                        </div>
-                    )}
-                </div>
-            </div>
-
-            {error && (
-                <div className="p-4 bg-red-50 border border-red-200 rounded-2xl text-red-700 text-sm flex items-center gap-2">
-                    <AlertTriangle className="w-4 h-4 flex-shrink-0" />{error}
-                </div>
-            )}
-
-            {/* KPI — 4 col */}
-            {isLoading ? (
-                <div className="grid grid-cols-4 gap-4">
-                    {[...Array(4)].map((_, i) => (
-                        <div key={i} className="bg-white rounded-2xl border border-slate-200/60 p-5 animate-pulse h-32">
-                            <div className="w-9 h-9 rounded-xl bg-slate-100 mb-4" /><div className="h-8 bg-slate-100 rounded w-1/2 mb-2" /><div className="h-3 bg-slate-100 rounded w-2/3" />
-                        </div>
-                    ))}
-                </div>
-            ) : stats ? (
-                <div className="grid grid-cols-4 gap-4">
-                    {kpiCards.map(c => {
-                        const Icon = c.icon;
-                        return (
-                            <Link key={c.label} href={c.href} className="group relative bg-white rounded-2xl border border-slate-200/60 p-5 hover:shadow-lg hover:border-slate-300 hover:-translate-y-0.5 transition-all overflow-hidden">
-                                <Icon className="absolute -bottom-2 -right-2 w-20 h-20 text-slate-100 group-hover:text-slate-200 transition-colors" strokeWidth={0.8} />
-                                <div className={`w-9 h-9 rounded-xl ${c.light} flex items-center justify-center mb-4`}><Icon className="w-4.5 h-4.5" /></div>
-                                <p className={`text-4xl font-bold bg-gradient-to-br ${c.gradient} bg-clip-text text-transparent`}>{c.value.toLocaleString()}</p>
-                                <p className="text-sm text-slate-500 mt-1 font-medium">{c.label}</p>
-                                <div className="mt-3 flex items-center gap-1 text-xs text-slate-400 group-hover:text-indigo-500 transition-colors font-medium">View details <ChevronRight className="w-3.5 h-3.5" /></div>
-                            </Link>
-                        );
-                    })}
-                </div>
-            ) : null}
-
-            {/* Charts + Hotspot */}
-            {stats && !isLoading && (
-                <div className="grid grid-cols-3 gap-5">
-                    {/* Vulnerability breakdown — 2/3 width */}
-                    <div className="col-span-2 bg-white rounded-2xl border border-slate-200/60 shadow-sm p-6">
-                        <div className="flex items-center justify-between mb-6">
-                            <div>
-                                <h3 className="text-base font-bold text-slate-900">Vulnerability Breakdown</h3>
-                                <p className="text-xs text-slate-400 mt-0.5">Distribution by category</p>
-                            </div>
-                            <Link href="/vulnerability" className="text-xs text-indigo-500 font-semibold hover:text-indigo-700 transition-colors flex items-center gap-0.5">View all <ChevronRight className="w-3.5 h-3.5" /></Link>
-                        </div>
-                        <div className="space-y-4">
-                            {vulnBreakdown.map(v => (
-                                <div key={v.label} className="flex items-center gap-4">
-                                    <span className="text-sm text-slate-500 w-24">{v.label}</span>
-                                    <div className="flex-1 h-2.5 bg-slate-100 rounded-full overflow-hidden">
-                                        <div className={`h-full ${v.color} rounded-full transition-all duration-700`} style={{ width: totalVulnerable > 0 ? `${((v.value / totalVulnerable) * 100).toFixed(0)}%` : '0%' }} />
-                                    </div>
-                                    <span className="text-sm font-bold text-slate-700 w-8 text-right">{v.value}</span>
-                                    <span className="text-xs text-slate-400 w-10 text-right">{totalVulnerable > 0 ? `${((v.value / totalVulnerable) * 100).toFixed(0)}%` : '0%'}</span>
-                                </div>
-                            ))}
-                        </div>
-                    </div>
-
-                    {/* Hotspot — 1/3 width */}
-                    <div className="bg-white rounded-2xl border border-slate-200/60 shadow-sm p-6">
-                        <h3 className="text-base font-bold text-slate-900 mb-1">Hotspot Areas</h3>
-                        <p className="text-xs text-slate-400 mb-5">Top puroks by vulnerability</p>
-                        {topVulnerable.length > 0 ? (
-                            <div className="space-y-3">
-                                {topVulnerable.slice(0, 6).map((p, i) => (
-                                    <div key={i} className="flex items-center gap-3">
-                                        <span className="w-5 h-5 rounded-lg bg-rose-50 text-rose-500 text-[10px] font-bold flex items-center justify-center flex-shrink-0">{i + 1}</span>
-                                        <div className="flex-1 min-w-0">
-                                            <div className="flex items-center justify-between mb-1">
-                                                <span className="text-sm font-medium text-slate-700 truncate">{p.purok}</span>
-                                                <span className="text-sm font-bold text-rose-600 ml-2">{p.vulnerable_count}</span>
-                                            </div>
-                                            <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
-                                                <div className="h-full bg-gradient-to-r from-rose-400 to-pink-500 rounded-full" style={{ width: `${((p.vulnerable_count / (topVulnerable[0]?.vulnerable_count || 1)) * 100).toFixed(0)}%` }} />
-                                            </div>
-                                        </div>
-                                    </div>
-                                ))}
-                            </div>
-                        ) : (
-                            <div className="flex flex-col items-center justify-center h-28 text-slate-400">
-                                <Activity className="w-8 h-8 mb-2 opacity-40" />
-                                <p className="text-sm">No data yet</p>
-                            </div>
-                        )}
-                    </div>
-                </div>
-            )}
-
-            {/* Quick Actions */}
-            {quickLinks.length > 0 && (
-                <div>
-                    <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">Quick Actions</p>
-                    <div className="grid grid-cols-4 gap-3">
-                        {quickLinks.map(l => {
-                            const Icon = l.icon;
-                            return (
-                                <Link key={l.href} href={l.href} className="group flex items-center gap-3 p-4 bg-white border border-slate-200/60 rounded-2xl hover:border-slate-300 hover:shadow-md hover:-translate-y-0.5 transition-all">
-                                    <div className={`w-10 h-10 rounded-xl bg-gradient-to-br ${l.color} flex items-center justify-center shadow-sm flex-shrink-0`}><Icon className="w-5 h-5 text-white" /></div>
-                                    <div>
-                                        <p className="text-sm font-semibold text-slate-800">{l.label}</p>
-                                        <p className="text-xs text-slate-400 group-hover:text-indigo-500 transition-colors flex items-center gap-0.5 mt-0.5">Open <ChevronRight className="w-3 h-3" /></p>
-                                    </div>
-                                </Link>
-                            );
-                        })}
-                    </div>
-                </div>
-            )}
+  return (
+    <CivicPage className="space-y-6">
+      <CivicHero
+        eyebrow="Municipal Operations"
+        title={`${greeting()}, ${user.name?.split(' ')[0] ?? 'there'}`}
+        description={isLoading ? 'Loading municipal census metrics...' : `${(stats?.total_population ?? 0).toLocaleString()} residents currently tracked across the civic console.`}
+        aside={<CivicBadge label={new Date().toLocaleDateString('en-PH', { month: 'long', day: 'numeric', year: 'numeric' })} tone="navy" />}
+      >
+        <div className="mt-4 flex flex-wrap gap-2">
+          <CivicBadge label={`${stats?.total_households ?? 0} households`} tone="teal" />
+          <CivicBadge label={`${totalVulnerable} vulnerable`} tone="amber" />
+          <CivicBadge label="System online" tone="emerald" />
         </div>
-    );
+      </CivicHero>
+
+      {error ? (
+        <CivicPanel className="border-red-200 bg-red-50/90">
+          <div className="flex items-center gap-3 text-sm text-red-700">
+            <AlertTriangle className="h-4 w-4" />
+            {error}
+          </div>
+        </CivicPanel>
+      ) : null}
+
+      <div className="grid grid-cols-4 gap-4">
+        <CivicKpiCard
+          icon={Home}
+          label="Total households"
+          value={isLoading ? '—' : stats?.total_households.toLocaleString() ?? '0'}
+          hint="Approved and draft records in the current barangay."
+          tone="navy"
+        />
+        <CivicKpiCard
+          icon={Users}
+          label="Population"
+          value={isLoading ? '—' : stats?.total_population.toLocaleString() ?? '0'}
+          hint="Residents currently represented in the census."
+          tone="teal"
+        />
+        <CivicKpiCard
+          icon={Baby}
+          label="Children"
+          value={isLoading ? '—' : stats?.children_count.toLocaleString() ?? '0'}
+          hint="Residents aged 0 to 17."
+          tone="amber"
+        />
+        <CivicKpiCard
+          icon={ShieldAlert}
+          label="Vulnerable total"
+          value={isLoading ? '—' : totalVulnerable.toLocaleString()}
+          hint="Residents requiring closer monitoring or support."
+          tone="rose"
+        />
+      </div>
+
+      <div className="grid grid-cols-[minmax(0,2fr)_minmax(0,1fr)] gap-5">
+        <CivicPanel>
+          <CivicSectionHeading
+            icon={ShieldAlert}
+            title="Vulnerability breakdown"
+            description="Distribution of high-priority residents by category."
+          />
+          <div className="mt-6 space-y-4">
+            {[
+              { label: 'Children', value: stats?.children_count ?? 0, color: 'bg-cyan-900' },
+              { label: 'Seniors', value: stats?.seniors_count ?? 0, color: 'bg-amber-500' },
+              { label: 'PWD', value: stats?.pwd_count ?? 0, color: 'bg-rose-500' },
+              { label: 'Pregnant', value: stats?.pregnant_count ?? 0, color: 'bg-teal-600' },
+              { label: 'Chronic', value: stats?.chronic_count ?? 0, color: 'bg-slate-700' },
+              { label: 'Low-income', value: stats?.low_income_count ?? 0, color: 'bg-emerald-600' },
+            ].map((row) => (
+              <div key={row.label} className="grid grid-cols-[120px_minmax(0,1fr)_56px_56px] items-center gap-3">
+                <span className="text-sm font-medium text-slate-700">{row.label}</span>
+                <div className="h-2.5 overflow-hidden rounded-full bg-slate-100">
+                  <div
+                    className={`h-full rounded-full ${row.color}`}
+                    style={{ width: totalVulnerable > 0 ? `${Math.max((row.value / totalVulnerable) * 100, 6)}%` : '0%' }}
+                  />
+                </div>
+                <span className="text-right text-sm font-bold text-slate-900">{row.value}</span>
+                <span className="text-right text-xs text-slate-500">
+                  {totalVulnerable > 0 ? `${Math.round((row.value / totalVulnerable) * 100)}%` : '0%'}
+                </span>
+              </div>
+            ))}
+          </div>
+        </CivicPanel>
+
+        <CivicPanel>
+          <CivicSectionHeading
+            icon={ShieldAlert}
+            title="Hotspot puroks"
+            description="Areas with the highest concentration of vulnerable residents."
+          />
+          <div className="mt-6 space-y-3">
+            {topVulnerable.length > 0 ? topVulnerable.slice(0, 6).map((purok, index) => (
+              <div key={purok.purok} className="rounded-[22px] border border-slate-200 bg-slate-50 px-4 py-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-3">
+                    <div className="flex h-8 w-8 items-center justify-center rounded-2xl bg-cyan-950 text-xs font-black text-white">
+                      {index + 1}
+                    </div>
+                    <div>
+                      <p className="text-sm font-bold text-slate-950">{purok.purok}</p>
+                      <p className="text-xs text-slate-500">High-risk concentration</p>
+                    </div>
+                  </div>
+                  <CivicBadge label={`${purok.vulnerable_count}`} tone="rose" />
+                </div>
+              </div>
+            )) : (
+              <p className="text-sm text-slate-500">No hotspot data yet.</p>
+            )}
+          </div>
+        </CivicPanel>
+      </div>
+
+      {quickLinks.length > 0 ? (
+        <CivicPanel>
+          <CivicSectionHeading
+            icon={FileText}
+            title="Quick actions"
+            description="Common administrative tasks for the current session."
+          />
+          <div className="mt-5 grid grid-cols-4 gap-3">
+            {quickLinks.map((link) => {
+              const Icon = link.icon;
+              return (
+                <Link
+                  key={link.href}
+                  href={link.href}
+                  className="rounded-[24px] border border-slate-200 bg-white px-4 py-4 transition hover:-translate-y-px hover:border-slate-300 hover:shadow-md"
+                >
+                  <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-slate-100 text-slate-800">
+                    <Icon className="h-5 w-5" />
+                  </div>
+                  <p className="mt-4 text-sm font-bold text-slate-950">{link.label}</p>
+                  <p className="mt-1 text-xs text-slate-500">{link.description}</p>
+                </Link>
+              );
+            })}
+          </div>
+        </CivicPanel>
+      ) : null}
+    </CivicPage>
+  );
 }

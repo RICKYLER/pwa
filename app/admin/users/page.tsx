@@ -1,9 +1,10 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import AppShell from '@/components/AppShell';
 import { restoreSession } from '@/lib/auth';
+import { BARANGAY_OPTIONS, getBarangayLabel, normalizeBarangaySelection } from '@/lib/barangays';
 import type { User, UserRole } from '@/lib/db/schema';
 import {
   AlertTriangle,
@@ -26,6 +27,7 @@ const ROLES: { key: UserRole; label: string; desc: string; color: string; bg: st
   { key: 'encoder', label: 'Encoder', desc: 'Add and edit census records', color: 'text-blue-700', bg: 'bg-blue-50 ring-blue-200' },
   { key: 'health_worker', label: 'Health Worker', desc: 'Manage health vulnerability flags', color: 'text-emerald-700', bg: 'bg-emerald-50 ring-emerald-200' },
   { key: 'responder', label: 'Responder', desc: 'Respond to incidents and operations', color: 'text-rose-700', bg: 'bg-rose-50 ring-rose-200' },
+  { key: 'resident', label: 'Resident', desc: 'Self-service registration and status tracking', color: 'text-cyan-700', bg: 'bg-cyan-50 ring-cyan-200' },
 ];
 
 const BLANK_FORM = {
@@ -58,7 +60,22 @@ export default function AdminUsersPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [toast, setToast] = useState<ToastState | null>(null);
-  const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+  const [actionConfirm, setActionConfirm] = useState<{ userId: string; action: 'delete' | 'deactivate' } | null>(null);
+  const [actionLoadingId, setActionLoadingId] = useState<string | null>(null);
+
+  const usersByRole = useMemo(() => (
+    ROLES.map((role) => ({
+      role,
+      users: users
+        .filter((user) => user.role === role.key)
+        .sort((left, right) => {
+          if (left.status !== right.status) {
+            return left.status === 'active' ? -1 : 1;
+          }
+          return left.name.localeCompare(right.name);
+        }),
+    }))
+  ), [users]);
 
   useEffect(() => {
     const user = restoreSession();
@@ -105,7 +122,7 @@ export default function AdminUsersPage() {
     setEditingId(null);
     setForm({
       ...BLANK_FORM,
-      barangay_id: me?.barangay_id ?? '',
+      barangay_id: normalizeBarangaySelection(me?.barangay_id),
     });
     setShowForm(true);
   }
@@ -116,7 +133,7 @@ export default function AdminUsersPage() {
       name: user.name,
       email: user.email,
       role: user.role,
-      barangay_id: user.barangay_id,
+      barangay_id: normalizeBarangaySelection(user.barangay_id),
     });
     setShowForm(true);
   }
@@ -172,6 +189,7 @@ export default function AdminUsersPage() {
 
   async function handleDelete(userId: string) {
     try {
+      setActionLoadingId(userId);
       const response = await fetch(`/api/admin/users/${userId}`, {
         method: 'DELETE',
       });
@@ -181,11 +199,37 @@ export default function AdminUsersPage() {
         throw new Error(payload.error || 'Unable to delete account.');
       }
 
-      setDeleteConfirm(null);
+      setActionConfirm(null);
       await loadUsers();
       showToast('success', 'Account deleted.');
     } catch (error) {
       showToast('error', error instanceof Error ? error.message : 'Unable to delete account.');
+    } finally {
+      setActionLoadingId(null);
+    }
+  }
+
+  async function handleStatusChange(user: User, status: 'active' | 'inactive') {
+    try {
+      setActionLoadingId(user.id);
+      const response = await fetch(`/api/admin/users/${user.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status }),
+      });
+      const payload = await response.json();
+
+      if (!response.ok) {
+        throw new Error(payload.error || 'Unable to update account status.');
+      }
+
+      setActionConfirm(null);
+      await loadUsers();
+      showToast('success', status === 'inactive' ? 'Account deactivated.' : 'Account reactivated.');
+    } catch (error) {
+      showToast('error', error instanceof Error ? error.message : 'Unable to update account status.');
+    } finally {
+      setActionLoadingId(null);
     }
   }
 
@@ -300,16 +344,21 @@ export default function AdminUsersPage() {
                 <div>
                   <label className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-slate-500">
                     <Building2 className="h-3 w-3" />
-                    Barangay ID
+                    Barangay
                   </label>
-                  <input
-                    type="text"
+                  <select
                     required
                     value={form.barangay_id}
                     onChange={(event) => setForm((current) => ({ ...current, barangay_id: event.target.value }))}
                     className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-sm transition focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
-                    placeholder="e.g. barangay-1"
-                  />
+                  >
+                    <option value="">Select barangay</option>
+                    {BARANGAY_OPTIONS.map((option) => (
+                      <option key={option.id} value={option.id}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
                 </div>
               </div>
 
@@ -318,7 +367,7 @@ export default function AdminUsersPage() {
                   <ShieldCheck className="h-3 w-3" />
                   Role
                 </label>
-                <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                <div className="grid grid-cols-2 gap-2 lg:grid-cols-5">
                   {ROLES.map((role) => (
                     <button
                       key={role.key}
@@ -380,98 +429,177 @@ export default function AdminUsersPage() {
             ))}
           </div>
         ) : users.length > 0 ? (
-          <div className="space-y-2">
-            {users.map((user) => {
-              const roleInfo = ROLES.find((role) => role.key === user.role) || ROLES[1];
-              const isMe = user.id === me?.id;
-              const isDeleteConfirm = deleteConfirm === user.id;
-
-              return (
-                <div
-                  key={user.id}
-                  className={`group flex items-center gap-4 rounded-2xl border px-5 py-4 transition ${
-                    isMe
-                      ? 'border-indigo-200 bg-indigo-50/30'
-                      : 'border-slate-200/60 bg-white hover:border-slate-300 hover:shadow-sm'
-                  }`}
-                >
-                  <div
-                    className={`flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full text-sm font-bold ${
-                      isMe
-                        ? 'bg-gradient-to-br from-indigo-500 to-violet-600 text-white shadow-md shadow-indigo-500/30'
-                        : 'bg-gradient-to-br from-slate-200 to-slate-300 text-slate-600'
-                    }`}
-                  >
-                    {user.name.charAt(0).toUpperCase()}
-                  </div>
-
-                  <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <p className="text-sm font-semibold text-slate-900">{user.name}</p>
-                      {isMe && (
-                        <span className="rounded-full bg-indigo-100 px-2 py-0.5 text-[10px] font-bold text-indigo-600">
-                          You
-                        </span>
-                      )}
-                      {user.must_change_password && (
-                        <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-700">
-                          Setup Pending
+          <div className="space-y-5">
+            {usersByRole.map(({ role, users: roleUsers }) => (
+              <section key={role.key} className="space-y-2">
+                <div className="flex items-center justify-between gap-3 px-1">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <p className={`text-sm font-bold ${role.color}`}>{role.label}</p>
+                      <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ring-1 ${role.bg} ${role.color}`}>
+                        {roleUsers.length}
+                      </span>
+                      {roleUsers.some((user) => user.status === 'inactive') && (
+                        <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-500 ring-1 ring-slate-200">
+                          {roleUsers.filter((user) => user.status === 'inactive').length} inactive
                         </span>
                       )}
                     </div>
-
-                    <p className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-slate-400">
-                      <Mail className="h-3 w-3 flex-shrink-0" />
-                      <span className="truncate">{user.email}</span>
-                      <span className="text-slate-200">·</span>
-                      <Building2 className="h-3 w-3 flex-shrink-0" />
-                      {user.barangay_id}
-                    </p>
-                  </div>
-
-                  <span className={`hidden flex-shrink-0 items-center rounded-full px-2.5 py-1 text-[11px] font-semibold ring-1 sm:inline-flex ${roleInfo.bg} ${roleInfo.color}`}>
-                    {roleInfo.label}
-                  </span>
-
-                  <div className="flex flex-shrink-0 items-center gap-1">
-                    {isDeleteConfirm ? (
-                      <>
-                        <span className="mr-1 text-xs font-semibold text-red-600">Delete?</span>
-                        <button
-                          onClick={() => handleDelete(user.id)}
-                          className="rounded-lg bg-red-600 px-2.5 py-1.5 text-xs font-bold text-white transition hover:bg-red-700"
-                        >
-                          Yes
-                        </button>
-                        <button
-                          onClick={() => setDeleteConfirm(null)}
-                          className="rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs font-medium text-slate-500"
-                        >
-                          No
-                        </button>
-                      </>
-                    ) : (
-                      <>
-                        <button
-                          onClick={() => openEdit(user)}
-                          className="rounded-xl p-2 text-slate-400 transition hover:bg-indigo-50 hover:text-indigo-600"
-                        >
-                          <Edit2 className="h-4 w-4" />
-                        </button>
-                        {!isMe && (
-                          <button
-                            onClick={() => setDeleteConfirm(user.id)}
-                            className="rounded-xl p-2 text-slate-400 transition hover:bg-red-50 hover:text-red-600"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </button>
-                        )}
-                      </>
-                    )}
+                    <p className="mt-0.5 text-xs text-slate-500">{role.desc}</p>
                   </div>
                 </div>
-              );
-            })}
+
+                {roleUsers.length > 0 ? (
+                  roleUsers.map((user) => {
+                    const isMe = user.id === me?.id;
+                    const isResidentAccount = user.role === 'resident';
+                    const isInactive = user.status === 'inactive';
+                    const isActionConfirm = actionConfirm?.userId === user.id;
+                    const confirmAction = isActionConfirm ? actionConfirm?.action : null;
+                    const isActionLoading = actionLoadingId === user.id;
+
+                    return (
+                      <div
+                        key={user.id}
+                        className={`group flex items-center gap-4 rounded-2xl border px-5 py-4 transition ${
+                          isMe
+                            ? 'border-indigo-200 bg-indigo-50/30'
+                            : isInactive
+                              ? 'border-slate-200 bg-slate-50/90'
+                              : 'border-slate-200/60 bg-white hover:border-slate-300 hover:shadow-sm'
+                        }`}
+                      >
+                        <div
+                          className={`flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full text-sm font-bold ${
+                            isMe
+                              ? 'bg-gradient-to-br from-indigo-500 to-violet-600 text-white shadow-md shadow-indigo-500/30'
+                              : 'bg-gradient-to-br from-slate-200 to-slate-300 text-slate-600'
+                          }`}
+                        >
+                          {user.name.charAt(0).toUpperCase()}
+                        </div>
+
+                        <div className="min-w-0 flex-1">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <p className="text-sm font-semibold text-slate-900">{user.name}</p>
+                            {isMe && (
+                              <span className="rounded-full bg-indigo-100 px-2 py-0.5 text-[10px] font-bold text-indigo-600">
+                                You
+                              </span>
+                            )}
+                            {isInactive && (
+                              <span className="rounded-full bg-slate-200 px-2 py-0.5 text-[10px] font-bold text-slate-600">
+                                Inactive
+                              </span>
+                            )}
+                            {user.must_change_password && (
+                              <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-700">
+                                Setup Pending
+                              </span>
+                            )}
+                          </div>
+
+                          <p className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-slate-400">
+                            <Mail className="h-3 w-3 flex-shrink-0" />
+                            <span className="truncate">{user.email}</span>
+                            <span className="text-slate-200">·</span>
+                            <Building2 className="h-3 w-3 flex-shrink-0" />
+                            {getBarangayLabel(user.barangay_id) ?? user.barangay_id}
+                          </p>
+                        </div>
+
+                        <span className={`hidden flex-shrink-0 items-center rounded-full px-2.5 py-1 text-[11px] font-semibold ring-1 sm:inline-flex ${role.bg} ${role.color}`}>
+                          {role.label}
+                        </span>
+
+                        <div className="flex flex-shrink-0 items-center gap-1">
+                          {confirmAction === 'delete' ? (
+                            <>
+                              <span className="mr-1 text-xs font-semibold text-red-600">Delete?</span>
+                              <button
+                                onClick={() => {
+                                  void handleDelete(user.id);
+                                }}
+                                disabled={isActionLoading}
+                                className="rounded-lg bg-red-600 px-2.5 py-1.5 text-xs font-bold text-white transition hover:bg-red-700"
+                              >
+                                {isActionLoading ? 'Deleting…' : 'Yes'}
+                              </button>
+                              <button
+                                onClick={() => setActionConfirm(null)}
+                                className="rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs font-medium text-slate-500"
+                              >
+                                No
+                              </button>
+                            </>
+                          ) : confirmAction === 'deactivate' ? (
+                            <>
+                              <span className="mr-1 text-xs font-semibold text-amber-700">Deactivate?</span>
+                              <button
+                                onClick={() => {
+                                  void handleStatusChange(user, 'inactive');
+                                }}
+                                disabled={isActionLoading}
+                                className="rounded-lg bg-amber-600 px-2.5 py-1.5 text-xs font-bold text-white transition hover:bg-amber-700"
+                              >
+                                {isActionLoading ? 'Saving…' : 'Yes'}
+                              </button>
+                              <button
+                                onClick={() => setActionConfirm(null)}
+                                className="rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs font-medium text-slate-500"
+                              >
+                                No
+                              </button>
+                            </>
+                          ) : (
+                            <>
+                              <button
+                                onClick={() => openEdit(user)}
+                                className="rounded-xl p-2 text-slate-400 transition hover:bg-indigo-50 hover:text-indigo-600"
+                              >
+                                <Edit2 className="h-4 w-4" />
+                              </button>
+                              {!isMe && !isResidentAccount && (
+                                isInactive ? (
+                                  <button
+                                    onClick={() => {
+                                      void handleStatusChange(user, 'active');
+                                    }}
+                                    disabled={isActionLoading}
+                                    className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700 transition hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-60"
+                                  >
+                                    {isActionLoading ? 'Saving…' : 'Reactivate'}
+                                  </button>
+                                ) : (
+                                  <button
+                                    onClick={() => setActionConfirm({ userId: user.id, action: 'deactivate' })}
+                                    className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-700 transition hover:bg-amber-100"
+                                  >
+                                    Deactivate
+                                  </button>
+                                )
+                              )}
+                              {!isMe && isResidentAccount && (
+                                <button
+                                  onClick={() => setActionConfirm({ userId: user.id, action: 'delete' })}
+                                  className="rounded-xl p-2 text-slate-400 transition hover:bg-red-50 hover:text-red-600"
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </button>
+                              )}
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })
+                ) : (
+                  <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50/70 px-5 py-4 text-sm text-slate-400">
+                    No {role.label.toLowerCase()} accounts yet.
+                  </div>
+                )}
+              </section>
+            ))}
           </div>
         ) : (
           <div className="rounded-2xl border border-dashed border-slate-300 bg-white py-20 text-center">
@@ -492,7 +620,7 @@ export default function AdminUsersPage() {
           <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-slate-400">
             Role Permissions Reference
           </p>
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+          <div className="grid grid-cols-2 gap-2 lg:grid-cols-5">
             {ROLES.map((role) => (
               <div key={role.key} className={`rounded-xl px-3 py-2.5 ring-1 ${role.bg}`}>
                 <p className={`text-xs font-bold ${role.color}`}>{role.label}</p>

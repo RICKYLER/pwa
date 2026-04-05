@@ -7,11 +7,23 @@ export const maxDuration = 30;
 const API_KEY = process.env.OPENWEATHER_API_KEY?.trim() ?? '';
 const FAILURE_LOG_WINDOW_MS = 5 * 60 * 1000;
 const TILE_REQUEST_TIMEOUT_MS = 5000;
+const TILE_CACHE_MAX_AGE_MS = 10 * 60 * 1000;
+const TILE_CACHE_STALE_MS = 30 * 60 * 1000;
+const TILE_CACHE_MAX_ENTRIES = 512;
 const TRANSPARENT_PNG = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9pY9lWQAAAAASUVORK5CYII=',
   'base64',
 );
 const recentFailureLogs = new Map<string, number>();
+const tileResponseCache = new Map<string, CachedTileResponse>();
+const inflightTileRequests = new Map<string, Promise<CachedTileResponse>>();
+
+type CachedTileResponse = {
+  body: Buffer;
+  contentType: string;
+  source: string;
+  cachedAt: number;
+};
 
 function emptyTile(status = 200) {
   return new NextResponse(TRANSPARENT_PNG, {
@@ -32,6 +44,66 @@ function logFailureOnce(key: string, status: number, errorText: string) {
 
   recentFailureLogs.set(key, now);
   console.warn('OpenWeather map tile proxy fallback:', status, errorText);
+}
+
+function getTileCacheKey(
+  layerId: string,
+  prefer: string,
+  z: number,
+  x: number,
+  y: number,
+  date: number,
+) {
+  return `${layerId}:${prefer || 'default'}:${date || 0}:${z}:${x}:${y}`;
+}
+
+function getCachedTile(key: string) {
+  const cached = tileResponseCache.get(key);
+  if (!cached) {
+    return null;
+  }
+
+  const age = Date.now() - cached.cachedAt;
+  if (age > TILE_CACHE_STALE_MS) {
+    tileResponseCache.delete(key);
+    return null;
+  }
+
+  return {
+    cached,
+    isFresh: age <= TILE_CACHE_MAX_AGE_MS,
+  };
+}
+
+function cacheTile(key: string, response: Omit<CachedTileResponse, 'cachedAt'>) {
+  tileResponseCache.set(key, {
+    ...response,
+    cachedAt: Date.now(),
+  });
+
+  if (tileResponseCache.size <= TILE_CACHE_MAX_ENTRIES) {
+    return;
+  }
+
+  const oldestKey = tileResponseCache.keys().next().value;
+  if (typeof oldestKey === 'string') {
+    tileResponseCache.delete(oldestKey);
+  }
+}
+
+function createTileResponse(
+  response: CachedTileResponse,
+  cacheStatus: 'HIT' | 'STALE' | 'MISS',
+) {
+  return new NextResponse(response.body, {
+    status: 200,
+    headers: {
+      'Content-Type': response.contentType,
+      'Cache-Control': 'public, max-age=600, s-maxage=600, stale-while-revalidate=1800',
+      'X-Weather-Tile-Source': response.source,
+      'X-Weather-Tile-Cache': cacheStatus,
+    },
+  });
 }
 
 function buildMapV2Url({
@@ -99,6 +171,61 @@ function buildMapV1Url({
   const upstream = new URL(`https://tile.openweathermap.org/map/${layer}/${z}/${x}/${y}.png`);
   upstream.searchParams.set('appid', API_KEY);
   return upstream;
+}
+
+async function fetchTileFromUpstream(attempts: Array<{
+  source: string;
+  logKey: string;
+  url: URL;
+}>) {
+  let lastFailureStatus = 502;
+  let lastFailureText = 'Unknown upstream failure';
+
+  for (const attempt of attempts) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), TILE_REQUEST_TIMEOUT_MS);
+
+    try {
+      const response = await fetch(attempt.url.toString(), {
+        headers: {
+          Accept: 'image/png',
+        },
+        signal: controller.signal,
+        cache: 'force-cache',
+        next: { revalidate: 600 },
+      });
+
+      clearTimeout(timeoutId);
+
+      if (response.ok) {
+        const arrayBuffer = await response.arrayBuffer();
+
+        return {
+          body: Buffer.from(arrayBuffer),
+          contentType: response.headers.get('content-type') ?? 'image/png',
+          source: attempt.source,
+        } satisfies Omit<CachedTileResponse, 'cachedAt'>;
+      }
+
+      lastFailureStatus = response.status;
+      lastFailureText = await response.text().catch(() => '');
+      logFailureOnce(attempt.logKey, response.status, lastFailureText);
+    } catch (fetchError: any) {
+      clearTimeout(timeoutId);
+      if (fetchError.name === 'AbortError') {
+        lastFailureText = 'Request timeout after 5s';
+        continue;
+      }
+      throw fetchError;
+    }
+  }
+
+  throw {
+    message: lastFailureStatus === 401 || lastFailureStatus === 403
+      ? 'Upstream authorization failed.'
+      : lastFailureText || 'Unknown upstream failure',
+    status: lastFailureStatus,
+  };
 }
 
 export async function GET(request: Request) {
@@ -188,56 +315,64 @@ export async function GET(request: Request) {
   const attempts = preferV1
     ? [...mapV1Attempt, ...mapV2Attempts]
     : [...mapV2Attempts, ...mapV1Attempt];
+  const tileCacheKey = getTileCacheKey(layer.id, prefer, z, x, y, date);
+  const cachedTile = getCachedTile(tileCacheKey);
+
+  if (cachedTile?.isFresh) {
+    return createTileResponse(cachedTile.cached, 'HIT');
+  }
 
   try {
-    let lastFailureStatus = 502;
-    let lastFailureText = 'Unknown upstream failure';
-
-    for (const attempt of attempts) {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), TILE_REQUEST_TIMEOUT_MS);
-
-      try {
-        const response = await fetch(attempt.url.toString(), {
-          headers: {
-            Accept: 'image/png',
-          },
-          signal: controller.signal,
-          next: { revalidate: 600 },
-        });
-
-        clearTimeout(timeoutId);
-
-        if (response.ok) {
-          const arrayBuffer = await response.arrayBuffer();
-
-          return new NextResponse(arrayBuffer, {
-            status: 200,
-            headers: {
-              'Content-Type': response.headers.get('content-type') ?? 'image/png',
-              'Cache-Control': 'public, max-age=600, s-maxage=600, stale-while-revalidate=1800',
-              'X-Weather-Tile-Source': attempt.source,
-            },
+    if (cachedTile && !cachedTile.isFresh) {
+      if (!inflightTileRequests.has(tileCacheKey)) {
+        const refreshPromise = fetchTileFromUpstream(attempts)
+          .then((response) => {
+            cacheTile(tileCacheKey, response);
+            return {
+              ...response,
+              cachedAt: Date.now(),
+            } satisfies CachedTileResponse;
+          })
+          .finally(() => {
+            inflightTileRequests.delete(tileCacheKey);
           });
-        }
 
-        lastFailureStatus = response.status;
-        lastFailureText = await response.text().catch(() => '');
-
-        logFailureOnce(attempt.logKey, response.status, lastFailureText);
-      } catch (fetchError: any) {
-        clearTimeout(timeoutId);
-        if (fetchError.name === 'AbortError') {
-          lastFailureText = 'Request timeout after 5s';
-          continue;
-        }
-        throw fetchError;
+        inflightTileRequests.set(tileCacheKey, refreshPromise);
       }
+
+      return createTileResponse(cachedTile.cached, 'STALE');
     }
 
-    return emptyTile(lastFailureStatus === 401 || lastFailureStatus === 403 ? 200 : lastFailureStatus);
+    const inflightRequest = inflightTileRequests.get(tileCacheKey);
+    const tileResponsePromise = inflightRequest ?? fetchTileFromUpstream(attempts)
+      .then((response) => {
+        cacheTile(tileCacheKey, response);
+        return {
+          ...response,
+          cachedAt: Date.now(),
+        } satisfies CachedTileResponse;
+      })
+      .finally(() => {
+        inflightTileRequests.delete(tileCacheKey);
+      });
+
+    if (!inflightRequest) {
+      inflightTileRequests.set(tileCacheKey, tileResponsePromise);
+    }
+
+    const tileResponse = await tileResponsePromise;
+    return createTileResponse(tileResponse, 'MISS');
   } catch (error) {
     console.error('OpenWeather map tile proxy error:', error);
-    return emptyTile(502);
+    if (cachedTile) {
+      return createTileResponse(cachedTile.cached, 'STALE');
+    }
+    const upstreamStatus = typeof error === 'object'
+      && error !== null
+      && 'status' in error
+      && typeof error.status === 'number'
+      ? error.status
+      : 502;
+    return emptyTile(upstreamStatus === 401 || upstreamStatus === 403 ? 200 : upstreamStatus);
   }
 }

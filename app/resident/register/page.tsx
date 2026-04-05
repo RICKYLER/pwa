@@ -3,19 +3,62 @@
 import Link from 'next/link';
 import { FormEvent, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { AlertTriangle, Lock, Mail, ShieldCheck, User } from 'lucide-react';
+import CivicAuthShell, { type CivicAuthFeature, type CivicAuthStat } from '@/components/auth/CivicAuthShell';
 import { getDefaultRouteForUser, restoreSession } from '@/lib/auth';
+import { BARANGAY_OPTIONS } from '@/lib/barangays';
+import {
+  AlertTriangle,
+  BadgeCheck,
+  Building2,
+  Eye,
+  EyeOff,
+  FileCheck2,
+  Lock,
+  Mail,
+  ShieldCheck,
+  User,
+} from 'lucide-react';
 
-const DEFAULT_BARANGAY_ID = process.env.NEXT_PUBLIC_DEFAULT_BARANGAY_ID?.trim() || 'barangay-1';
+const REGISTER_FEATURES: CivicAuthFeature[] = [
+  {
+    icon: User,
+    label: 'Resident account',
+    description: 'Create your own resident login for household registration and status tracking.',
+  },
+  {
+    icon: Mail,
+    label: 'Email verification',
+    description: 'You must verify your email address before this resident account can sign in.',
+  },
+  {
+    icon: FileCheck2,
+    label: 'Registration status',
+    description: 'After signing in, you can submit a household registration and check its review status online.',
+  },
+  {
+    icon: ShieldCheck,
+    label: 'Resident-only history',
+    description: 'Your resident account is limited to your own registration records and updates.',
+  },
+];
+
+const REGISTER_STATS: CivicAuthStat[] = [
+  { value: '01', label: 'create account', description: 'Enter your full name, email address, and password.' },
+  { value: '02', label: 'verify email', description: 'Open the verification email and confirm your address.' },
+  { value: '03', label: 'sign in', description: 'Sign in and start your household registration.' },
+];
 
 export default function ResidentRegisterPage() {
   const router = useRouter();
   const [form, setForm] = useState({
     name: '',
     email: '',
+    barangay_id: '',
     password: '',
     confirmPassword: '',
   });
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [error, setError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -40,6 +83,11 @@ export default function ResidentRegisterPage() {
       return;
     }
 
+    if (!form.barangay_id) {
+      setError('Select your barangay.');
+      return;
+    }
+
     try {
       setIsSubmitting(true);
       const response = await fetch('/api/auth/register', {
@@ -49,7 +97,7 @@ export default function ResidentRegisterPage() {
           name: form.name,
           email: form.email,
           password: form.password,
-          barangay_id: DEFAULT_BARANGAY_ID,
+          barangay_id: form.barangay_id,
         }),
       });
 
@@ -71,133 +119,176 @@ export default function ResidentRegisterPage() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-950">
-      <div className="mx-auto flex min-h-screen max-w-6xl flex-col lg:flex-row">
-        <section className="relative hidden overflow-hidden px-12 py-16 text-white lg:flex lg:w-1/2 lg:flex-col lg:justify-center">
-          <div className="absolute inset-0 bg-gradient-to-br from-indigo-900 via-violet-900 to-slate-950" />
-          <div className="absolute top-1/4 left-1/4 h-72 w-72 rounded-full bg-indigo-500/20 blur-3xl" />
-          <div className="absolute bottom-1/4 right-1/4 h-96 w-96 rounded-full bg-violet-500/15 blur-3xl" />
-          <div className="relative z-10 max-w-md">
-            <div className="mb-8 flex h-20 w-20 items-center justify-center rounded-3xl bg-white/10 shadow-2xl shadow-indigo-500/25 backdrop-blur">
-              <ShieldCheck className="h-10 w-10" />
-            </div>
-            <p className="text-sm font-semibold uppercase tracking-[0.3em] text-indigo-200">Resident Self-Service</p>
-            <h1 className="mt-4 text-4xl font-bold leading-tight">
-              Create a resident account and track your registration online.
-            </h1>
-            <p className="mt-5 text-base leading-7 text-indigo-200">
-              Residents can sign in, submit a registration, and monitor approval status without using staff credentials.
-            </p>
-          </div>
-        </section>
-
-        <section className="flex w-full items-center justify-center bg-white px-6 py-10 lg:w-1/2">
-          <div className="w-full max-w-md">
-            <div className="mb-8 text-center lg:text-left">
-              <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-indigo-500 to-violet-600 text-white shadow-lg shadow-indigo-500/30 lg:mx-0">
-                <User className="h-7 w-7" />
-              </div>
-              <h1 className="text-3xl font-bold text-slate-900">Resident account registration</h1>
-              <p className="mt-2 text-sm text-slate-500">
-                Create your own login, verify your Gmail, then sign in to submit and monitor a household registration.
-              </p>
-            </div>
-
-            <div className="mb-6 rounded-2xl border border-indigo-100 bg-indigo-50 px-4 py-3 text-sm text-indigo-900">
-              After registration, we will send a verification link to your email before you can log in.
-            </div>
-
-            <form onSubmit={handleSubmit} className="space-y-5">
-              <div>
-                <label htmlFor="name" className="mb-1.5 block text-sm font-semibold text-slate-700">Full name</label>
-                <div className="relative">
-                  <User className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                  <input
-                    id="name"
-                    type="text"
-                    value={form.name}
-                    onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))}
-                    required
-                    className="w-full rounded-xl border border-slate-200 bg-slate-50 py-3 pl-10 pr-4 text-sm text-slate-900 transition focus:border-indigo-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
-                    placeholder="Your full name"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label htmlFor="email" className="mb-1.5 block text-sm font-semibold text-slate-700">Email address</label>
-                <div className="relative">
-                  <Mail className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                  <input
-                    id="email"
-                    type="email"
-                    value={form.email}
-                    onChange={(event) => setForm((current) => ({ ...current, email: event.target.value }))}
-                    required
-                    className="w-full rounded-xl border border-slate-200 bg-slate-50 py-3 pl-10 pr-4 text-sm text-slate-900 transition focus:border-indigo-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
-                    placeholder="you@example.com"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label htmlFor="password" className="mb-1.5 block text-sm font-semibold text-slate-700">Password</label>
-                <div className="relative">
-                  <Lock className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                  <input
-                    id="password"
-                    type="password"
-                    value={form.password}
-                    onChange={(event) => setForm((current) => ({ ...current, password: event.target.value }))}
-                    required
-                    className="w-full rounded-xl border border-slate-200 bg-slate-50 py-3 pl-10 pr-4 text-sm text-slate-900 transition focus:border-indigo-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
-                    placeholder="Minimum 8 characters"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label htmlFor="confirmPassword" className="mb-1.5 block text-sm font-semibold text-slate-700">Confirm password</label>
-                <div className="relative">
-                  <Lock className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                  <input
-                    id="confirmPassword"
-                    type="password"
-                    value={form.confirmPassword}
-                    onChange={(event) => setForm((current) => ({ ...current, confirmPassword: event.target.value }))}
-                    required
-                    className="w-full rounded-xl border border-slate-200 bg-slate-50 py-3 pl-10 pr-4 text-sm text-slate-900 transition focus:border-indigo-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
-                    placeholder="Re-enter your password"
-                  />
-                </div>
-              </div>
-
-              {error && (
-                <div className="flex items-start gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-                  <AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0" />
-                  <span>{error}</span>
-                </div>
-              )}
-
-              <button
-                type="submit"
-                disabled={isSubmitting}
-                className="flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-indigo-600 to-violet-600 px-4 py-3 text-sm font-semibold text-white shadow-lg shadow-indigo-500/25 transition hover:opacity-95 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {isSubmitting ? 'Creating account...' : 'Create account and verify email'}
-              </button>
-            </form>
-
-            <p className="mt-6 text-center text-sm text-slate-500">
-              Already have a resident account?
-              {' '}
-              <Link href="/login" className="font-semibold text-indigo-600 hover:text-indigo-700">
-                Sign in
-              </Link>
-            </p>
-          </div>
-        </section>
+    <CivicAuthShell
+      heroEyebrow="Resident self-service"
+      heroTitle="Create your resident account."
+      heroDescription="Create your resident login, verify your email address, then sign in to submit a household registration and check its review status."
+      heroBadge="Resident household registration"
+      heroFootnote={`Choose your barangay from the official list of ${BARANGAY_OPTIONS.length} barangays.`}
+      panelEyebrow="Resident registration"
+      panelTitle="Create resident account"
+      panelDescription="Create your resident login, select your barangay, then verify your email before signing in."
+      panelAside={
+        <div className="inline-flex items-center gap-2 rounded-full border border-amber-200 bg-amber-50 px-3.5 py-1.5 text-[11px] font-semibold uppercase tracking-[0.18em] text-amber-700">
+          <BadgeCheck className="h-4 w-4" />
+          Email verification required
+        </div>
+      }
+      features={REGISTER_FEATURES}
+      stats={REGISTER_STATS}
+    >
+      <div className="mb-5 rounded-[22px] border border-cyan-100 bg-cyan-50/75 px-4 py-3.5">
+        <p className="text-sm font-semibold text-cyan-950">Before you continue</p>
+        <p className="mt-1 text-sm leading-5 text-slate-600">
+          Use an email address you can access right now. We will send the verification link there, and this account cannot sign in until that step is complete.
+        </p>
       </div>
-    </div>
+
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <div className="grid gap-4 lg:grid-cols-3">
+          <div>
+            <label htmlFor="name" className="mb-1.5 block text-sm font-semibold text-slate-700">
+              Full name
+            </label>
+            <div className="relative">
+              <User className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+              <input
+                id="name"
+                type="text"
+                value={form.name}
+                onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))}
+                required
+                className="h-[52px] w-full rounded-[20px] border border-slate-200 bg-slate-50 py-3 pl-11 pr-4 text-sm text-slate-900 shadow-[inset_0_1px_0_rgba(255,255,255,0.8)] outline-none transition placeholder:text-slate-400 focus:border-cyan-800 focus:bg-white focus:ring-4 focus:ring-cyan-900/10"
+                placeholder="Enter your full name"
+                autoComplete="name"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label htmlFor="email" className="mb-1.5 block text-sm font-semibold text-slate-700">
+              Email address
+            </label>
+            <div className="relative">
+              <Mail className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+              <input
+                id="email"
+                type="email"
+                value={form.email}
+                onChange={(event) => setForm((current) => ({ ...current, email: event.target.value }))}
+                required
+                className="h-[52px] w-full rounded-[20px] border border-slate-200 bg-slate-50 py-3 pl-11 pr-4 text-sm text-slate-900 shadow-[inset_0_1px_0_rgba(255,255,255,0.8)] outline-none transition placeholder:text-slate-400 focus:border-cyan-800 focus:bg-white focus:ring-4 focus:ring-cyan-900/10"
+                placeholder="you@example.com"
+                autoComplete="email"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label htmlFor="barangay_id" className="mb-1.5 block text-sm font-semibold text-slate-700">
+              Barangay
+            </label>
+            <div className="relative">
+              <Building2 className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+              <select
+                id="barangay_id"
+                value={form.barangay_id}
+                onChange={(event) => setForm((current) => ({ ...current, barangay_id: event.target.value }))}
+                required
+                className="h-[52px] w-full appearance-none rounded-[20px] border border-slate-200 bg-slate-50 py-3 pl-11 pr-4 text-sm text-slate-900 shadow-[inset_0_1px_0_rgba(255,255,255,0.8)] outline-none transition focus:border-cyan-800 focus:bg-white focus:ring-4 focus:ring-cyan-900/10"
+              >
+                <option value="">Select barangay</option>
+                {BARANGAY_OPTIONS.map((option) => (
+                  <option key={option.id} value={option.id}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div>
+            <label htmlFor="password" className="mb-1.5 block text-sm font-semibold text-slate-700">
+              Password
+            </label>
+            <div className="relative">
+              <Lock className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+              <input
+                id="password"
+                type={showPassword ? 'text' : 'password'}
+                value={form.password}
+                onChange={(event) => setForm((current) => ({ ...current, password: event.target.value }))}
+                required
+                className="h-[52px] w-full rounded-[20px] border border-slate-200 bg-slate-50 py-3 pl-11 pr-12 text-sm text-slate-900 shadow-[inset_0_1px_0_rgba(255,255,255,0.8)] outline-none transition placeholder:text-slate-400 focus:border-cyan-800 focus:bg-white focus:ring-4 focus:ring-cyan-900/10"
+                placeholder="Minimum 8 characters"
+                autoComplete="new-password"
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword((current) => !current)}
+                className="absolute right-3 top-1/2 inline-flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-full text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
+              >
+                {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+              </button>
+            </div>
+          </div>
+
+          <div>
+            <label htmlFor="confirmPassword" className="mb-1.5 block text-sm font-semibold text-slate-700">
+              Confirm password
+            </label>
+            <div className="relative">
+              <Lock className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+              <input
+                id="confirmPassword"
+                type={showConfirmPassword ? 'text' : 'password'}
+                value={form.confirmPassword}
+                onChange={(event) => setForm((current) => ({ ...current, confirmPassword: event.target.value }))}
+                required
+                className="h-[52px] w-full rounded-[20px] border border-slate-200 bg-slate-50 py-3 pl-11 pr-12 text-sm text-slate-900 shadow-[inset_0_1px_0_rgba(255,255,255,0.8)] outline-none transition placeholder:text-slate-400 focus:border-cyan-800 focus:bg-white focus:ring-4 focus:ring-cyan-900/10"
+                placeholder="Re-enter your password"
+                autoComplete="new-password"
+              />
+              <button
+                type="button"
+                onClick={() => setShowConfirmPassword((current) => !current)}
+                className="absolute right-3 top-1/2 inline-flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-full text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
+              >
+                {showConfirmPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div className="rounded-[20px] border border-slate-200 bg-slate-50/80 px-4 py-3 text-xs leading-5 text-slate-600 sm:text-sm">
+          Passwords should be at least 8 characters long and easy for you to remember securely.
+        </div>
+
+        {error ? (
+          <div className="flex items-start gap-3 rounded-[20px] border border-rose-200 bg-rose-50/90 px-4 py-3 text-sm text-rose-800">
+            <AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0" />
+            <span>{error}</span>
+          </div>
+        ) : null}
+
+        <button
+          type="submit"
+          disabled={isSubmitting}
+          className="inline-flex h-[52px] w-full items-center justify-center gap-2 rounded-[18px] bg-cyan-950 px-4 text-sm font-semibold text-white shadow-[0_24px_42px_-28px_rgba(8,47,73,0.75)] transition hover:bg-cyan-900 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {isSubmitting ? 'Creating account...' : 'Create account and send verification'}
+        </button>
+      </form>
+
+      <div className="mt-4 text-center text-sm text-slate-600">
+        Already have a resident account?
+        {' '}
+        <Link href="/login" className="font-semibold text-cyan-800 transition hover:text-cyan-950">
+          Sign in here
+        </Link>
+      </div>
+    </CivicAuthShell>
   );
 }

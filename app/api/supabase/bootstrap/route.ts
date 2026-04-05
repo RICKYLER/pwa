@@ -169,20 +169,26 @@ async function loadInventoryBundle() {
   };
 }
 
-async function loadDistributionBundle() {
+async function loadDistributionEvents() {
   const supabase = getSupabaseAdminClient();
-  const [events, records] = await Promise.all([
-    supabase.from('distribution_events').select('*').order('scheduled_date', { ascending: false }),
-    supabase.from('distribution_records').select('*').order('timestamp', { ascending: false }),
-  ]);
+  const { data, error } = await supabase
+    .from('distribution_events')
+    .select('*')
+    .order('scheduled_date', { ascending: false });
 
-  const error = events.error || records.error;
   if (error) throw new Error(error.message);
+  return data ?? [];
+}
 
-  return {
-    distribution_events: events.data ?? [],
-    distribution_records: records.data ?? [],
-  };
+async function loadDistributionRecords() {
+  const supabase = getSupabaseAdminClient();
+  const { data, error } = await supabase
+    .from('distribution_records')
+    .select('*')
+    .order('timestamp', { ascending: false });
+
+  if (error) throw new Error(error.message);
+  return data ?? [];
 }
 
 async function loadIncidents() {
@@ -237,8 +243,29 @@ async function buildBootstrapPayload(
     wants('audit_logs')
     || (needsHouseholds && user.role === 'resident')
   );
+  const canReadInventory = user.role === 'admin' || user.role === 'encoder';
+  const canReadDistributionEvents = user.role === 'admin' || user.role === 'encoder' || user.role === 'responder';
+  const canReadDistributionRecords = user.role === 'admin' || user.role === 'encoder';
+  const canReadIncidents = ['admin', 'encoder', 'health_worker', 'responder'].includes(user.role);
   const remoteUserId = shouldResolveRemoteUserId
     ? await resolveSupabaseUserId(user.id).catch(() => null)
+    : null;
+  const programsPromise = wants('programs') ? loadPrograms() : null;
+  const locationMasterPromise = wants('location_master_lists') ? loadLocationMasters(user) : null;
+  const auditLogsPromise = wants('audit_logs') ? loadAuditLogs(remoteUserId, user.role) : null;
+  const incidentsPromise = wants('incidents') && canReadIncidents ? loadIncidents() : null;
+  const distributionEventsPromise = wants('distribution_events') && canReadDistributionEvents
+    ? loadDistributionEvents()
+    : null;
+  const distributionRecordsPromise = wants('distribution_records') && canReadDistributionRecords
+    ? loadDistributionRecords()
+    : null;
+  const inventoryBundlePromise = canReadInventory && (
+    wants('inventory_items')
+    || wants('inventory_movements')
+    || wants('package_templates')
+  )
+    ? loadInventoryBundle()
     : null;
 
   let households: Record<string, unknown>[] = [];
@@ -267,32 +294,33 @@ async function buildBootstrapPayload(
     payload.residents = residents;
   }
 
-  if (wants('vulnerability_flags')) {
-    payload.vulnerability_flags = await loadVulnerabilityFlags(residentIds, user.role);
-  }
+  const [vulnerabilityFlags, beneficiaries] = await Promise.all([
+    wants('vulnerability_flags') ? loadVulnerabilityFlags(residentIds, user.role) : Promise.resolve([]),
+    wants('beneficiaries') ? loadBeneficiaries(user, residentIds) : Promise.resolve([]),
+  ]);
 
-  if (wants('programs')) {
-    payload.programs = await loadPrograms();
+  if (wants('vulnerability_flags')) {
+    payload.vulnerability_flags = vulnerabilityFlags;
   }
 
   if (wants('beneficiaries')) {
-    payload.beneficiaries = await loadBeneficiaries(user, residentIds);
+    payload.beneficiaries = beneficiaries;
   }
 
-  if (wants('location_master_lists')) {
-    payload.location_master_lists = await loadLocationMasters(user);
+  if (programsPromise) {
+    payload.programs = await programsPromise;
   }
 
-  if (wants('audit_logs')) {
-    payload.audit_logs = await loadAuditLogs(remoteUserId, user.role);
+  if (locationMasterPromise) {
+    payload.location_master_lists = await locationMasterPromise;
   }
 
-  if ((user.role === 'admin' || user.role === 'encoder') && (
-    wants('inventory_items')
-    || wants('inventory_movements')
-    || wants('package_templates')
-  )) {
-    const inventoryBundle = await loadInventoryBundle();
+  if (auditLogsPromise) {
+    payload.audit_logs = await auditLogsPromise;
+  }
+
+  if (inventoryBundlePromise) {
+    const inventoryBundle = await inventoryBundlePromise;
     if (wants('inventory_items')) {
       payload.inventory_items = inventoryBundle.inventory_items;
     }
@@ -304,21 +332,16 @@ async function buildBootstrapPayload(
     }
   }
 
-  if ((user.role === 'admin' || user.role === 'encoder') && (
-    wants('distribution_events')
-    || wants('distribution_records')
-  )) {
-    const distributionBundle = await loadDistributionBundle();
-    if (wants('distribution_events')) {
-      payload.distribution_events = distributionBundle.distribution_events;
-    }
-    if (wants('distribution_records')) {
-      payload.distribution_records = distributionBundle.distribution_records;
-    }
+  if (distributionEventsPromise) {
+    payload.distribution_events = await distributionEventsPromise;
   }
 
-  if (wants('incidents') && ['admin', 'encoder', 'health_worker', 'responder'].includes(user.role)) {
-    payload.incidents = await loadIncidents();
+  if (distributionRecordsPromise) {
+    payload.distribution_records = await distributionRecordsPromise;
+  }
+
+  if (incidentsPromise) {
+    payload.incidents = await incidentsPromise;
   }
 
   return payload;

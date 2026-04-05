@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
+import { isBarangayId } from '@/lib/barangays';
 import { requireAdminUser } from '@/lib/server/auth-guards';
 import { deleteUserAccount, getStoredUserById, updateUserAccount } from '@/lib/server/auth-store';
 import { writeServerAuditLog } from '@/lib/server/supabase-audit';
@@ -8,8 +9,13 @@ export const runtime = 'nodejs';
 
 const updateUserSchema = z.object({
   name: z.string().min(1).optional(),
-  role: z.enum(['admin', 'encoder', 'health_worker', 'responder']).optional(),
-  barangay_id: z.string().min(1).optional(),
+  role: z.enum(['admin', 'encoder', 'health_worker', 'responder', 'resident']).optional(),
+  status: z.enum(['active', 'inactive']).optional(),
+  barangay_id: z.string()
+    .trim()
+    .min(1, 'Select a barangay.')
+    .optional()
+    .refine((value) => value === undefined || isBarangayId(value), { message: 'Select a valid barangay.' }),
 });
 
 export async function PATCH(
@@ -22,6 +28,11 @@ export async function PATCH(
   }
 
   const { id } = await context.params;
+  const existingUser = await getStoredUserById(id);
+
+  if (!existingUser) {
+    return NextResponse.json({ error: 'User not found.' }, { status: 404 });
+  }
 
   let payload: z.infer<typeof updateUserSchema>;
 
@@ -34,15 +45,37 @@ export async function PATCH(
     return NextResponse.json({ error: 'Invalid request.' }, { status: 400 });
   }
 
+  const nextRole = payload.role ?? existingUser.role;
+
+  if (payload.status && nextRole === 'resident') {
+    return NextResponse.json(
+      { error: 'Resident accounts use hard delete and cannot be deactivated.' },
+      { status: 400 },
+    );
+  }
+
+  if (payload.status === 'inactive' && guard.user.id === id) {
+    return NextResponse.json(
+      { error: 'You cannot deactivate your own account.' },
+      { status: 400 },
+    );
+  }
+
   try {
     const user = await updateUserAccount(id, payload);
     try {
+      const auditAction = payload.status && payload.status !== existingUser.status
+        ? (payload.status === 'inactive' ? 'DEACTIVATE' : 'REACTIVATE')
+        : 'UPDATE';
+
       await writeServerAuditLog({
         actor: guard.user,
-        action: 'UPDATE',
+        action: auditAction,
         entity_type: 'user',
         entity_id: user.id,
         changes: {
+          previous_role: existingUser.role,
+          previous_status: existingUser.status,
           ...payload,
           source: 'admin_update_user',
         },
@@ -79,9 +112,20 @@ export async function DELETE(
 
   try {
     const existingUser = await getStoredUserById(id);
+    if (!existingUser) {
+      return NextResponse.json({ error: 'User not found.' }, { status: 404 });
+    }
+
+    if (existingUser.role !== 'resident') {
+      return NextResponse.json(
+        { error: 'Staff accounts must be deactivated instead of deleted.' },
+        { status: 400 },
+      );
+    }
+
     await deleteUserAccount(id);
 
-    if (existingUser?.email) {
+    if (existingUser.email) {
       try {
         await writeServerAuditLog({
           actor: guard.user,

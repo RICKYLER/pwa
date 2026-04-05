@@ -88,7 +88,7 @@ export async function createResidentSelfServiceAccount(input: {
 
 export async function updateUserAccount(
   userId: string,
-  patch: Partial<Pick<User, 'name' | 'role' | 'barangay_id'>>,
+  patch: Partial<Pick<User, 'name' | 'role' | 'status' | 'barangay_id'>>,
 ) {
   return (await getAuthStore()).updateUserAccount(userId, patch);
 }

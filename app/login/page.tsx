@@ -1,23 +1,88 @@
 'use client';
 
-import { FormEvent, useState, useEffect } from 'react';
+import { FormEvent, useEffect, useState } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
-import { AuthRequestError, getDefaultRouteForUser, login, restoreSession } from '@/lib/auth';
-import { Eye, EyeOff, ShieldCheck, Cpu, Lock, Mail, Loader2, RefreshCw } from 'lucide-react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import {
+  AuthRequestError,
+  getDefaultRouteForUser,
+  login,
+  restoreSession,
+} from '@/lib/auth';
+import CivicAuthShell, { type CivicAuthFeature, type CivicAuthStat } from '@/components/auth/CivicAuthShell';
+import {
+  BadgeCheck,
+  Eye,
+  EyeOff,
+  FileCheck2,
+  Landmark,
+  Loader2,
+  Lock,
+  Mail,
+  RefreshCw,
+  ShieldCheck,
+} from 'lucide-react';
+
+const LOGIN_FEATURES: CivicAuthFeature[] = [
+  {
+    icon: ShieldCheck,
+    label: 'Trusted civic access',
+    description: 'One secure sign-in experience for staff operations and verified resident self-service.',
+  },
+  {
+    icon: FileCheck2,
+    label: 'Registration visibility',
+    description: 'Residents can create an account, submit household records, and follow approval progress online.',
+  },
+  {
+    icon: Landmark,
+    label: 'Barangay operations',
+    description: 'Staff accounts open the operational dashboard, field response, distribution, and reports.',
+  },
+  {
+    icon: BadgeCheck,
+    label: 'Verified resident identity',
+    description: 'Resident accounts stay blocked until the email owner confirms the verification link.',
+  },
+];
+
+const LOGIN_STATS: CivicAuthStat[] = [
+  { value: '1', label: 'entry point', description: 'Shared sign-in for staff and residents.' },
+  { value: '24/7', label: 'resident access', description: 'Registrations and status tracking stay available online.' },
+  { value: 'Role-based', label: 'session routing', description: 'Each account lands in the correct workspace after sign-in.' },
+];
+
+function LoadingSkeleton() {
+  return (
+    <div className="space-y-5">
+      <div>
+        <div className="mb-2 h-4 w-28 rounded-full bg-slate-100" />
+        <div className="h-[58px] animate-pulse rounded-[22px] border border-slate-200 bg-slate-50" />
+      </div>
+      <div>
+        <div className="mb-2 h-4 w-24 rounded-full bg-slate-100" />
+        <div className="h-[58px] animate-pulse rounded-[22px] border border-slate-200 bg-slate-50" />
+      </div>
+      <div className="h-[56px] animate-pulse rounded-[20px] bg-slate-200" />
+    </div>
+  );
+}
 
 export default function LoginPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPass, setShowPass] = useState(false);
   const [error, setError] = useState('');
+  const [inactiveAccountMessage, setInactiveAccountMessage] = useState('');
   const [verificationEmail, setVerificationEmail] = useState('');
   const [verificationHelpVisible, setVerificationHelpVisible] = useState(false);
   const [verificationMessage, setVerificationMessage] = useState('');
   const [isResendingVerification, setIsResendingVerification] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [isMounted, setIsMounted] = useState(false);
+  const sessionReason = searchParams.get('reason');
 
   useEffect(() => {
     setIsMounted(true);
@@ -26,15 +91,19 @@ export default function LoginPage() {
   useEffect(() => {
     if (!isMounted) return;
     const existingUser = restoreSession();
-    if (existingUser) router.push(getDefaultRouteForUser(existingUser));
+    if (existingUser) {
+      router.push(getDefaultRouteForUser(existingUser));
+    }
   }, [isMounted, router]);
 
-  async function handleSubmit(e: FormEvent<HTMLFormElement>) {
-    e.preventDefault();
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
     setError('');
+    setInactiveAccountMessage('');
     setVerificationMessage('');
     setVerificationHelpVisible(false);
     setIsLoading(true);
+
     try {
       const user = await login(email, password);
       router.push(getDefaultRouteForUser(user));
@@ -44,7 +113,12 @@ export default function LoginPage() {
         setVerificationHelpVisible(true);
       }
 
-      setError(err instanceof Error ? err.message : 'Login failed');
+      if (err instanceof AuthRequestError && err.code === 'ACCOUNT_INACTIVE') {
+        setInactiveAccountMessage(err.message);
+        setError('');
+      } else {
+        setError(err instanceof Error ? err.message : 'Login failed');
+      }
     } finally {
       setIsLoading(false);
     }
@@ -95,227 +169,215 @@ export default function LoginPage() {
     : '/forgot-password';
 
   return (
-    <div className="min-h-screen flex bg-slate-950">
-      {/* Left panel — branding */}
-      <div className="hidden lg:flex lg:w-1/2 relative overflow-hidden flex-col items-center justify-center p-12">
-        {/* Mesh gradient background */}
-        <div className="absolute inset-0 bg-gradient-to-br from-indigo-900 via-violet-900 to-slate-900" />
-        {/* Animated orbs */}
-        <div className="absolute top-1/4 left-1/4 w-72 h-72 bg-indigo-500/20 rounded-full blur-3xl animate-pulse" />
-        <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-violet-500/15 rounded-full blur-3xl animate-pulse" style={{ animationDelay: '1s' }} />
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-48 h-48 bg-blue-400/10 rounded-full blur-2xl" />
-        {/* Grid pattern */}
-        <div className="absolute inset-0 opacity-[0.03]"
-          style={{ backgroundImage: 'linear-gradient(rgba(255,255,255,1) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,1) 1px, transparent 1px)', backgroundSize: '48px 48px' }}
-        />
-
-        {/* Content */}
-        <div className="relative z-10 text-center max-w-sm">
-          <div className="w-20 h-20 rounded-3xl bg-gradient-to-br from-indigo-400 to-violet-600 flex items-center justify-center mx-auto mb-8 shadow-2xl shadow-indigo-500/40">
-            <ShieldCheck className="w-10 h-10 text-white" />
-          </div>
-          <h1 className="text-4xl font-bold text-white mb-4 leading-tight">
-            MSWDO<br />Census PWA
-          </h1>
-          <p className="text-indigo-300 text-lg leading-relaxed mb-8">
-            Municipal Household Census Management System
-          </p>
-
-          <div className="grid grid-cols-2 gap-3 text-left">
-            {[
-              { icon: Cpu, label: 'Realtime Sync', desc: 'Live Supabase updates' },
-              { icon: ShieldCheck, label: 'Secure', desc: 'Role-based access control' },
-              { icon: Lock, label: 'Cloud Data', desc: 'Stored in Supabase online' },
-              { icon: ShieldCheck, label: 'Official', desc: 'MSWDO compliant reports' },
-            ].map(f => (
-              <div key={f.label} className="bg-white/5 border border-white/10 rounded-xl p-3 backdrop-blur-sm">
-                <f.icon className="w-4 h-4 text-indigo-400 mb-1.5" />
-                <p className="text-white text-xs font-semibold">{f.label}</p>
-                <p className="text-indigo-300 text-xs">{f.desc}</p>
-              </div>
-            ))}
-          </div>
+    <CivicAuthShell
+      heroEyebrow="Civic access"
+      heroTitle="Secure municipal access for staff operations and resident services."
+      heroDescription="Use your assigned account to enter the MSWDO civic system. Staff accounts open operational tools, while verified residents continue to self-service registration and status tracking."
+      heroBadge="Barangay-1 service network"
+      heroFootnote="Residents should use their own account. Staff credentials stay reserved for operations and review."
+      panelEyebrow="Account sign in"
+      panelTitle="Welcome back"
+      panelDescription="Sign in with your assigned account to continue. Staff users land on the operations workspace, and verified residents land on the self-service portal."
+      panelAside={
+        <div className="inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-3.5 py-1.5 text-[11px] font-semibold uppercase tracking-[0.18em] text-emerald-700">
+          <ShieldCheck className="h-4 w-4" />
+          Secure session
         </div>
-      </div>
-
-      {/* Right panel — login form */}
-      <div className="w-full lg:w-1/2 flex items-center justify-center p-6 bg-white">
-        <div className="w-full max-w-md">
-          {/* Mobile logo */}
-          <div className="lg:hidden text-center mb-8">
-            <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center mx-auto mb-3 shadow-lg shadow-indigo-500/30">
-              <ShieldCheck className="w-7 h-7 text-white" />
+      }
+      features={LOGIN_FEATURES}
+      stats={LOGIN_STATS}
+      footer={
+        <p className="text-center text-xs text-slate-500">
+          Secure cookie session. Staff land on the civic console, and residents land on their own portal.
+        </p>
+      }
+    >
+      {isMounted ? (
+        <form onSubmit={handleSubmit} className="space-y-4">
+          {sessionReason === 'account-removed' || sessionReason === 'account-deactivated' || sessionReason === 'access-updated' ? (
+            <div className="rounded-[20px] border border-amber-200 bg-amber-50/90 px-4 py-3 text-sm text-amber-950">
+              <p className="font-semibold">
+                {sessionReason === 'account-removed'
+                  ? 'Resident account removed'
+                  : sessionReason === 'account-deactivated'
+                    ? 'Account deactivated'
+                    : 'Account access changed'}
+              </p>
+              <p className="mt-1 leading-5 text-amber-900">
+                {sessionReason === 'account-removed'
+                  ? 'An administrator removed this resident account. Contact MSWDO if you need clarification.'
+                  : sessionReason === 'account-deactivated'
+                    ? 'An administrator deactivated this account. Contact MSWDO if you need access restored.'
+                    : 'An administrator updated this account. Sign in again or contact MSWDO if you need help.'}
+              </p>
             </div>
-            <h1 className="text-2xl font-bold text-slate-900">MSWDO Census</h1>
+          ) : null}
+
+          {inactiveAccountMessage ? (
+            <div className="rounded-[20px] border border-amber-200 bg-amber-50/90 px-4 py-3 text-sm text-amber-950">
+              <p className="font-semibold">Account deactivated</p>
+              <p className="mt-1 leading-5 text-amber-900">{inactiveAccountMessage}</p>
+            </div>
+          ) : null}
+
+          <div className="rounded-[20px] border border-cyan-100 bg-cyan-50/75 px-4 py-3 text-sm text-slate-600">
+            <p className="font-semibold text-cyan-950">One sign-in page</p>
+            <p className="mt-1 leading-5">
+              Staff use assigned credentials. Residents use a verified resident account.
+            </p>
           </div>
 
-          <div className="mb-8">
-            <h2 className="text-3xl font-bold text-slate-900 mb-1">Welcome back</h2>
-            <p className="text-slate-500">Sign in with your assigned account to continue</p>
+          <div>
+            <label htmlFor="email" className="mb-1.5 block text-sm font-semibold text-slate-700">
+              Email address
+            </label>
+            <input
+              id="email"
+              type="email"
+              value={email}
+              onChange={(event) => {
+                setEmail(event.target.value);
+                setInactiveAccountMessage('');
+                setVerificationEmail(event.target.value.trim());
+                setVerificationHelpVisible(false);
+                setVerificationMessage('');
+              }}
+              className="h-[52px] w-full rounded-[20px] border border-slate-200 bg-slate-50 px-4 text-sm text-slate-900 shadow-[inset_0_1px_0_rgba(255,255,255,0.8)] outline-none transition placeholder:text-slate-400 focus:border-cyan-800 focus:bg-white focus:ring-4 focus:ring-cyan-900/10"
+              placeholder="name@email.com"
+              autoComplete="username"
+              required
+              disabled={isLoading}
+              suppressHydrationWarning
+            />
           </div>
 
-          {isMounted ? (
-            <form onSubmit={handleSubmit} className="space-y-5">
-              {/* Email */}
-              <div>
-                <label htmlFor="email" className="block text-sm font-semibold text-slate-700 mb-1.5">
-                  Email Address
-                </label>
-                <input
-                  id="email"
-                  type="email"
-                  value={email}
-                  onChange={(e) => {
-                    setEmail(e.target.value);
-                    setVerificationEmail(e.target.value.trim());
-                    setVerificationHelpVisible(false);
-                    setVerificationMessage('');
-                  }}
-                  className="w-full px-4 py-3 border border-slate-200 rounded-xl bg-slate-50 text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-400 focus:bg-white transition-all text-sm"
-                  placeholder="your@email.com"
-                  autoComplete="username"
-                  required
-                  disabled={isLoading}
-                  suppressHydrationWarning
-                />
+          <div>
+            <div className="mb-1.5 flex items-center justify-between gap-3">
+              <label htmlFor="password" className="block text-sm font-semibold text-slate-700">
+                Password
+              </label>
+              <Link
+                href={forgotPasswordHref}
+                className="text-xs font-semibold text-cyan-800 transition hover:text-cyan-950"
+              >
+                Forgot password?
+              </Link>
+            </div>
+            <div className="relative">
+              <input
+                id="password"
+                type={showPass ? 'text' : 'password'}
+                value={password}
+                onChange={(event) => {
+                  setPassword(event.target.value);
+                  setInactiveAccountMessage('');
+                  setVerificationHelpVisible(false);
+                  setVerificationMessage('');
+                }}
+                className="h-[52px] w-full rounded-[20px] border border-slate-200 bg-slate-50 px-4 pr-12 text-sm text-slate-900 shadow-[inset_0_1px_0_rgba(255,255,255,0.8)] outline-none transition placeholder:text-slate-400 focus:border-cyan-800 focus:bg-white focus:ring-4 focus:ring-cyan-900/10"
+                placeholder="Enter your password"
+                autoComplete="current-password"
+                required
+                disabled={isLoading}
+                suppressHydrationWarning
+              />
+              <button
+                type="button"
+                onClick={() => setShowPass((current) => !current)}
+                className="absolute right-3 top-1/2 inline-flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-full text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
+              >
+                {showPass ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+              </button>
+            </div>
+          </div>
+
+          {error ? (
+            <div className="flex items-start gap-3 rounded-[20px] border border-rose-200 bg-rose-50/90 px-4 py-3 text-sm text-rose-800">
+              <div className="mt-0.5 flex h-5 w-5 items-center justify-center rounded-full bg-rose-100 text-xs font-bold text-rose-700">
+                !
               </div>
+              <span>{error}</span>
+            </div>
+          ) : null}
 
-              {/* Password */}
-              <div>
-                <div className="mb-1.5 flex items-center justify-between gap-3">
-                  <label htmlFor="password" className="block text-sm font-semibold text-slate-700">
-                    Password
-                  </label>
-                  <Link
-                    href={forgotPasswordHref}
-                    className="text-xs font-semibold text-indigo-600 transition hover:text-indigo-700"
-                  >
-                    Forgot password?
-                  </Link>
-                </div>
-                <div className="relative">
-                  <input
-                    id="password"
-                    type={showPass ? 'text' : 'password'}
-                    value={password}
-                    onChange={(e) => {
-                      setPassword(e.target.value);
-                      setVerificationHelpVisible(false);
-                      setVerificationMessage('');
-                    }}
-                    className="w-full px-4 py-3 pr-12 border border-slate-200 rounded-xl bg-slate-50 text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-400 focus:bg-white transition-all text-sm"
-                    placeholder="••••••••"
-                    autoComplete="current-password"
-                    required
-                    disabled={isLoading}
-                    suppressHydrationWarning
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPass(!showPass)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-slate-600 transition-colors"
-                  >
-                    {showPass ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                  </button>
-                </div>
-              </div>
-
-              {/* Error */}
-              {error && (
-                <div className="p-3.5 bg-red-50 border border-red-200 rounded-xl text-red-700 text-sm flex items-start gap-2">
-                  <span className="w-4 h-4 text-red-500 flex-shrink-0 mt-0.5">⚠</span>
-                  {error}
-                </div>
-              )}
-
-              {verificationHelpVisible && (
-                <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
-                  <div className="flex items-start gap-3">
-                    <Mail className="mt-0.5 h-4 w-4 flex-shrink-0 text-amber-600" />
-                    <div className="space-y-3">
-                      <p className="font-semibold">Resident email still needs verification.</p>
-                      <p className="text-amber-800">
-                        For security, resident accounts should stay blocked until the email owner confirms the address.
-                        You can resend the verification email or open the verification page again.
-                      </p>
-                      {verificationMessage && (
-                        <p className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-emerald-700">
-                          {verificationMessage}
-                        </p>
-                      )}
-                      <div className="flex flex-col gap-3 sm:flex-row">
-                        <button
-                          type="button"
-                          onClick={() => { void handleResendVerification(); }}
-                          disabled={isResendingVerification || isLoading}
-                          className="inline-flex items-center justify-center gap-2 rounded-xl border border-amber-300 bg-white px-4 py-2.5 font-semibold text-amber-900 transition hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-60"
-                        >
-                          {isResendingVerification ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-                          {isResendingVerification ? 'Sending...' : 'Resend verification email'}
-                        </button>
-                        <Link
-                          href={verifyPageHref}
-                          className="inline-flex items-center justify-center rounded-xl bg-amber-600 px-4 py-2.5 font-semibold text-white transition hover:bg-amber-700"
-                        >
-                          Open verification page
-                        </Link>
-                      </div>
-                    </div>
+          {verificationHelpVisible ? (
+            <div className="rounded-[22px] border border-amber-200 bg-amber-50/90 p-4 text-sm text-amber-950">
+              <div className="flex items-start gap-3">
+                <Mail className="mt-0.5 h-4 w-4 flex-shrink-0 text-amber-700" />
+                <div className="space-y-3">
+                  <p className="font-semibold">Resident email still needs verification.</p>
+                  <p className="leading-5 text-amber-900">
+                    For security, the resident account stays blocked until the email owner confirms the verification link.
+                    You can resend the email or return to the verification page.
+                  </p>
+                  {verificationMessage ? (
+                    <p className="rounded-[18px] border border-emerald-200 bg-emerald-50 px-3 py-2 text-emerald-700">
+                      {verificationMessage}
+                    </p>
+                  ) : null}
+                  <div className="flex flex-col gap-3 sm:flex-row">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void handleResendVerification();
+                      }}
+                      disabled={isResendingVerification || isLoading}
+                      className="inline-flex items-center justify-center gap-2 rounded-[16px] border border-amber-300 bg-white px-4 py-2.5 font-semibold text-amber-900 transition hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {isResendingVerification ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                      {isResendingVerification ? 'Sending...' : 'Resend verification email'}
+                    </button>
+                    <Link
+                      href={verifyPageHref}
+                      className="inline-flex items-center justify-center rounded-[16px] bg-amber-600 px-4 py-2.5 font-semibold text-white transition hover:bg-amber-700"
+                    >
+                      Open verification page
+                    </Link>
                   </div>
                 </div>
-              )}
-
-              {/* Submit */}
-              <button
-                type="submit"
-                disabled={isLoading}
-                className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-gradient-to-r from-indigo-600 to-violet-600 text-white font-semibold rounded-xl hover:opacity-90 disabled:opacity-60 transition-all shadow-lg shadow-indigo-500/30 hover:shadow-xl hover:shadow-indigo-500/30 hover:-translate-y-0.5 text-sm"
-              >
-                {isLoading ? (
-                  <>
-                    <div className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />
-                    Signing in…
-                  </>
-                ) : (
-                  <>
-                    <Lock className="w-4 h-4" />
-                    Sign In
-                  </>
-                )}
-              </button>
-
-              <div className="rounded-2xl border border-indigo-100 bg-indigo-50 p-4 text-sm text-indigo-900">
-                <p className="font-semibold">Resident access</p>
-                <p className="mt-1 text-indigo-800">
-                  Need your own login to submit and track a household registration?
-                </p>
-                <Link
-                  href="/resident/register"
-                  className="mt-3 inline-flex items-center rounded-xl bg-indigo-600 px-4 py-2 font-semibold text-white transition hover:bg-indigo-700"
-                >
-                  Create resident account
-                </Link>
               </div>
-            </form>
-          ) : (
-            <div className="space-y-5">
-              <div>
-                <div className="mb-1.5 h-5 w-28 rounded bg-slate-100" />
-                <div className="h-[50px] animate-pulse rounded-xl border border-slate-200 bg-slate-50" />
-              </div>
-              <div>
-                <div className="mb-1.5 h-5 w-24 rounded bg-slate-100" />
-                <div className="h-[50px] animate-pulse rounded-xl border border-slate-200 bg-slate-50" />
-              </div>
-              <div className="h-[50px] animate-pulse rounded-xl bg-slate-200" />
             </div>
-          )}
+          ) : null}
 
-          <p className="text-center text-xs text-slate-400 mt-6">
-            Secure cookie session · Staff land on the dashboard, residents land on their portal
-          </p>
-        </div>
-      </div>
-    </div>
+          <button
+            type="submit"
+            disabled={isLoading}
+            className="inline-flex h-[52px] w-full items-center justify-center gap-2 rounded-[18px] bg-cyan-950 px-4 text-sm font-semibold text-white shadow-[0_24px_42px_-28px_rgba(8,47,73,0.75)] transition hover:bg-cyan-900 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {isLoading ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Signing in...
+              </>
+            ) : (
+              <>
+                <Lock className="h-4 w-4" />
+                Sign in
+              </>
+            )}
+          </button>
+
+          <div className="rounded-[20px] border border-cyan-100 bg-[linear-gradient(180deg,rgba(236,250,255,0.95),rgba(243,248,251,0.95))] px-4 py-3.5">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-cyan-800">Resident self-service</p>
+                <p className="mt-1 text-sm font-semibold text-slate-950">Need a resident account?</p>
+                <p className="mt-1 text-sm leading-5 text-slate-600">
+                  Create one first, verify your email, then sign in here.
+                </p>
+              </div>
+              <Link
+                href="/resident/register"
+                className="inline-flex items-center justify-center rounded-[16px] bg-cyan-950 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-cyan-900"
+              >
+                Create account
+              </Link>
+            </div>
+          </div>
+        </form>
+      ) : (
+        <LoadingSkeleton />
+      )}
+    </CivicAuthShell>
   );
 }

@@ -9,6 +9,7 @@ import { getDefaultRouteForUser, getCurrentUser, isResidentUser } from '@/lib/au
 import { getHouseholds } from '@/lib/db/households';
 import type { Household } from '@/lib/db/schema';
 import { buildRegistrationTimeline, formatRegistrationStatusLabel, getHouseholdRegistrationStatus } from '@/lib/household-registration';
+import { CivicBadge, CivicPanel, CivicSectionHeading } from '@/components/ui/civic-primitives';
 
 function formatDate(value?: Date): string {
   if (!value) {
@@ -77,13 +78,13 @@ export default function ResidentPortalPage() {
     >
       <div className="grid gap-4 sm:grid-cols-3">
         {[
-          { label: 'My Registrations', value: records.length, icon: FileText, tone: 'bg-indigo-50 text-indigo-700' },
-          { label: 'Pending Review', value: pendingCount, icon: Clock3, tone: 'bg-amber-50 text-amber-700' },
-          { label: 'Approved', value: records.filter((record) => getHouseholdRegistrationStatus(record) === 'approved').length, icon: CheckCircle2, tone: 'bg-emerald-50 text-emerald-700' },
+          { label: 'My Registrations', value: records.length, icon: FileText, tone: 'bg-cyan-950 text-white' },
+          { label: 'Pending Review', value: pendingCount, icon: Clock3, tone: 'bg-amber-500 text-white' },
+          { label: 'Approved', value: records.filter((record) => getHouseholdRegistrationStatus(record) === 'approved').length, icon: CheckCircle2, tone: 'bg-emerald-600 text-white' },
         ].map((card) => {
           const Icon = card.icon;
           return (
-            <div key={card.label} className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+            <div key={card.label} className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-[0_18px_46px_-36px_rgba(15,23,42,0.24)]">
               <div className={`flex h-10 w-10 items-center justify-center rounded-2xl ${card.tone}`}>
                 <Icon className="h-5 w-5" />
               </div>
@@ -94,17 +95,16 @@ export default function ResidentPortalPage() {
         })}
       </div>
 
-      <div className="mt-6 rounded-[32px] border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
+      <CivicPanel className="mt-6 sm:p-6">
         <div className="flex flex-wrap items-start justify-between gap-4">
-          <div>
-            <h2 className="text-lg font-semibold text-slate-900">My Registration Records</h2>
-            <p className="mt-1 text-sm text-slate-500">
-              Every record you submit will appear here with its current review status.
-            </p>
-          </div>
+          <CivicSectionHeading
+            icon={FileText}
+            title="My registration records"
+            description="Every record you submit appears here with its current review status."
+          />
           <Link
             href="/households/register"
-            className="inline-flex items-center gap-2 rounded-2xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700"
+            className="inline-flex items-center gap-2 rounded-full bg-cyan-950 px-4 py-2.5 text-sm font-semibold text-white hover:bg-cyan-900"
           >
             <FileText className="h-4 w-4" />
             New Registration
@@ -112,7 +112,7 @@ export default function ResidentPortalPage() {
         </div>
 
         {isLoading ? (
-          <div className="mt-6 rounded-3xl border border-slate-200 bg-slate-50 px-4 py-12 text-center text-sm text-slate-500">
+          <div className="mt-6 rounded-[28px] border border-slate-200 bg-slate-50 px-4 py-12 text-center text-sm text-slate-500">
             Loading your registrations...
           </div>
         ) : records.length > 0 ? (
@@ -120,14 +120,12 @@ export default function ResidentPortalPage() {
             {records.map((record) => {
               const timeline = buildRegistrationTimeline(record);
               return (
-                <div key={record.id} className="rounded-3xl border border-slate-200 bg-slate-50 p-5">
+                <div key={record.id} className="rounded-[28px] border border-slate-200 bg-slate-50 p-5">
                   <div className="flex flex-wrap items-start justify-between gap-4">
                     <div>
                       <div className="flex flex-wrap items-center gap-2">
                         <h3 className="text-base font-semibold text-slate-900">{record.head_name}</h3>
-                        <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-600">
-                          {formatRegistrationStatusLabel(getHouseholdRegistrationStatus(record))}
-                        </span>
+                        <CivicBadge label={formatRegistrationStatusLabel(getHouseholdRegistrationStatus(record))} tone="amber" />
                       </div>
                       <p className="mt-2 text-sm text-slate-500">
                         {record.street_address}, {record.purok_sitio}, {record.barangay_name}, {record.municipality}
@@ -136,7 +134,7 @@ export default function ResidentPortalPage() {
                     </div>
                     <Link
                       href={`/households/register/status?id=${record.id}`}
-                      className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
+                      className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
                     >
                       View Status
                     </Link>
@@ -146,7 +144,7 @@ export default function ResidentPortalPage() {
                     {timeline.map((step) => (
                       <div
                         key={step.key}
-                        className={`rounded-2xl border px-3 py-3 text-sm ${
+                        className={`rounded-[22px] border px-3 py-3 text-sm ${
                           step.state === 'done'
                             ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
                             : step.state === 'current'
@@ -160,7 +158,7 @@ export default function ResidentPortalPage() {
                   </div>
 
                   {record.registration_review_notes?.trim() && (
-                    <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                    <div className="mt-4 rounded-[22px] border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
                       <div className="flex items-start gap-2">
                         <ShieldAlert className="mt-0.5 h-4 w-4 flex-shrink-0" />
                         <span>{record.registration_review_notes.trim()}</span>
@@ -179,7 +177,7 @@ export default function ResidentPortalPage() {
             })}
           </div>
         ) : (
-          <div className="mt-6 rounded-3xl border border-dashed border-slate-300 bg-slate-50 px-6 py-14 text-center">
+          <div className="mt-6 rounded-[28px] border border-dashed border-slate-300 bg-slate-50 px-6 py-14 text-center">
             <FileText className="mx-auto h-8 w-8 text-slate-300" />
             <p className="mt-4 text-base font-semibold text-slate-900">No registration submitted yet</p>
             <p className="mt-2 text-sm text-slate-500">
@@ -187,14 +185,14 @@ export default function ResidentPortalPage() {
             </p>
             <Link
               href="/households/register"
-              className="mt-5 inline-flex items-center gap-2 rounded-2xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700"
+              className="mt-5 inline-flex items-center gap-2 rounded-full bg-cyan-950 px-4 py-2.5 text-sm font-semibold text-white hover:bg-cyan-900"
             >
               <FileText className="h-4 w-4" />
               Start Registration
             </Link>
           </div>
         )}
-      </div>
+      </CivicPanel>
     </ResidentShell>
   );
 }

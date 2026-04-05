@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
+import { isBarangayId } from '@/lib/barangays';
 import { sendResidentVerificationEmail } from '@/lib/server/auth-email';
 import { resolveAppUrl } from '@/lib/server/app-url';
 import { writeServerAuditLog } from '@/lib/server/supabase-audit';
@@ -14,7 +15,10 @@ const registerSchema = z.object({
   name: z.string().trim().min(2, 'Full name is required.'),
   email: z.string().email('Enter a valid email address.'),
   password: z.string().min(8, 'Password must be at least 8 characters long.'),
-  barangay_id: z.string().trim().min(1).default('barangay-1'),
+  barangay_id: z.string()
+    .trim()
+    .min(1, 'Select your barangay.')
+    .refine((value) => isBarangayId(value), { message: 'Select a valid barangay.' }),
 });
 
 export async function POST(request: NextRequest) {

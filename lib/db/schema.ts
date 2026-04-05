@@ -1,6 +1,7 @@
 // Core type definitions for MSWDO Census PWA
 
 export type UserRole = 'admin' | 'encoder' | 'health_worker' | 'responder' | 'resident';
+export type UserAccountStatus = 'active' | 'inactive';
 export type HouseholdStatus = 'active' | 'moved_out' | 'deceased';
 export type ResidentStatus = 'active' | 'moved_out' | 'deceased';
 export type CivilStatus = 'single' | 'married' | 'widowed' | 'separated';
@@ -33,6 +34,7 @@ export interface User {
   password_hash?: string;
   name: string;
   role: UserRole;
+  status: UserAccountStatus;
   barangay_id: string;
   must_change_password?: boolean;
   email_verification_required?: boolean;
@@ -237,7 +239,7 @@ export interface Incident {
 
 export interface AuditLog {
   id: string;
-  user_id: string;
+  user_id?: string | null;
   action: string;
   entity_type: 'household' | 'resident' | 'distribution' | 'incident' | 'inventory' | 'user' | 'location_master';
   entity_id: string;

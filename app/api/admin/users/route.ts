@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
+import { isBarangayId } from '@/lib/barangays';
 import { requireAdminUser } from '@/lib/server/auth-guards';
 import { resolveAppUrl } from '@/lib/server/app-url';
 import { writeServerAuditLog } from '@/lib/server/supabase-audit';
@@ -15,8 +16,11 @@ export const runtime = 'nodejs';
 const createUserSchema = z.object({
   name: z.string().min(1),
   email: z.string().email(),
-  role: z.enum(['admin', 'encoder', 'health_worker', 'responder']),
-  barangay_id: z.string().min(1),
+  role: z.enum(['admin', 'encoder', 'health_worker', 'responder', 'resident']),
+  barangay_id: z.string()
+    .trim()
+    .min(1, 'Select a barangay.')
+    .refine((value) => isBarangayId(value), { message: 'Select a valid barangay.' }),
 });
 
 const ROLE_LABELS: Record<string, string> = {
@@ -24,6 +28,7 @@ const ROLE_LABELS: Record<string, string> = {
   encoder: 'Encoder',
   health_worker: 'Health Worker',
   responder: 'Responder',
+  resident: 'Resident',
 };
 const INTERNAL_USER_EMAILS = new Set([
   'sync-agent@mswdo.local',

@@ -9,10 +9,9 @@ export const maxDuration = 60;
 
 const API_KEY = process.env.OPENWEATHER_API_KEY?.trim() ?? '';
 const SAMPLE_CACHE_TTL_MS = 10 * 60 * 1000;
+const MAX_EFFECTIVE_SURFACE_SAMPLES = 24;
 
-interface SurfacePointValue {
-  lat: number;
-  lng: number;
+interface SurfacePointData {
   time: string | null;
   pressureSeaLevel: number | null;
   cloudCover: number | null;
@@ -22,7 +21,13 @@ interface SurfacePointValue {
   providerMode: FieldResponseWeatherPayload['provider']['mode'];
 }
 
-const sampleCache = new Map<string, { expiresAt: number; value: SurfacePointValue }>();
+interface SurfacePointValue extends SurfacePointData {
+  lat: number;
+  lng: number;
+}
+
+const sampleCache = new Map<string, { expiresAt: number; value: SurfacePointData }>();
+const sampleInFlightCache = new Map<string, Promise<SurfacePointData>>();
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max);
@@ -53,6 +58,67 @@ function latitudeToMercatorY(lat: number) {
 function mercatorYToLatitude(y: number) {
   const n = Math.PI - (2 * Math.PI * y);
   return (180 / Math.PI) * Math.atan(0.5 * (Math.exp(n) - Math.exp(-n)));
+}
+
+function resolveEffectiveSurfaceGrid(cols: number, rows: number) {
+  let effectiveCols = cols;
+  let effectiveRows = rows;
+
+  while ((effectiveCols * effectiveRows) > MAX_EFFECTIVE_SURFACE_SAMPLES) {
+    const canReduceCols = effectiveCols > 4;
+    const canReduceRows = effectiveRows > 4;
+
+    if (!canReduceCols && !canReduceRows) {
+      break;
+    }
+
+    const colRatio = canReduceCols ? effectiveCols / cols : -1;
+    const rowRatio = canReduceRows ? effectiveRows / rows : -1;
+
+    if (canReduceCols && (!canReduceRows || colRatio >= rowRatio)) {
+      effectiveCols -= 1;
+      continue;
+    }
+
+    effectiveRows -= 1;
+  }
+
+  return {
+    cols: effectiveCols,
+    rows: effectiveRows,
+  };
+}
+
+function buildGridPoints(
+  north: number,
+  south: number,
+  east: number,
+  west: number,
+  cols: number,
+  rows: number,
+) {
+  const westX = longitudeToNormalizedX(west);
+  let eastX = longitudeToNormalizedX(east);
+  if (eastX <= westX) {
+    eastX += 1;
+  }
+
+  const northY = latitudeToMercatorY(north);
+  const southY = latitudeToMercatorY(south);
+
+  return Array.from({ length: rows * cols }, (_, index) => {
+    const row = Math.floor(index / cols);
+    const col = index % cols;
+    const xRatio = cols === 1 ? 0 : col / (cols - 1);
+    const yRatio = rows === 1 ? 0 : row / (rows - 1);
+    const normalizedX = westX + ((eastX - westX) * xRatio);
+    const normalizedY = northY + ((southY - northY) * yRatio);
+
+    return {
+      lat: mercatorYToLatitude(normalizedY),
+      lng: normalizeLng((normalizedX * 360) - 180),
+    };
+  });
 }
 
 function pickNearestWeatherStep(
@@ -111,43 +177,71 @@ function pickNearestWeatherStep(
   });
 }
 
-async function fetchSurfacePoint(
+async function fetchSurfacePointData(
   lat: number,
   lng: number,
   unixTime: number | null,
 ) {
+  const sampledLat = round(lat, 2);
+  const sampledLng = round(lng, 2);
   const bucket = unixTime ? Math.round(unixTime / 3600) : 'live';
-  const cacheKey = `${round(lat, 2)}:${round(lng, 2)}:${bucket}`;
+  const cacheKey = `${sampledLat}:${sampledLng}:${bucket}`;
   const cached = sampleCache.get(cacheKey);
   if (cached && cached.expiresAt > Date.now()) {
     return cached.value;
   }
 
-  const payload = await fetchOpenWeatherFieldResponseWeather(lat, lng, API_KEY, {
+  const inFlight = sampleInFlightCache.get(cacheKey);
+  if (inFlight) {
+    return inFlight;
+  }
+
+  const requestPromise = fetchOpenWeatherFieldResponseWeather(sampledLat, sampledLng, API_KEY, {
     next: { revalidate: 600 },
-  }).catch((error) => {
-    console.error(`Weather fetch failed for ${lat},${lng}:`, error.message);
-    throw error;
-  });
-  const nearestStep = pickNearestWeatherStep(payload, unixTime);
-  const value: SurfacePointValue = {
+  })
+    .then((payload) => {
+      const nearestStep = pickNearestWeatherStep(payload, unixTime);
+      const value: SurfacePointData = {
+        time: nearestStep.time,
+        pressureSeaLevel: nearestStep.pressureSeaLevel,
+        cloudCover: nearestStep.cloudCover,
+        temperature: nearestStep.temperature,
+        windSpeed: nearestStep.windSpeed,
+        windDirection: nearestStep.windDirection,
+        providerMode: payload.provider.mode,
+      };
+
+      sampleCache.set(cacheKey, {
+        expiresAt: Date.now() + SAMPLE_CACHE_TTL_MS,
+        value,
+      });
+
+      return value;
+    })
+    .catch((error) => {
+      console.error(`Weather fetch failed for ${sampledLat},${sampledLng}:`, error.message);
+      throw error;
+    })
+    .finally(() => {
+      sampleInFlightCache.delete(cacheKey);
+    });
+
+  sampleInFlightCache.set(cacheKey, requestPromise);
+  return requestPromise;
+}
+
+async function fetchSurfacePoint(
+  lat: number,
+  lng: number,
+  unixTime: number | null,
+): Promise<SurfacePointValue> {
+  const value = await fetchSurfacePointData(lat, lng, unixTime);
+
+  return {
     lat: round(lat, 4),
     lng: round(lng, 4),
-    time: nearestStep.time,
-    pressureSeaLevel: nearestStep.pressureSeaLevel,
-    cloudCover: nearestStep.cloudCover,
-    temperature: nearestStep.temperature,
-    windSpeed: nearestStep.windSpeed,
-    windDirection: nearestStep.windDirection,
-    providerMode: payload.provider.mode,
+    ...value,
   };
-
-  sampleCache.set(cacheKey, {
-    expiresAt: Date.now() + SAMPLE_CACHE_TTL_MS,
-    value,
-  });
-
-  return value;
 }
 
 async function mapWithConcurrency<TInput, TResult>(
@@ -195,32 +289,19 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: 'Invalid weather surface bounds.' }, { status: 400 });
   }
 
-  const westX = longitudeToNormalizedX(west);
-  let eastX = longitudeToNormalizedX(east);
-  if (eastX <= westX) {
-    eastX += 1;
-  }
-
-  const northY = latitudeToMercatorY(north);
-  const southY = latitudeToMercatorY(south);
   const unixTime = Number.isFinite(date) && date > 0 ? Math.floor(date) : null;
-
-  const points = Array.from({ length: rows * cols }, (_, index) => {
-    const row = Math.floor(index / cols);
-    const col = index % cols;
-    const xRatio = cols === 1 ? 0 : col / (cols - 1);
-    const yRatio = rows === 1 ? 0 : row / (rows - 1);
-    const normalizedX = westX + ((eastX - westX) * xRatio);
-    const normalizedY = northY + ((southY - northY) * yRatio);
-
-    return {
-      lat: mercatorYToLatitude(normalizedY),
-      lng: normalizeLng((normalizedX * 360) - 180),
-    };
-  });
+  const effectiveGrid = resolveEffectiveSurfaceGrid(cols, rows);
+  const points = buildGridPoints(
+    north,
+    south,
+    east,
+    west,
+    effectiveGrid.cols,
+    effectiveGrid.rows,
+  );
 
   try {
-    const samples = await mapWithConcurrency(points, 20, (point) =>
+    const samples = await mapWithConcurrency(points, 12, (point) =>
       fetchSurfacePoint(point.lat, point.lng, unixTime),
     );
 
@@ -242,8 +323,8 @@ export async function GET(request: Request) {
           east: round(east, 4),
           west: round(west, 4),
         },
-        rows,
-        cols,
+        rows: effectiveGrid.rows,
+        cols: effectiveGrid.cols,
         mode: unixTime ? 'forecast' : 'current',
         providerMode: samples[0]?.providerMode ?? null,
         stats: {

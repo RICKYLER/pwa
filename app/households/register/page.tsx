@@ -11,6 +11,7 @@ import ResidentShell from '@/components/resident/ResidentShell';
 import { getCurrentUser, hasPermission } from '@/lib/auth';
 import { createHouseholdBundle } from '@/lib/db/households';
 import type { Household } from '@/lib/db/schema';
+import { CivicBadge, CivicPanel, CivicSectionHeading } from '@/components/ui/civic-primitives';
 
 export default function HouseholdRegistrationPage() {
   const router = useRouter();
@@ -49,25 +50,27 @@ export default function HouseholdRegistrationPage() {
 
   const content = (
       <div className="mx-auto max-w-[1180px] space-y-6 p-4 sm:p-6 lg:p-8">
-        <div className="flex flex-wrap items-center justify-between gap-4">
-          <div>
-            <Link
-              href={user.role === 'resident' ? '/resident' : '/households'}
-              className="inline-flex items-center gap-2 text-sm font-medium text-slate-500 transition hover:text-slate-800"
-            >
-              <ArrowLeft className="h-4 w-4" />
-              {user.role === 'resident' ? 'Back to Portal' : 'Back to Households'}
-            </Link>
-            <h1 className="mt-3 text-2xl font-bold text-slate-900">New Registration</h1>
-            <p className="mt-1 max-w-2xl text-sm text-slate-500">
-              Collect the form, capture the map pin, and send the record to the admin approval queue.
-            </p>
+        <CivicPanel>
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div>
+              <Link
+                href={user.role === 'resident' ? '/resident' : '/households'}
+                className="inline-flex items-center gap-2 text-sm font-medium text-slate-500 transition hover:text-slate-800"
+              >
+                <ArrowLeft className="h-4 w-4" />
+                {user.role === 'resident' ? 'Back to Portal' : 'Back to Households'}
+              </Link>
+              <div className="mt-4">
+                <CivicSectionHeading
+                  icon={ShieldCheck}
+                  title="New registration"
+                  description="Collect the form, capture the map pin, and send the record to the admin approval queue."
+                />
+              </div>
+            </div>
+            <CivicBadge label="Pending records stay out of the master list until approved" tone="emerald" />
           </div>
-          <div className="inline-flex items-center gap-2 rounded-full bg-emerald-50 px-4 py-2 text-sm font-medium text-emerald-700">
-            <ShieldCheck className="h-4 w-4" />
-            Pending records stay out of the master list until approved
-          </div>
-        </div>
+        </CivicPanel>
 
         <HouseholdRegistrationWizard
           barangayId={user.barangay_id}

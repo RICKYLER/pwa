@@ -21,6 +21,8 @@ create table if not exists public.users (
   name text not null default '',
   role text not null default 'resident'
     check (role in ('admin', 'encoder', 'health_worker', 'responder', 'resident')),
+  status text not null default 'active'
+    check (status in ('active', 'inactive')),
   barangay_id text not null default 'barangay-1',
   must_change_password boolean not null default false,
   email_verification_required boolean not null default false,
@@ -28,6 +30,21 @@ create table if not exists public.users (
   created_at timestamptz not null default timezone('utc', now()),
   updated_at timestamptz not null default timezone('utc', now())
 );
+
+create or replace function public.current_user_is_active()
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select exists (
+    select 1
+    from public.users u
+    where u.id = auth.uid()
+      and u.status = 'active'
+  )
+$$;
 
 create or replace function public.current_user_role()
 returns text
@@ -39,6 +56,7 @@ as $$
   select u.role
   from public.users u
   where u.id = auth.uid()
+    and u.status = 'active'
 $$;
 
 create or replace function public.current_user_barangay_id()
@@ -51,6 +69,7 @@ as $$
   select u.barangay_id
   from public.users u
   where u.id = auth.uid()
+    and u.status = 'active'
 $$;
 
 create or replace function public.current_user_email()
@@ -63,6 +82,7 @@ as $$
   select u.email
   from public.users u
   where u.id = auth.uid()
+    and u.status = 'active'
 $$;
 
 create or replace function public.is_admin()
@@ -430,7 +450,7 @@ alter table public.distribution_events
 
 create table if not exists public.audit_logs (
   id text primary key default gen_random_uuid()::text,
-  user_id uuid not null references public.users (id) on delete restrict,
+  user_id uuid references public.users (id) on delete set null,
   action text not null,
   entity_type text not null
     check (entity_type in ('household', 'resident', 'distribution', 'incident', 'inventory', 'user', 'location_master')),
@@ -448,7 +468,7 @@ create table if not exists public.sync_backups (
   data jsonb,
   client_timestamp timestamptz not null,
   synced_at timestamptz not null default timezone('utc', now()),
-  synced_by uuid not null references public.users (id) on delete restrict,
+  synced_by uuid references public.users (id) on delete set null,
   unique (queue_id)
 );
 
@@ -737,7 +757,7 @@ drop policy if exists "users_select_self_or_admin" on public.users;
 create policy "users_select_self_or_admin"
 on public.users
 for select
-using (auth.uid() = id or public.is_admin());
+using (public.current_user_is_active() and (auth.uid() = id or public.is_admin()));
 
 drop policy if exists "users_update_admin_only" on public.users;
 create policy "users_update_admin_only"
@@ -747,10 +767,17 @@ using (public.is_admin())
 with check (public.is_admin());
 
 drop policy if exists "location_master_lists_read_authenticated" on public.location_master_lists;
-create policy "location_master_lists_read_authenticated"
+drop policy if exists "location_master_lists_read_scoped" on public.location_master_lists;
+create policy "location_master_lists_read_scoped"
 on public.location_master_lists
 for select
-using (auth.uid() is not null);
+using (
+  public.current_user_is_active()
+  and (
+    public.is_admin()
+    or barangay_id = public.current_user_barangay_id()
+  )
+);
 
 drop policy if exists "location_master_lists_write_admin" on public.location_master_lists;
 create policy "location_master_lists_write_admin"
@@ -889,7 +916,7 @@ drop policy if exists "programs_read_authenticated" on public.programs;
 create policy "programs_read_authenticated"
 on public.programs
 for select
-using (auth.uid() is not null);
+using (public.current_user_is_active());
 
 drop policy if exists "programs_write_admin" on public.programs;
 create policy "programs_write_admin"
@@ -899,10 +926,11 @@ using (public.is_admin())
 with check (public.is_admin());
 
 drop policy if exists "beneficiaries_read_authenticated" on public.beneficiaries;
-create policy "beneficiaries_read_authenticated"
+drop policy if exists "beneficiaries_read_scoped" on public.beneficiaries;
+create policy "beneficiaries_read_scoped"
 on public.beneficiaries
 for select
-using (auth.uid() is not null);
+using (public.current_user_is_active() and public.can_access_beneficiary(id));
 
 drop policy if exists "beneficiaries_write_admin" on public.beneficiaries;
 create policy "beneficiaries_write_admin"
@@ -963,13 +991,13 @@ drop policy if exists "audit_logs_select_self_or_admin" on public.audit_logs;
 create policy "audit_logs_select_self_or_admin"
 on public.audit_logs
 for select
-using (public.is_admin() or user_id = auth.uid());
+using (public.current_user_is_active() and (public.is_admin() or user_id = auth.uid()));
 
 drop policy if exists "audit_logs_insert_own" on public.audit_logs;
 create policy "audit_logs_insert_own"
 on public.audit_logs
 for insert
-with check (user_id = auth.uid());
+with check (public.current_user_is_active() and user_id = auth.uid());
 
 drop policy if exists "sync_backups_select_admin" on public.sync_backups;
 create policy "sync_backups_select_admin"
@@ -981,7 +1009,7 @@ drop policy if exists "sync_backups_insert_own" on public.sync_backups;
 create policy "sync_backups_insert_own"
 on public.sync_backups
 for insert
-with check (synced_by = auth.uid());
+with check (public.current_user_is_active() and synced_by = auth.uid());
 
 alter table public.households replica identity full;
 alter table public.residents replica identity full;
