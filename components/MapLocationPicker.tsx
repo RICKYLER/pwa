@@ -2,7 +2,9 @@
 
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { GoogleMap, Marker } from '@react-google-maps/api';
-import { MapPin, Crosshair, Loader2, Search, X } from 'lucide-react';
+import { MapPin, Crosshair, Loader2, Search, X, AlertCircle, CheckCircle } from 'lucide-react';
+import { resolveLocationFromCoordinates, searchLocation } from '@/lib/geocoding';
+import type { ResolvedLocation } from '@/lib/geocoding';
 
 interface Coords { lat: number; lng: number; }
 
@@ -10,6 +12,8 @@ interface MapLocationPickerProps {
     onLocationChange: (address: string, coords: Coords) => void;
     defaultCenter?: Coords;
     defaultAddress?: string;
+    municipality?: string;
+    barangayName?: string;
 }
 
 // Default: Davao City, Philippines
@@ -28,6 +32,8 @@ export default function MapLocationPicker({
     onLocationChange,
     defaultCenter = DEFAULT_CENTER,
     defaultAddress = '',
+    municipality,
+    barangayName,
 }: MapLocationPickerProps) {
     const [center, setCenter] = useState<Coords>(defaultCenter);
     const [marker, setMarker] = useState<Coords | null>(null);
@@ -36,7 +42,25 @@ export default function MapLocationPicker({
     const [isReverseGeocoding, setIsReverseGeocoding] = useState(false);
     const [isSearching, setIsSearching] = useState(false);
     const [ready, setReady] = useState(false);
+    const [locationType, setLocationType] = useState<string | null>(null);
+    const [addressQuality, setAddressQuality] = useState<'street' | 'neighborhood' | 'city' | null>(null);
     const mapRef = useRef<google.maps.Map | null>(null);
+
+    // Helper to determine address quality
+    function getAddressQuality(resolved: ResolvedLocation | null): 'street' | 'neighborhood' | 'city' | null {
+        if (!resolved) return null;
+        
+        if (resolved.streetAddress && resolved.streetAddress !== resolved.barangayName && 
+            resolved.streetAddress !== resolved.municipality) {
+            return 'street';
+        }
+        
+        if (resolved.purokSitio || resolved.barangayName) {
+            return 'neighborhood';
+        }
+        
+        return 'city';
+    }
 
     // Wait for window.google (injected by parent LoadScript)
     useEffect(() => {
@@ -49,48 +73,55 @@ export default function MapLocationPicker({
         mapRef.current = map;
     }, []);
 
-    async function reverseGeocode(coords: Coords): Promise<string> {
-        return new Promise(resolve => {
-            const geocoder = new window.google.maps.Geocoder();
-            geocoder.geocode({ location: coords }, (results, status) => {
-                if (status === 'OK' && results && results[0]) {
-                    resolve(results[0].formatted_address);
-                } else {
-                    resolve(`${coords.lat.toFixed(5)}, ${coords.lng.toFixed(5)}`);
-                }
-            });
-        });
-    }
-
     const handleMapClick = useCallback(async (e: google.maps.MapMouseEvent) => {
         if (!e.latLng) return;
         const coords: Coords = { lat: e.latLng.lat(), lng: e.latLng.lng() };
         setMarker(coords);
         setIsReverseGeocoding(true);
-        const addr = await reverseGeocode(coords);
-        setAddress(addr);
+        
+        const resolved = await resolveLocationFromCoordinates(coords.lat, coords.lng);
+        
+        if (resolved) {
+            setAddress(resolved.formattedAddress);
+            setAddressQuality(getAddressQuality(resolved));
+            setLocationType(null);
+            onLocationChange(resolved.formattedAddress, coords);
+        } else {
+            const fallbackAddr = `${coords.lat.toFixed(5)}, ${coords.lng.toFixed(5)}`;
+            setAddress(fallbackAddr);
+            setAddressQuality(null);
+            setLocationType(null);
+            onLocationChange(fallbackAddr, coords);
+        }
+        
         setIsReverseGeocoding(false);
-        onLocationChange(addr, coords);
     }, [onLocationChange]);
 
     async function handleSearch() {
         if (!searchQuery.trim() || !window.google) return;
         setIsSearching(true);
-        const geocoder = new window.google.maps.Geocoder();
-        geocoder.geocode({ address: searchQuery }, (results, status) => {
-            setIsSearching(false);
-            if (status === 'OK' && results && results[0]) {
-                const loc = results[0].geometry.location;
-                const coords: Coords = { lat: loc.lat(), lng: loc.lng() };
-                setCenter(coords);
-                setMarker(coords);
-                const addr = results[0].formatted_address;
-                setAddress(addr);
-                onLocationChange(addr, coords);
-                mapRef.current?.panTo(coords);
-                mapRef.current?.setZoom(17);
-            }
+        
+        const resolved = await searchLocation(searchQuery, {
+            context: {
+                municipality,
+                barangayName,
+            },
+            locationBias: center,
         });
+        
+        setIsSearching(false);
+        
+        if (resolved) {
+            const coords: Coords = { lat: resolved.lat, lng: resolved.lng };
+            setCenter(coords);
+            setMarker(coords);
+            setAddress(resolved.formattedAddress);
+            setAddressQuality(getAddressQuality(resolved));
+            setLocationType(null);
+            onLocationChange(resolved.formattedAddress, coords);
+            mapRef.current?.panTo(coords);
+            mapRef.current?.setZoom(17);
+        }
     }
 
     function useMyLocation() {
@@ -102,10 +133,23 @@ export default function MapLocationPicker({
             mapRef.current?.panTo(coords);
             mapRef.current?.setZoom(17);
             setIsReverseGeocoding(true);
-            const addr = await reverseGeocode(coords);
-            setAddress(addr);
+            
+            const resolved = await resolveLocationFromCoordinates(coords.lat, coords.lng);
+            
+            if (resolved) {
+                setAddress(resolved.formattedAddress);
+                setAddressQuality(getAddressQuality(resolved));
+                setLocationType(null);
+                onLocationChange(resolved.formattedAddress, coords);
+            } else {
+                const fallbackAddr = `${coords.lat.toFixed(5)}, ${coords.lng.toFixed(5)}`;
+                setAddress(fallbackAddr);
+                setAddressQuality(null);
+                setLocationType(null);
+                onLocationChange(fallbackAddr, coords);
+            }
+            
             setIsReverseGeocoding(false);
-            onLocationChange(addr, coords);
         });
     }
 
@@ -196,15 +240,38 @@ export default function MapLocationPicker({
             {/* Address result */}
             <div className={`flex items-start gap-2 px-3 py-2.5 rounded-xl border text-sm transition-all ${marker ? 'bg-emerald-50 border-emerald-200' : 'bg-slate-50 border-slate-200'}`}>
                 <MapPin className={`w-4 h-4 flex-shrink-0 mt-0.5 ${marker ? 'text-emerald-600' : 'text-slate-400'}`} />
-                {isReverseGeocoding ? (
-                    <span className="text-slate-400 flex items-center gap-1.5">
-                        <Loader2 className="w-3.5 h-3.5 animate-spin" /> Getting address…
-                    </span>
-                ) : address ? (
-                    <span className="text-slate-700 font-medium">{address}</span>
-                ) : (
-                    <span className="text-slate-400">Click on the map or search to pin a location</span>
-                )}
+                <div className="flex-1 min-w-0">
+                    {isReverseGeocoding ? (
+                        <span className="text-slate-400 flex items-center gap-1.5">
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" /> Getting address…
+                        </span>
+                    ) : address ? (
+                        <div className="space-y-1">
+                            <div className="flex items-start gap-2">
+                                <span className="text-slate-700 font-medium flex-1">{address}</span>
+                                {addressQuality === 'street' && (
+                                    <span className="flex items-center gap-1 px-2 py-0.5 text-xs font-medium bg-emerald-100 text-emerald-700 rounded-md whitespace-nowrap">
+                                        <CheckCircle className="w-3 h-3" />
+                                        Street-level
+                                    </span>
+                                )}
+                                {addressQuality === 'neighborhood' && (
+                                    <span className="flex items-center gap-1 px-2 py-0.5 text-xs font-medium bg-blue-100 text-blue-700 rounded-md whitespace-nowrap">
+                                        Neighborhood-level
+                                    </span>
+                                )}
+                                {addressQuality === 'city' && (
+                                    <span className="flex items-center gap-1 px-2 py-0.5 text-xs font-medium bg-amber-100 text-amber-700 rounded-md whitespace-nowrap">
+                                        <AlertCircle className="w-3 h-3" />
+                                        City-level
+                                    </span>
+                                )}
+                            </div>
+                        </div>
+                    ) : (
+                        <span className="text-slate-400">Click on the map or search to pin a location</span>
+                    )}
+                </div>
             </div>
         </div>
     );

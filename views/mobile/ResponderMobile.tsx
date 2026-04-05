@@ -1,12 +1,31 @@
-'use client';
+﻿'use client';
 
 import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import {
+  CheckCircle2,
+  Layers3,
+  Loader2,
+  Navigation,
+  Package,
+  RefreshCw,
+  ShieldAlert,
+  Users,
+  Zap,
+} from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Drawer, DrawerContent, DrawerDescription, DrawerHeader, DrawerTitle } from '@/components/ui/drawer';
+import WeatherWidget from '@/components/WeatherWidget';
+import ResponderLeafletMap from '@/components/ResponderLeafletMap';
+import ResponderMapControlPanel from '@/components/ResponderMapControlPanel';
+import ResponderSelectionSummary from '@/components/ResponderSelectionSummary';
+import { MobileActionBar, MobileListCard, MobilePageHeader } from '@/components/mobile/mobile-primitives';
+import { CivicBadge, CivicEmptyState, CivicPage, CivicPanel } from '@/components/ui/civic-primitives';
 import { getCurrentUser, hasRole } from '@/lib/auth';
-import { getIncidents, updateIncidentStatus, seedDemoIncidents } from '@/lib/db/incidents';
 import { getDistributionEvents } from '@/lib/db/distribution';
-import { db, STORE_NAMES } from '@/lib/db/indexeddb';
 import { getHouseholds } from '@/lib/db/households';
+import { getIncidents, seedDemoIncidents, updateIncidentStatus } from '@/lib/db/incidents';
+import { db, STORE_NAMES } from '@/lib/db/indexeddb';
 import type {
   DistributionEvent,
   Household,
@@ -15,13 +34,6 @@ import type {
   Resident,
   VulnerabilityFlags,
 } from '@/lib/db/schema';
-import { CheckCircle2, Layers3, Loader2, Navigation, Package, RefreshCw, ShieldAlert, Users, X, Zap } from 'lucide-react';
-import WeatherWidget from '@/components/WeatherWidget';
-import ResponderLeafletMap from '@/components/ResponderLeafletMap';
-import ResponderMapControlPanel from '@/components/ResponderMapControlPanel';
-import ResponderSelectionSummary from '@/components/ResponderSelectionSummary';
-import { CivicBadge, CivicChipButton, CivicPanel } from '@/components/ui/civic-primitives';
-import { Drawer, DrawerContent, DrawerDescription, DrawerHeader, DrawerTitle } from '@/components/ui/drawer';
 import { openResponderMapLocation } from '@/lib/responder-map-links';
 import { useResponderMapControls } from '@/hooks/useResponderMapControls';
 
@@ -31,6 +43,22 @@ interface PriorityHousehold {
   flags: VulnerabilityFlags[];
   score: number;
 }
+
+const INCIDENT_TYPE_CODE: Record<string, string> = {
+  flood: 'FL',
+  fire: 'FR',
+  medical: 'MD',
+  landslide: 'LS',
+  typhoon: 'TY',
+  other: 'AL',
+};
+
+const INCIDENT_STATUS_OPTIONS: { value: IncidentStatus; label: string; description: string }[] = [
+  { value: 'reported', label: 'Reported', description: 'Newly reported and waiting for verification.' },
+  { value: 'verified', label: 'Verified', description: 'Confirmed and queued for response.' },
+  { value: 'responding', label: 'Responding', description: 'Responder is on the way or already on site.' },
+  { value: 'resolved', label: 'Resolved', description: 'Incident is contained and the task is closed.' },
+];
 
 function howLongAgo(date: Date): string {
   const minutesPassed = Math.floor((Date.now() - new Date(date).getTime()) / 60000);
@@ -63,99 +91,80 @@ function getVulnerabilityLabels(flags: VulnerabilityFlags[]): string[] {
   return labels;
 }
 
-function getSeverityStyle(severity: string) {
-  const styles = {
-    critical: { text: 'text-red-600', badge: 'bg-red-50 text-red-700 border-red-200' },
-    high: { text: 'text-orange-600', badge: 'bg-orange-50 text-orange-700 border-orange-200' },
-    medium: { text: 'text-amber-600', badge: 'bg-amber-50 text-amber-700 border-amber-200' },
-    low: { text: 'text-slate-500', badge: 'bg-slate-100 text-slate-600 border-slate-200' },
-  };
-  return styles[severity as keyof typeof styles] ?? styles.low;
-}
+function getSeverityTone(severity: string) {
+  const tones = {
+    critical: 'rose',
+    high: 'amber',
+    medium: 'navy',
+    low: 'slate',
+  } as const;
 
-const incidentEmoji: Record<string, string> = {
-  flood: '🌊',
-  fire: '🔥',
-  medical: '🏥',
-  landslide: '⛰️',
-  typhoon: '🌀',
-  other: '⚡',
-};
+  return tones[severity as keyof typeof tones] ?? tones.low;
+}
 
 function StatusUpdateSheet({
   incident,
   onSave,
   onClose,
 }: {
-  incident: Incident;
+  incident: Incident | null;
   onSave: (id: string, newStatus: IncidentStatus) => Promise<void>;
   onClose: () => void;
 }) {
-  const [saving, setSaving] = useState(false);
+  const [savingStatus, setSavingStatus] = useState<IncidentStatus | null>(null);
 
-  const allStatuses: { value: IncidentStatus; label: string; description: string }[] = [
-    { value: 'reported', label: 'Reported', description: 'Newly reported and not yet confirmed.' },
-    { value: 'verified', label: 'Verified', description: 'Confirmed and waiting for response.' },
-    { value: 'responding', label: 'Responding', description: 'Responder is on the way or on site.' },
-    { value: 'resolved', label: 'Resolved', description: 'Incident contained and closed.' },
-  ];
+  if (!incident) {
+    return null;
+  }
+
+  const currentIncident = incident;
 
   async function pickStatus(status: IncidentStatus) {
-    setSaving(true);
-    await onSave(incident.id, status);
-    setSaving(false);
+    setSavingStatus(status);
+    await onSave(currentIncident.id, status);
+    setSavingStatus(null);
     onClose();
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col justify-end" onClick={onClose}>
-      <div className="absolute inset-0 bg-slate-950/40 backdrop-blur-sm" />
-      <div
-        className="relative z-10 rounded-t-[28px] border-t border-slate-200 bg-white pb-[env(safe-area-inset-bottom)]"
-        onClick={(event) => event.stopPropagation()}
-      >
-        <div className="mx-auto mt-3 h-1.5 w-12 rounded-full bg-slate-200" />
-        <div className="px-5 py-4">
-          <div className="mb-4 flex items-start justify-between gap-3">
-            <div>
-              <h3 className="text-base font-bold text-slate-950">Update incident status</h3>
-              <p className="mt-1 text-xs text-slate-500">{incident.location}</p>
-            </div>
-            <button onClick={onClose} className="rounded-2xl border border-slate-200 bg-white p-2 text-slate-500">
-              <X className="h-4 w-4" />
-            </button>
-          </div>
-
-          <div className="space-y-2">
-            {allStatuses.map((status) => {
-              const isCurrent = status.value === incident.status;
-              return (
-                <button
-                  key={status.value}
-                  type="button"
-                  disabled={saving || isCurrent}
-                  onClick={() => void pickStatus(status.value)}
-                  className={`flex w-full items-center gap-3 rounded-[22px] border px-4 py-3 text-left transition ${
-                    isCurrent ? 'border-cyan-900/15 bg-cyan-50' : 'border-slate-200 bg-white'
-                  }`}
-                >
-                  {saving ? (
-                    <Loader2 className="h-4 w-4 animate-spin text-slate-400" />
-                  ) : (
-                    <span className={`h-2 w-2 rounded-full ${isCurrent ? 'bg-cyan-900' : 'bg-slate-300'}`} />
-                  )}
-                  <div className="flex-1">
-                    <p className={`text-sm font-semibold ${isCurrent ? 'text-cyan-950' : 'text-slate-800'}`}>{status.label}</p>
-                    <p className="text-xs text-slate-500">{status.description}</p>
-                  </div>
-                  {isCurrent ? <CivicBadge label="Current" tone="navy" /> : null}
-                </button>
-              );
-            })}
-          </div>
+    <Drawer open={Boolean(currentIncident)} onOpenChange={(open) => { if (!open) onClose(); }}>
+      <DrawerContent className="max-h-[80vh] rounded-t-[30px] border-slate-200 bg-white">
+        <DrawerHeader className="text-left">
+          <DrawerTitle className="text-base font-bold text-slate-950">Update incident status</DrawerTitle>
+          <DrawerDescription className="text-sm leading-6 text-slate-500">
+            {currentIncident.location}
+          </DrawerDescription>
+        </DrawerHeader>
+        <div className="space-y-2 overflow-y-auto px-4 pb-[calc(env(safe-area-inset-bottom)+1.25rem)] pt-1">
+          {INCIDENT_STATUS_OPTIONS.map((status) => {
+            const isCurrent = status.value === currentIncident.status;
+            const isSaving = savingStatus === status.value;
+            return (
+              <button
+                key={status.value}
+                type="button"
+                disabled={Boolean(savingStatus) || isCurrent}
+                onClick={() => { void pickStatus(status.value); }}
+                className={`flex w-full items-center gap-3 rounded-[22px] border px-4 py-3 text-left transition ${
+                  isCurrent ? 'border-cyan-900/15 bg-cyan-50' : 'border-slate-200 bg-white'
+                }`}
+              >
+                {isSaving ? (
+                  <Loader2 className="h-4 w-4 animate-spin text-slate-400" />
+                ) : (
+                  <span className={`h-2.5 w-2.5 rounded-full ${isCurrent ? 'bg-cyan-950' : 'bg-slate-300'}`} />
+                )}
+                <div className="flex-1">
+                  <p className={`text-sm font-semibold ${isCurrent ? 'text-cyan-950' : 'text-slate-800'}`}>{status.label}</p>
+                  <p className="text-xs text-slate-500">{status.description}</p>
+                </div>
+                {isCurrent ? <CivicBadge label="Current" tone="navy" className="text-[10px]" /> : null}
+              </button>
+            );
+          })}
         </div>
-      </div>
-    </div>
+      </DrawerContent>
+    </Drawer>
   );
 }
 
@@ -175,23 +184,12 @@ export default function ResponderMobile() {
   const [visited, setVisited] = useState<Set<string>>(new Set());
   const [mapControlsOpen, setMapControlsOpen] = useState(false);
   const [selectionOpen, setSelectionOpen] = useState(false);
-
-  useEffect(() => {
-    if (!user) {
-      router.push('/login');
-      return;
-    }
-
-    if (!hasRole(['responder', 'admin'])) {
-      router.push('/dashboard');
-      return;
-    }
-
-    void loadData();
-  }, [router, user]);
+  const [queueOpen, setQueueOpen] = useState(false);
+  const [priorityOpen, setPriorityOpen] = useState(false);
 
   const loadData = useCallback(async () => {
     if (!user) return;
+
     setLoading(true);
     try {
       await seedDemoIncidents(user.id);
@@ -211,10 +209,7 @@ export default function ResponderMobile() {
       setEvents(ongoingEvents);
       setMapHouseholds(
         allHouseholds.filter(
-          (household) =>
-            household.status === 'active'
-            && household.gps_lat !== undefined
-            && household.gps_long !== undefined,
+          (household) => household.status === 'active' && household.gps_lat !== undefined && household.gps_long !== undefined,
         ),
       );
 
@@ -229,7 +224,7 @@ export default function ResponderMobile() {
           return { household, residents: residentsInHousehold, flags: householdFlags, score };
         })
         .filter((household) => household.score > 0)
-        .sort((a, b) => b.score - a.score);
+        .sort((left, right) => right.score - left.score);
 
       setPriorities(householdsWithScores);
     } catch (error) {
@@ -238,6 +233,20 @@ export default function ResponderMobile() {
       setLoading(false);
     }
   }, [user]);
+
+  useEffect(() => {
+    if (!user) {
+      router.push('/login');
+      return;
+    }
+
+    if (!hasRole(['responder', 'admin'])) {
+      router.push('/dashboard');
+      return;
+    }
+
+    void loadData();
+  }, [loadData, router, user]);
 
   async function changeIncidentStatus(id: string, newStatus: IncidentStatus) {
     const updated = await updateIncidentStatus(id, newStatus);
@@ -263,24 +272,19 @@ export default function ResponderMobile() {
 
   const activeIncidents = incidents.filter((incident) => incident.status !== 'resolved');
   const resolvedCount = incidents.filter((incident) => incident.status === 'resolved').length;
+  const hasSelection = Boolean(selectedHousehold || selectedIncident);
 
   return (
     <>
-      {sheetIncident ? (
-        <StatusUpdateSheet
-          incident={sheetIncident}
-          onSave={changeIncidentStatus}
-          onClose={() => setSheetIncident(null)}
-        />
-      ) : null}
+      <StatusUpdateSheet incident={sheetIncident} onSave={changeIncidentStatus} onClose={() => setSheetIncident(null)} />
 
       <Drawer open={mapControlsOpen} onOpenChange={setMapControlsOpen}>
-        <DrawerContent className="max-h-[88vh] rounded-t-[28px]">
+        <DrawerContent className="max-h-[88vh] rounded-t-[30px] border-slate-200 bg-white">
           <DrawerHeader className="pb-0 text-left">
             <DrawerTitle>Map controls</DrawerTitle>
-            <DrawerDescription>Weather overlays and base-map options live here instead of on the map canvas.</DrawerDescription>
+            <DrawerDescription>Weather overlays and base-map controls stay here instead of covering the map.</DrawerDescription>
           </DrawerHeader>
-          <div className="overflow-y-auto px-4 pb-5 pt-3">
+          <div className="overflow-y-auto px-4 pb-[calc(env(safe-area-inset-bottom)+1.25rem)] pt-3">
             <ResponderMapControlPanel
               compact
               activeBaseLayerId={mapControls.activeBaseLayerId}
@@ -305,12 +309,12 @@ export default function ResponderMobile() {
       </Drawer>
 
       <Drawer open={selectionOpen} onOpenChange={setSelectionOpen}>
-        <DrawerContent className="max-h-[82vh] rounded-t-[28px]">
+        <DrawerContent className="max-h-[82vh] rounded-t-[30px] border-slate-200 bg-white">
           <DrawerHeader className="pb-0 text-left">
             <DrawerTitle>Selected map item</DrawerTitle>
             <DrawerDescription>Household and incident detail opens here after you tap a marker.</DrawerDescription>
           </DrawerHeader>
-          <div className="overflow-y-auto px-4 pb-5 pt-3">
+          <div className="overflow-y-auto px-4 pb-[calc(env(safe-area-inset-bottom)+1.25rem)] pt-3">
             <ResponderSelectionSummary
               compact
               household={selectedHousehold}
@@ -327,46 +331,213 @@ export default function ResponderMobile() {
         </DrawerContent>
       </Drawer>
 
-      <div className="space-y-5 px-4 pb-24 pt-4">
-        <CivicPanel className="overflow-hidden border-cyan-100 bg-[linear-gradient(135deg,#083344,#164e63)] text-white shadow-[0_28px_60px_-36px_rgba(8,47,73,0.7)]">
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-cyan-100/70">Response Operations</p>
-              <h2 className="mt-3 text-xl font-black tracking-tight">{user.name}</h2>
-              <p className="mt-1 text-sm text-cyan-100/80">Field responder for {user.barangay_id}</p>
-            </div>
-            <button
-              onClick={() => void loadData()}
-              className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/10 px-3 py-2 text-xs font-semibold text-white transition hover:bg-white/15"
-            >
-              <RefreshCw className="h-3.5 w-3.5" />
-              Refresh
-            </button>
-          </div>
-          <div className="mt-4 grid grid-cols-3 gap-2">
-            {[
-              { label: 'Active', value: activeIncidents.length },
-              { label: 'Priority', value: priorities.length },
-              { label: 'Resolved', value: resolvedCount },
-            ].map((metric) => (
-              <div key={metric.label} className="rounded-[18px] border border-white/10 bg-white/10 px-3 py-3">
-                <p className="text-xl font-black">{loading ? '—' : metric.value}</p>
-                <p className="mt-1 text-[10px] uppercase tracking-[0.14em] text-cyan-100/70">{metric.label}</p>
+      <Drawer open={queueOpen} onOpenChange={setQueueOpen}>
+        <DrawerContent className="max-h-[84vh] rounded-t-[30px] border-slate-200 bg-white">
+          <DrawerHeader className="pb-0 text-left">
+            <DrawerTitle>Incident queue</DrawerTitle>
+            <DrawerDescription>Triaging incidents lives in a drawer so the map stays primary on mobile.</DrawerDescription>
+          </DrawerHeader>
+          <div className="space-y-3 overflow-y-auto px-4 pb-[calc(env(safe-area-inset-bottom)+1.25rem)] pt-3">
+            {loading ? (
+              <div className="space-y-2">
+                {[...Array(3)].map((_, index) => (
+                  <div key={index} className="h-32 animate-pulse rounded-[24px] bg-slate-100" />
+                ))}
               </div>
-            ))}
+            ) : activeIncidents.length === 0 ? (
+              <CivicEmptyState
+                icon={CheckCircle2}
+                title="All clear"
+                description="No active incidents are waiting in the queue."
+              />
+            ) : (
+              activeIncidents.map((incident) => (
+                <MobileListCard
+                  key={incident.id}
+                  title={incident.location}
+                  subtitle={incident.description}
+                  leading={<span className="text-[11px] font-bold tracking-[0.12em]">{INCIDENT_TYPE_CODE[incident.type] || 'AL'}</span>}
+                  status={(
+                    <>
+                      <CivicBadge label={incident.status} tone="navy" className="text-[10px]" />
+                      <CivicBadge label={incident.severity} tone={getSeverityTone(incident.severity)} className="text-[10px]" />
+                    </>
+                  )}
+                  meta={(
+                    <div className="flex items-center justify-between gap-3 text-xs text-slate-500">
+                      <span>{howLongAgo(incident.reported_at)}</span>
+                      <span>{incident.location}</span>
+                    </div>
+                  )}
+                  actions={(
+                    <>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => {
+                          setSelectedIncident(incident);
+                          setSelectedHousehold(null);
+                          setQueueOpen(false);
+                          setSelectionOpen(true);
+                        }}
+                        className="h-10 rounded-full border-slate-200 px-4 text-xs font-semibold text-slate-700"
+                      >
+                        Inspect
+                      </Button>
+                      <Button
+                        type="button"
+                        onClick={() => setSheetIncident(incident)}
+                        className="h-10 rounded-full px-4 text-xs font-semibold"
+                      >
+                        Update
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => openResponderMapLocation(incident.gps_lat, incident.gps_lng, incident.location)}
+                        className="h-10 rounded-full border-slate-200 px-4 text-xs font-semibold text-slate-700"
+                      >
+                        Go
+                      </Button>
+                    </>
+                  )}
+                />
+              ))
+            )}
           </div>
-        </CivicPanel>
+        </DrawerContent>
+      </Drawer>
 
-        <WeatherWidget mode="compact" />
+      <Drawer open={priorityOpen} onOpenChange={setPriorityOpen}>
+        <DrawerContent className="max-h-[84vh] rounded-t-[30px] border-slate-200 bg-white">
+          <DrawerHeader className="pb-0 text-left">
+            <DrawerTitle>Priority check-ins</DrawerTitle>
+            <DrawerDescription>Use the queue to inspect high-risk households without pushing the map off-screen.</DrawerDescription>
+          </DrawerHeader>
+          <div className="space-y-3 overflow-y-auto px-4 pb-[calc(env(safe-area-inset-bottom)+1.25rem)] pt-3">
+            {loading ? (
+              <div className="space-y-2">
+                {[...Array(3)].map((_, index) => (
+                  <div key={index} className="h-32 animate-pulse rounded-[24px] bg-slate-100" />
+                ))}
+              </div>
+            ) : priorities.length === 0 ? (
+              <CivicEmptyState
+                icon={Users}
+                title="No priority households"
+                description="Vulnerability scoring did not surface any check-ins right now."
+              />
+            ) : (
+              priorities.map((priority, index) => {
+                const labels = getVulnerabilityLabels(priority.flags);
+                const alreadyVisited = visited.has(priority.household.id);
+                const canNavigate = priority.household.gps_lat !== undefined && priority.household.gps_long !== undefined;
 
-        <CivicPanel className="space-y-4">
+                return (
+                  <MobileListCard
+                    key={priority.household.id}
+                    title={priority.household.head_name}
+                    subtitle={`${priority.household.purok_sitio} | ${priority.household.street_address}`}
+                    leading={<span className="text-sm font-bold">{index + 1}</span>}
+                    status={(
+                      <>
+                        {labels.map((label) => (
+                          <CivicBadge key={label} label={label} tone="rose" className="text-[10px]" />
+                        ))}
+                        <CivicBadge label={`Score ${priority.score}`} tone="amber" className="text-[10px]" />
+                        {alreadyVisited ? <CivicBadge label="Visited" tone="emerald" className="text-[10px]" /> : null}
+                      </>
+                    )}
+                    meta={(
+                      <div className="flex items-center justify-between gap-3 text-xs text-slate-500">
+                        <span>{priority.residents.length} residents</span>
+                        <span>{canNavigate ? 'Mapped' : 'No map pin'}</span>
+                      </div>
+                    )}
+                    actions={(
+                      <>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={() => {
+                            setSelectedHousehold(priority.household);
+                            setSelectedIncident(null);
+                            setPriorityOpen(false);
+                            setSelectionOpen(true);
+                          }}
+                          className="h-10 rounded-full border-slate-200 px-4 text-xs font-semibold text-slate-700"
+                        >
+                          Inspect
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          disabled={!canNavigate}
+                          onClick={() => openResponderMapLocation(
+                            priority.household.gps_lat,
+                            priority.household.gps_long,
+                            `${priority.household.street_address}, ${priority.household.purok_sitio}`,
+                          )}
+                          className="h-10 rounded-full border-slate-200 px-4 text-xs font-semibold text-slate-700"
+                        >
+                          Navigate
+                        </Button>
+                        <Button
+                          type="button"
+                          variant={alreadyVisited ? 'default' : 'outline'}
+                          onClick={() => toggleVisited(priority.household.id)}
+                          className="h-10 rounded-full px-4 text-xs font-semibold"
+                        >
+                          {alreadyVisited ? 'Visited' : 'Check-in'}
+                        </Button>
+                      </>
+                    )}
+                  />
+                );
+              })
+            )}
+          </div>
+        </DrawerContent>
+      </Drawer>
+
+      <CivicPage className="space-y-4 px-4 py-4 pb-40">
+        <MobilePageHeader
+          title="Field response"
+          subtitle={loading ? 'Loading field operations...' : `${activeIncidents.length} active incidents and ${priorities.length} priority households.`}
+          primaryAction={(
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => { void loadData(); }}
+              className="h-11 rounded-[18px] border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700"
+            >
+              <RefreshCw className="h-4 w-4" />
+              Refresh
+            </Button>
+          )}
+        />
+
+        <div className="grid grid-cols-3 gap-2">
+          {[
+            { label: 'Active', value: activeIncidents.length },
+            { label: 'Priority', value: priorities.length },
+            { label: 'Resolved', value: resolvedCount },
+          ].map((metric) => (
+            <CivicPanel key={metric.label} className="rounded-[22px] p-3 text-center">
+              <p className="text-lg font-black tracking-tight text-slate-950">{loading ? '--' : metric.value}</p>
+              <p className="mt-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">{metric.label}</p>
+            </CivicPanel>
+          ))}
+        </div>
+
+        <CivicPanel className="space-y-4 rounded-[26px] p-4">
           <div className="flex items-start justify-between gap-3">
             <div>
               <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Map workspace</p>
               <h2 className="mt-1 text-lg font-black tracking-tight text-slate-950">Field map</h2>
-              <p className="mt-1 text-sm text-slate-500">Tap markers to open the selection drawer. Controls stay outside the map.</p>
+              <p className="mt-1 text-sm text-slate-500">Tap markers to open the selection drawer. Queue work stays below the fold in drawers.</p>
             </div>
-            <CivicBadge label={mapControls.activeBaseLayer.label} tone="navy" />
+            <CivicBadge label={mapControls.activeBaseLayer.label} tone="navy" className="text-[10px]" />
           </div>
 
           <ResponderLeafletMap
@@ -393,214 +564,87 @@ export default function ResponderMobile() {
             showWeather={mapControls.showWeather}
             overlayOpacity={mapControls.overlayOpacity}
             refreshVersion={mapControls.mapRefreshVersion}
-            containerClassName="h-[340px]"
+            containerClassName="h-[380px]"
             compactWeather
           />
 
-          <div className="flex flex-wrap gap-2">
-            <button
+          <div className="grid grid-cols-2 gap-2">
+            <Button
               type="button"
+              variant="outline"
               onClick={() => setMapControlsOpen(true)}
-              className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+              className="h-11 rounded-[18px] border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700"
             >
               <Layers3 className="h-4 w-4" />
-              Map controls
-            </button>
-            <button
+              Layers
+            </Button>
+            <Button
               type="button"
+              variant="outline"
               onClick={() => setSelectionOpen(true)}
-              className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+              disabled={!hasSelection}
+              className="h-11 rounded-[18px] border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700"
             >
               <Navigation className="h-4 w-4" />
-              {selectedIncident || selectedHousehold ? 'Selection open' : 'No selection'}
-            </button>
+              {hasSelection ? 'Selection' : 'No selection'}
+            </Button>
           </div>
         </CivicPanel>
 
-        <section>
-          <div className="mb-3 flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Zap className="h-4 w-4 text-red-500" />
-              <h2 className="text-sm font-bold text-slate-950">Active incidents</h2>
-            </div>
-            <CivicBadge label={`${activeIncidents.length} active`} tone="rose" />
-          </div>
-
-          {loading ? (
-            <div className="flex gap-3 overflow-x-hidden">
-              {[...Array(3)].map((_, index) => (
-                <div key={index} className="h-44 w-72 flex-shrink-0 animate-pulse rounded-[24px] bg-slate-100" />
-              ))}
-            </div>
-          ) : activeIncidents.length === 0 ? (
-            <CivicPanel className="text-center">
-              <CheckCircle2 className="mx-auto h-8 w-8 text-emerald-500" />
-              <p className="mt-3 text-sm font-semibold text-slate-950">All clear</p>
-              <p className="mt-1 text-sm text-slate-500">No active incidents in the response area.</p>
-            </CivicPanel>
-          ) : (
-            <div className="flex gap-3 overflow-x-auto pb-1">
-              {activeIncidents.map((incident) => {
-                const style = getSeverityStyle(incident.severity);
-                return (
-                  <div key={incident.id} className="w-[19rem] flex-shrink-0 rounded-[24px] border border-slate-200/80 bg-white p-4 shadow-[0_18px_46px_-36px_rgba(15,23,42,0.35)]">
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="flex items-center gap-2">
-                        <span className="text-xl">{incidentEmoji[incident.type] ?? '⚡'}</span>
-                        <div>
-                          <p className={`text-[10px] font-bold uppercase tracking-[0.14em] ${style.text}`}>{incident.severity}</p>
-                          <p className="text-sm font-bold text-slate-950">{incident.location}</p>
-                        </div>
-                      </div>
-                      <CivicBadge label={incident.status} tone="navy" />
-                    </div>
-                    <p className="mt-3 text-xs leading-relaxed text-slate-600">{incident.description}</p>
-                    <p className="mt-3 text-[11px] font-medium text-slate-400">{howLongAgo(incident.reported_at)}</p>
-                    <div className="mt-4 flex gap-2">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setSelectedIncident(incident);
-                          setSelectedHousehold(null);
-                          setSelectionOpen(true);
-                        }}
-                        className="flex-1 rounded-full border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700"
-                      >
-                        Inspect
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setSheetIncident(incident)}
-                        className="flex-1 rounded-full bg-cyan-950 px-3 py-2 text-xs font-semibold text-white"
-                      >
-                        Update
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => openResponderMapLocation(incident.gps_lat, incident.gps_lng, incident.location)}
-                        className="rounded-full border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700"
-                      >
-                        Go
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </section>
-
-        <section>
-          <div className="mb-3 flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <ShieldAlert className="h-4 w-4 text-rose-500" />
-              <h2 className="text-sm font-bold text-slate-950">Priority check-ins</h2>
-            </div>
-            <CivicBadge label={`${priorities.length} households`} tone="amber" />
-          </div>
-
-          {loading ? (
-            <div className="space-y-2">
-              {[...Array(3)].map((_, index) => (
-                <div key={index} className="h-24 animate-pulse rounded-[24px] bg-slate-100" />
-              ))}
-            </div>
-          ) : priorities.length === 0 ? (
-            <CivicPanel className="text-center">
-              <Users className="mx-auto h-8 w-8 text-slate-400" />
-              <p className="mt-3 text-sm font-semibold text-slate-950">No priority households</p>
-            </CivicPanel>
-          ) : (
-            <div className="space-y-2">
-              {priorities.map((priority, index) => {
-                const labels = getVulnerabilityLabels(priority.flags);
-                const alreadyVisited = visited.has(priority.household.id);
-
-                return (
-                  <div
-                    key={priority.household.id}
-                    className={`rounded-[24px] border px-4 py-4 shadow-[0_18px_46px_-36px_rgba(15,23,42,0.25)] ${
-                      alreadyVisited ? 'border-emerald-200 bg-emerald-50/60' : 'border-slate-200/80 bg-white'
-                    }`}
-                  >
-                    <div className="flex items-start gap-3">
-                      <div className="flex h-8 w-8 items-center justify-center rounded-2xl bg-slate-100 text-xs font-black text-slate-600">
-                        {index + 1}
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm font-bold text-slate-950">{priority.household.head_name}</p>
-                        <p className="mt-1 truncate text-xs text-slate-500">{priority.household.purok_sitio} · {priority.household.street_address}</p>
-                        <div className="mt-2 flex flex-wrap gap-1">
-                          {labels.map((label) => (
-                            <CivicBadge key={label} label={label} tone="rose" className="text-[10px]" />
-                          ))}
-                          <CivicBadge label={`${priority.residents.length} residents`} tone="slate" className="text-[10px]" />
-                        </div>
-                      </div>
-                    </div>
-                    <div className="mt-4 flex gap-2">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setSelectedHousehold(priority.household);
-                          setSelectedIncident(null);
-                          setSelectionOpen(true);
-                        }}
-                        className="rounded-full border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700"
-                      >
-                        Inspect
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => openResponderMapLocation(priority.household.gps_lat, priority.household.gps_long, `${priority.household.street_address}, ${priority.household.purok_sitio}`)}
-                        className="rounded-full border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700"
-                      >
-                        Navigate
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => toggleVisited(priority.household.id)}
-                        className={`rounded-full px-3 py-2 text-xs font-semibold ${
-                          alreadyVisited ? 'bg-emerald-600 text-white' : 'border border-slate-200 bg-white text-slate-700'
-                        }`}
-                      >
-                        {alreadyVisited ? 'Visited' : 'Check-in'}
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </section>
+        <WeatherWidget mode="compact" />
 
         {events.length > 0 ? (
-          <section>
-            <div className="mb-3 flex items-center gap-2">
-              <Package className="h-4 w-4 text-emerald-600" />
-              <h2 className="text-sm font-bold text-slate-950">Assignments</h2>
+          <CivicPanel className="space-y-3 rounded-[24px] p-4">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Assignments</p>
+                <h2 className="mt-1 text-base font-bold text-slate-950">Ongoing distribution support</h2>
+              </div>
+              <CivicBadge label={`${events.length} live`} tone="emerald" className="text-[10px]" />
             </div>
             <div className="space-y-2">
-              {events.map((event) => (
-                <div key={event.id} className="rounded-[24px] border border-slate-200/80 bg-white px-4 py-4 shadow-[0_18px_46px_-36px_rgba(15,23,42,0.25)]">
+              {events.slice(0, 2).map((event) => (
+                <div key={event.id} className="rounded-[20px] border border-slate-200 bg-slate-50 px-4 py-3">
                   <p className="text-sm font-bold text-slate-950">{event.event_name}</p>
                   <p className="mt-1 text-xs text-slate-500">{event.location}</p>
-                  <div className="mt-4 flex gap-2">
-                    <button
+                  <div className="mt-3">
+                    <Button
                       type="button"
+                      variant="outline"
                       onClick={() => openResponderMapLocation(event.gps_lat, event.gps_lng, event.location)}
-                      className="rounded-full border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700"
+                      className="h-10 rounded-full border-slate-200 px-4 text-xs font-semibold text-slate-700"
                     >
-                      <Navigation className="mr-1 inline h-3.5 w-3.5" />
                       Navigate
-                    </button>
+                    </Button>
                   </div>
                 </div>
               ))}
             </div>
-          </section>
+          </CivicPanel>
         ) : null}
-      </div>
+      </CivicPage>
+
+      <MobileActionBar
+        primaryAction={(
+          <Button type="button" onClick={() => setQueueOpen(true)} className="h-12 w-full rounded-[20px] px-4 text-sm font-semibold">
+            <Zap className="h-4 w-4" />
+            Incident queue
+            <span className="ml-1 text-xs text-primary-foreground/80">{loading ? '--' : activeIncidents.length}</span>
+          </Button>
+        )}
+        secondaryAction={(
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => setPriorityOpen(true)}
+            className="h-12 rounded-[20px] border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700"
+          >
+            <ShieldAlert className="h-4 w-4" />
+            {loading ? '--' : priorities.length}
+          </Button>
+        )}
+      />
     </>
   );
 }
+

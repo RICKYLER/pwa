@@ -189,7 +189,26 @@ function buildResolvedLocation(
   const administrativeLevel3 = findAddressComponent(components, [['administrative_area_level_3']]);
   const administrativeLevel2 = findAddressComponent(components, [['administrative_area_level_2']]);
   const administrativeLevel4 = findAddressComponent(components, [['administrative_area_level_4']]);
-  const cleanedFormattedAddress = cleanAddressText(formattedAddress) || formattedAddress.trim();
+  const country = findAddressComponent(components, [['country']]);
+  
+  let cleanedFormattedAddress = cleanAddressText(formattedAddress) || formattedAddress.trim();
+
+  // Check if formatted_address contains only Plus Code + country/region
+  const addressParts = formattedAddress.split(',').map(p => p.trim());
+  const isPlusCodeOnly = addressParts.length <= 3 && 
+    addressParts.some(part => PLUS_CODE_PATTERN.test(part));
+
+  // If Plus Code only, try to build better address from components
+  if (isPlusCodeOnly && components) {
+    const betterAddressParts = [
+      streetNumber && route ? `${streetNumber} ${route}` : route,
+      locality || administrativeLevel2,
+    ].filter(Boolean);
+    
+    if (betterAddressParts.length > 0) {
+      cleanedFormattedAddress = betterAddressParts.join(', ');
+    }
+  }
 
   const streetAddress = [streetNumber, route].filter(Boolean).join(' ')
     || cleanAddressText(premise)
@@ -402,11 +421,18 @@ function scoreReverseGeocodeResult(result: google.maps.GeocoderResult): number {
   if (types.includes('point_of_interest')) score += 45;
   if (types.includes('neighborhood')) score += 35;
   if (types.includes('sublocality')) score += 25;
-  if (types.includes('plus_code')) score -= 120;
+  if (types.includes('locality')) score += 15;
+  if (types.includes('plus_code')) score -= 500;
   if (types.includes('political') && types.length === 1) score -= 40;
 
   if (cleanAddressText(result.formatted_address.split(',')[0]?.trim())) {
     score += 5;
+  }
+
+  const addressComponents = result.address_components ?? [];
+  const hasStreetNumber = addressComponents.some(c => c.types.includes('street_number'));
+  if (hasStreetNumber) {
+    score += 50;
   }
 
   return score;
@@ -432,7 +458,7 @@ function scoreNearbyPlace(result: google.maps.places.PlaceResult): number {
   if (types.includes('point_of_interest')) score += 60;
   if (types.includes('establishment')) score += 50;
   if (types.includes('neighborhood')) score += 30;
-  if (types.includes('plus_code')) score -= 120;
+  if (types.includes('plus_code')) score -= 500;
   if (result.name) score += 5;
 
   return score;
@@ -522,22 +548,57 @@ export async function searchLocation(
     return null;
   }
 
-  const searchQuery = buildSearchQuery(query, options?.context);
   const locationBias = options?.locationBias ?? DEFAULT_BARANGAY_CENTER;
+  const municipality = options?.context?.municipality;
 
-  if (window.google.maps.places) {
+  // Helper to score search results
+  function scoreSearchResult(result: google.maps.places.PlaceResult): number {
+    const types = result.types ?? [];
+    let score = 0;
+
+    if (types.includes('street_address')) score += 100;
+    if (types.includes('premise')) score += 90;
+    if (types.includes('route')) score += 80;
+    if (types.includes('intersection')) score += 70;
+    if (types.includes('establishment')) score += 60;
+    if (types.includes('point_of_interest')) score += 50;
+    if (types.includes('neighborhood')) score += 30;
+    if (types.includes('sublocality')) score += 20;
+    if (types.includes('locality')) score += 10;
+    if (types.includes('plus_code')) score -= 500;
+
+    // Bonus for street number component
+    const hasStreetNumber = result.address_components?.some(
+      c => c.types.includes('street_number')
+    );
+    if (hasStreetNumber) score += 50;
+
+    return score;
+  }
+
+  // Helper to search with Places API
+  async function searchWithPlaces(
+    searchQuery: string,
+    radius: number
+  ): Promise<google.maps.places.PlaceResult | null> {
+    if (!window.google.maps.places) return null;
+
     const placesService = new window.google.maps.places.PlacesService(document.createElement('div'));
 
-    const topResult = await new Promise<google.maps.places.PlaceResult | null>((resolve) => {
+    return new Promise<google.maps.places.PlaceResult | null>((resolve) => {
       placesService.textSearch(
         {
           query: searchQuery,
           location: locationBias,
-          radius: options?.radiusMeters ?? 15000,
+          radius,
         },
         (results, status) => {
-          if (status === window.google.maps.places.PlacesServiceStatus.OK && results?.[0]) {
-            resolve(results[0]);
+          if (status === window.google.maps.places.PlacesServiceStatus.OK && results?.length) {
+            // Sort by score and pick best
+            const sorted = [...results].sort(
+              (a, b) => scoreSearchResult(b) - scoreSearchResult(a)
+            );
+            resolve(sorted[0]);
             return;
           }
 
@@ -545,41 +606,70 @@ export async function searchLocation(
         },
       );
     });
+  }
 
-    if (topResult?.place_id) {
-      const detailedPlace = await new Promise<google.maps.places.PlaceResult | null>((resolve) => {
-        placesService.getDetails(
-          {
-            placeId: topResult.place_id!,
-            fields: ['address_components', 'formatted_address', 'geometry', 'name', 'place_id'],
-          },
-          (place, status) => {
-            if (status === window.google.maps.places.PlacesServiceStatus.OK && place) {
-              resolve(place);
-              return;
-            }
+  // Helper to get detailed place
+  async function getDetailedPlace(
+    placeId: string,
+    fallback: google.maps.places.PlaceResult
+  ): Promise<google.maps.places.PlaceResult> {
+    if (!window.google.maps.places) return fallback;
 
-            resolve(topResult);
-          },
-        );
+    const placesService = new window.google.maps.places.PlacesService(document.createElement('div'));
+
+    return new Promise<google.maps.places.PlaceResult>((resolve) => {
+      placesService.getDetails(
+        {
+          placeId,
+          fields: ['address_components', 'formatted_address', 'geometry', 'name', 'place_id', 'types'],
+        },
+        (place, status) => {
+          if (status === window.google.maps.places.PlacesServiceStatus.OK && place) {
+            resolve(place);
+            return;
+          }
+
+          resolve(fallback);
+        },
+      );
+    });
+  }
+
+  // Strategy 1: Original query with Places textSearch
+  const searchQuery1 = buildSearchQuery(query, options?.context);
+  let topResult = await searchWithPlaces(searchQuery1, options?.radiusMeters ?? 15000);
+
+  // Strategy 2: If no street_address found, append municipality context
+  if (!topResult || !topResult.types?.includes('street_address')) {
+    if (municipality && !searchQuery1.toLowerCase().includes(municipality.toLowerCase())) {
+      const searchQuery2 = buildSearchQuery(query, {
+        ...options?.context,
+        municipality,
       });
-
-      const resolvedPlace = detailedPlace ? getPlacePinDetails(detailedPlace) : null;
-      if (resolvedPlace) {
-        return resolvedPlace;
+      const result2 = await searchWithPlaces(searchQuery2, options?.radiusMeters ?? 15000);
+      
+      if (result2 && scoreSearchResult(result2) > scoreSearchResult(topResult || {} as any)) {
+        topResult = result2;
       }
-    }
-
-    const resolvedTopResult = topResult ? getPlacePinDetails(topResult) : null;
-    if (resolvedTopResult) {
-      return resolvedTopResult;
     }
   }
 
-  return geocodeAddress(searchQuery, {
-    bounds: options?.bounds ?? buildSearchBoundsFromCenter(locationBias),
+  // Get detailed place info if we have a result
+  if (topResult?.place_id) {
+    const detailedPlace = await getDetailedPlace(topResult.place_id, topResult);
+    const resolvedPlace = getPlacePinDetails(detailedPlace);
+    if (resolvedPlace) {
+      return resolvedPlace;
+    }
+  }
+
+  // Strategy 3: Fallback to Geocoder with full address components
+  const geocoderResult = await geocodeAddress(searchQuery1, {
+    bounds: options?.bounds ?? buildSearchBoundsFromCenter(locationBias, 0.05),
     region: options?.region ?? 'ph',
   });
+
+  return geocoderResult;
 }
 
 export async function resolveLocationFromCoordinates(
@@ -606,7 +696,17 @@ export async function resolveLocationFromCoordinates(
     return null;
   }
 
-  const bestResult = pickBestReverseGeocodeResult(geocoderResults) ?? geocoderResults[0];
+  // First, try to find a street-level result by filtering the results array
+  const streetLevelTypes = ['street_address', 'premise', 'route', 'intersection'];
+  const streetLevelResult = geocoderResults.find(result =>
+    result.types?.some(type => streetLevelTypes.includes(type))
+  );
+
+  // Use street-level result if found, otherwise pick best result
+  const bestResult = streetLevelResult 
+    ? streetLevelResult 
+    : (pickBestReverseGeocodeResult(geocoderResults) ?? geocoderResults[0]);
+  
   const baseDetails = getGeocoderPinDetails(bestResult);
 
   if (

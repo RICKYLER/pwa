@@ -1,4 +1,4 @@
-import type { LucideIcon } from 'lucide-react';
+﻿import type { LucideIcon } from 'lucide-react';
 import {
   Activity,
   FileText,
@@ -22,7 +22,11 @@ export interface AppNavItem {
   icon: LucideIcon;
   perm: string | null;
   group: 'Core' | 'Operations' | 'Administration' | 'Resident';
+  showInBottomNav?: boolean;
+  mobilePriority?: number;
 }
+
+export const MOBILE_BOTTOM_NAV_LIMIT = 4;
 
 export const STAFF_NAV_ITEMS: AppNavItem[] = [
   {
@@ -35,6 +39,8 @@ export const STAFF_NAV_ITEMS: AppNavItem[] = [
     icon: Home,
     perm: null,
     group: 'Core',
+    showInBottomNav: true,
+    mobilePriority: 1,
   },
   {
     href: '/households',
@@ -46,6 +52,8 @@ export const STAFF_NAV_ITEMS: AppNavItem[] = [
     icon: Users,
     perm: 'view_households',
     group: 'Core',
+    showInBottomNav: true,
+    mobilePriority: 2,
   },
   {
     href: '/vulnerability',
@@ -57,6 +65,8 @@ export const STAFF_NAV_ITEMS: AppNavItem[] = [
     icon: ShieldAlert,
     perm: 'view_vulnerability',
     group: 'Core',
+    showInBottomNav: true,
+    mobilePriority: 3,
   },
   {
     href: '/responder',
@@ -68,6 +78,8 @@ export const STAFF_NAV_ITEMS: AppNavItem[] = [
     icon: Radio,
     perm: 'view_incidents',
     group: 'Operations',
+    showInBottomNav: true,
+    mobilePriority: 4,
   },
   {
     href: '/distribution',
@@ -167,6 +179,13 @@ export const RESIDENT_NAV_ITEMS: AppNavItem[] = [
 
 export function isPathActive(pathname: string, href: string): boolean {
   return pathname === href || (href !== '/dashboard' && href !== '/resident' && pathname.startsWith(href));
+}
+
+export function getMobileBottomNavItems(items: AppNavItem[] = STAFF_NAV_ITEMS): AppNavItem[] {
+  return items
+    .filter((item) => item.showInBottomNav)
+    .sort((left, right) => (left.mobilePriority ?? Number.MAX_SAFE_INTEGER) - (right.mobilePriority ?? Number.MAX_SAFE_INTEGER))
+    .slice(0, MOBILE_BOTTOM_NAV_LIMIT);
 }
 
 function matchPath(items: AppNavItem[], pathname: string): AppNavItem | null {

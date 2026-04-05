@@ -1,9 +1,10 @@
-'use client';
+﻿'use client';
 
 import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { AlertTriangle, Baby, FileText, Home, Package, ShieldAlert, Users } from 'lucide-react';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { db } from '@/lib/db/indexeddb';
 import { getDashboardStats } from '@/lib/db/queries';
 import { getDefaultRouteForUser, hasPermission, restoreSession } from '@/lib/auth';
@@ -63,7 +64,7 @@ export default function DashboardMobile() {
       setStats(dashboardStats);
       setError('');
     } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : 'Failed to load');
+      setError(loadError instanceof Error ? loadError.message : 'Failed to load dashboard metrics.');
     } finally {
       if (!background) {
         setIsLoading(false);
@@ -94,90 +95,87 @@ export default function DashboardMobile() {
     ? stats.children_count + stats.seniors_count + stats.pwd_count + stats.pregnant_count + stats.chronic_count
     : 0;
 
+  const quickActions = [
+    hasPermission('create_household') && { href: '/households/new', label: 'Add household', icon: Home },
+    hasPermission('view_vulnerability') && { href: '/vulnerability', label: 'Risk profiles', icon: ShieldAlert },
+    hasPermission('view_reports') && { href: '/distribution', label: 'Distribution', icon: Package },
+    hasPermission('view_reports') && { href: '/reports', label: 'Reports', icon: FileText },
+  ].filter(Boolean) as { href: string; label: string; icon: typeof Home }[];
+
+  const attentionRows = [
+    { label: 'Children', value: stats?.children_count ?? 0, color: 'bg-cyan-950' },
+    { label: 'Seniors', value: stats?.seniors_count ?? 0, color: 'bg-amber-500' },
+    { label: 'PWD', value: stats?.pwd_count ?? 0, color: 'bg-rose-500' },
+    { label: 'Pregnant', value: stats?.pregnant_count ?? 0, color: 'bg-teal-600' },
+    { label: 'Chronic', value: stats?.chronic_count ?? 0, color: 'bg-slate-700' },
+    { label: 'Low income', value: stats?.low_income_count ?? 0, color: 'bg-emerald-600' },
+  ];
+
   return (
     <CivicPage className="space-y-4 px-4 py-4">
       <CivicHero
         eyebrow="Municipal Operations"
         title={`${greeting()}, ${user.name?.split(' ')[0] ?? 'there'}`}
-        description={isLoading ? 'Loading civic metrics...' : `${(stats?.total_population ?? 0).toLocaleString()} residents currently represented in the census.`}
+        description={isLoading ? 'Loading the latest civic overview...' : `${(stats?.total_population ?? 0).toLocaleString()} residents are represented in the current census.`}
+        className="px-4 py-4 sm:px-5 sm:py-5"
       >
         <div className="mt-4 flex flex-wrap gap-2">
           <CivicBadge label={`${stats?.total_households ?? 0} households`} tone="teal" />
-          <CivicBadge label={`${totalVulnerable} vulnerable`} tone="amber" />
+          <CivicBadge label={`${totalVulnerable} monitored residents`} tone="amber" />
         </div>
-      </CivicHero>
-
-      {error ? (
-        <CivicPanel className="border-red-200 bg-red-50/90">
-          <div className="flex items-center gap-2 text-sm text-red-700">
-            <AlertTriangle className="h-4 w-4" />
-            {error}
-          </div>
-        </CivicPanel>
-      ) : null}
-
-      <div className="grid grid-cols-2 gap-3">
-        <CivicKpiCard icon={Home} label="Households" value={isLoading ? '—' : stats?.total_households ?? 0} tone="navy" />
-        <CivicKpiCard icon={Users} label="Population" value={isLoading ? '—' : stats?.total_population ?? 0} tone="teal" />
-        <CivicKpiCard icon={Baby} label="Children" value={isLoading ? '—' : stats?.children_count ?? 0} tone="amber" />
-        <CivicKpiCard icon={ShieldAlert} label="Vulnerable" value={isLoading ? '—' : totalVulnerable} tone="rose" />
-      </div>
-
-      <CivicPanel>
-        <CivicSectionHeading
-          icon={ShieldAlert}
-          title="Vulnerability summary"
-          description="High-level counts for the most monitored groups."
-        />
-        <div className="mt-5 space-y-3">
-          {[
-            { label: 'Children', value: stats?.children_count ?? 0, color: 'bg-cyan-950' },
-            { label: 'Seniors', value: stats?.seniors_count ?? 0, color: 'bg-amber-500' },
-            { label: 'PWD', value: stats?.pwd_count ?? 0, color: 'bg-rose-500' },
-            { label: 'Pregnant', value: stats?.pregnant_count ?? 0, color: 'bg-teal-600' },
-            { label: 'Chronic', value: stats?.chronic_count ?? 0, color: 'bg-slate-700' },
-          ].map((row) => (
-            <div key={row.label} className="grid grid-cols-[76px_minmax(0,1fr)_40px] items-center gap-3">
-              <span className="text-xs font-medium text-slate-600">{row.label}</span>
-              <div className="h-2 overflow-hidden rounded-full bg-slate-100">
-                <div
-                  className={`h-full rounded-full ${row.color}`}
-                  style={{ width: totalVulnerable > 0 ? `${Math.max((row.value / totalVulnerable) * 100, 8)}%` : '0%' }}
-                />
-              </div>
-              <span className="text-right text-xs font-bold text-slate-900">{row.value}</span>
-            </div>
-          ))}
-        </div>
-      </CivicPanel>
-
-      <CivicPanel>
-        <CivicSectionHeading
-          icon={FileText}
-          title="Quick actions"
-          description="Go straight to the most common tasks."
-        />
         <div className="mt-4 grid grid-cols-2 gap-2">
-          {[
-            hasPermission('create_household') && { href: '/households/new', label: 'Add household', icon: Home },
-            hasPermission('view_vulnerability') && { href: '/vulnerability', label: 'Risk profiles', icon: ShieldAlert },
-            hasPermission('view_reports') && { href: '/distribution', label: 'Distribution', icon: Package },
-            hasPermission('view_reports') && { href: '/reports', label: 'Reports', icon: FileText },
-          ].filter(Boolean).map((link: any) => {
+          {quickActions.map((link) => {
             const Icon = link.icon;
             return (
               <Link
                 key={link.href}
                 href={link.href}
-                className="rounded-[22px] border border-slate-200 bg-white px-4 py-4 transition hover:border-slate-300 hover:bg-slate-50"
+                className="rounded-[22px] border border-white/70 bg-white/88 px-4 py-4 shadow-[0_16px_42px_-30px_rgba(15,23,42,0.22)] transition hover:border-slate-200 hover:bg-white"
               >
-                <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-slate-100 text-slate-800">
+                <div className="flex h-10 w-10 items-center justify-center rounded-[18px] bg-slate-100 text-slate-800">
                   <Icon className="h-4 w-4" />
                 </div>
                 <p className="mt-3 text-sm font-bold text-slate-950">{link.label}</p>
               </Link>
             );
           })}
+        </div>
+      </CivicHero>
+
+      {error ? (
+        <Alert className="rounded-[24px] border-red-200 bg-red-50 text-red-700">
+          <AlertTriangle className="h-4 w-4" />
+          <AlertTitle>Unable to refresh the dashboard</AlertTitle>
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      ) : null}
+
+      <div className="grid grid-cols-2 gap-3">
+        <CivicKpiCard className="rounded-[22px] p-4" icon={Home} label="Households" value={isLoading ? '--' : stats?.total_households ?? 0} tone="navy" />
+        <CivicKpiCard className="rounded-[22px] p-4" icon={Users} label="Population" value={isLoading ? '--' : stats?.total_population ?? 0} tone="teal" />
+        <CivicKpiCard className="rounded-[22px] p-4" icon={Baby} label="Children" value={isLoading ? '--' : stats?.children_count ?? 0} tone="amber" />
+        <CivicKpiCard className="rounded-[22px] p-4" icon={ShieldAlert} label="Vulnerable" value={isLoading ? '--' : totalVulnerable} tone="rose" />
+      </div>
+
+      <CivicPanel className="space-y-5 rounded-[24px] p-4">
+        <CivicSectionHeading
+          icon={ShieldAlert}
+          title="Attention today"
+          description="The largest monitored groups in the current household census."
+        />
+        <div className="space-y-3">
+          {attentionRows.map((row) => (
+            <div key={row.label} className="grid grid-cols-[84px_minmax(0,1fr)_44px] items-center gap-3">
+              <span className="text-xs font-medium text-slate-600">{row.label}</span>
+              <div className="h-2 overflow-hidden rounded-full bg-slate-100">
+                <div
+                  className={`h-full rounded-full ${row.color}`}
+                  style={{ width: totalVulnerable > 0 ? `${Math.max((row.value / Math.max(totalVulnerable, 1)) * 100, row.value > 0 ? 8 : 0)}%` : '0%' }}
+                />
+              </div>
+              <span className="text-right text-xs font-bold text-slate-900">{row.value}</span>
+            </div>
+          ))}
         </div>
       </CivicPanel>
     </CivicPage>
