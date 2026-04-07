@@ -1,6 +1,7 @@
 ﻿import type { LucideIcon } from 'lucide-react';
 import {
   Activity,
+  Bell,
   FileText,
   Home,
   MapPinned,
@@ -161,6 +162,17 @@ export const RESIDENT_NAV_ITEMS: AppNavItem[] = [
     pageTitle: 'Resident Portal',
     pageEyebrow: 'Resident Services',
     icon: Home,
+    perm: null,
+    group: 'Resident',
+  },
+  {
+    href: '/resident/notifications',
+    label: 'Notifications',
+    mobileLabel: 'Inbox',
+    description: 'Distribution notices and resident updates',
+    pageTitle: 'Notifications',
+    pageEyebrow: 'Resident Services',
+    icon: Bell,
     perm: null,
     group: 'Resident',
   },

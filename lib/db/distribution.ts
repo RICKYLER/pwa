@@ -59,6 +59,7 @@ function normalizeDistributionEvent(event: DistributionEvent): DistributionEvent
 
   return {
     ...event,
+    barangay_id: typeof event.barangay_id === 'string' ? event.barangay_id.trim() : '',
     target_scope: event.target_scope ?? inferred.target_scope,
     target_group: event.target_group ?? inferred.target_group,
     package_items: normalizeDistributedItems(event.package_items),
@@ -98,6 +99,22 @@ function matchesTargetGroup(
 
 function countDistributedUnits(items: DistributedItem[]): number {
   return items.reduce((sum, item) => sum + item.quantity, 0);
+}
+
+async function getScopedHouseholdsAndResidents(barangayId: string) {
+  const households = await getHouseholds({
+    barangay_id: barangayId,
+    status: 'active',
+    registration_status: 'approved',
+  });
+  const householdIds = new Set(households.map((household) => household.id));
+  const residents = (await getResidents({ status: 'active' }))
+    .filter((resident) => householdIds.has(resident.household_id));
+
+  return {
+    households,
+    residents,
+  };
 }
 
 /**
@@ -141,13 +158,14 @@ export async function getDistributionEvent(id: string): Promise<DistributionEven
  * Create distribution event
  */
 export async function createDistributionEvent(
-  data: Omit<DistributionEvent, 'id' | 'syncStatus'>,
+  data: Omit<DistributionEvent, 'id' | 'syncStatus' | 'created_by' | 'barangay_id'>,
   userId: string,
 ): Promise<DistributionEvent> {
   try {
     const event = normalizeDistributionEvent({
       ...data,
       id: generateId(),
+      barangay_id: '',
       created_by: userId,
       syncStatus: 'synced',
     });
@@ -212,19 +230,27 @@ export async function updateDistributionEvent(
 /**
  * Backwards-compatible helper for older code paths.
  */
-export async function getEligibleBeneficiaries(eventType: string): Promise<Resident[]> {
+export async function getEligibleBeneficiaries(
+  eventType: string,
+  barangayId: string,
+): Promise<Resident[]> {
   const inferred = inferTargetConfig(eventType);
   return getEligibleResidentsForEvent({
+    barangay_id: barangayId,
     target_group: inferred.target_group,
   });
 }
 
 export async function getEligibleResidentsForEvent(config: {
+  barangay_id: string;
   target_group: DistributionTargetGroup;
 }): Promise<Resident[]> {
   try {
-    const residents = await getResidents({ status: 'active' });
-    const households = await getHouseholds({ status: 'active', registration_status: 'approved' });
+    if (!config.barangay_id) {
+      return [];
+    }
+
+    const { households, residents } = await getScopedHouseholdsAndResidents(config.barangay_id);
     const flagsMap = await getCurrentVulnerabilityFlagsMapForResidents(residents, households);
 
     return residents.filter((resident) =>
@@ -237,13 +263,15 @@ export async function getEligibleResidentsForEvent(config: {
 }
 
 export async function getEligibleHouseholdsForEvent(config: {
+  barangay_id: string;
   target_group: DistributionTargetGroup;
 }): Promise<Household[]> {
   try {
-    const [households, residents] = await Promise.all([
-      getHouseholds({ status: 'active', registration_status: 'approved' }),
-      getResidents({ status: 'active' }),
-    ]);
+    if (!config.barangay_id) {
+      return [];
+    }
+
+    const { households, residents } = await getScopedHouseholdsAndResidents(config.barangay_id);
     const flagsMap = await getCurrentVulnerabilityFlagsMapForResidents(residents, households);
 
     if (config.target_group === 'all') {

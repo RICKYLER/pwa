@@ -40,5 +40,6 @@ test('resident users subscribe only to their own scoped realtime topics', () => 
     'global:programs',
     'user:resident-123:registry',
     'user:resident-123:audit',
+    'user:resident-123:notifications',
   ]);
 });

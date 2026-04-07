@@ -3,13 +3,28 @@
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { CheckCircle2, Clock3, FileText, MapPin, ShieldAlert } from 'lucide-react';
+import { Bell, CheckCircle2, Clock3, FileText, MapPin, ShieldAlert } from 'lucide-react';
 import ResidentShell from '@/components/resident/ResidentShell';
 import { getDefaultRouteForUser, getCurrentUser, isResidentUser } from '@/lib/auth';
 import { getHouseholds } from '@/lib/db/households';
-import type { Household } from '@/lib/db/schema';
+import { getUserNotifications } from '@/lib/db/user-notifications';
+import type { DistributionStatus, Household, UserNotification } from '@/lib/db/schema';
 import { buildRegistrationTimeline, formatRegistrationStatusLabel, getHouseholdRegistrationStatus } from '@/lib/household-registration';
 import { CivicBadge, CivicPanel, CivicSectionHeading } from '@/components/ui/civic-primitives';
+import {
+  DISTRIBUTION_NOTIFICATION_STATUS_LABELS,
+  parseDistributionEventNotification,
+} from '@/lib/distribution-notifications';
+
+declare global {
+  interface WindowEventMap {
+    'mswdo-data-changed': CustomEvent<{
+      source: 'supabase';
+      table: string;
+      mode: 'hydrate' | 'change';
+    }>;
+  }
+}
 
 function formatDate(value?: Date): string {
   if (!value) {
@@ -22,10 +37,17 @@ function formatDate(value?: Date): string {
   }).format(new Date(value));
 }
 
+const STATUS_BADGE_TONES: Record<DistributionStatus, 'amber' | 'navy' | 'emerald'> = {
+  planned: 'amber',
+  ongoing: 'navy',
+  completed: 'emerald',
+};
+
 export default function ResidentPortalPage() {
   const router = useRouter();
   const user = getCurrentUser();
   const [records, setRecords] = useState<Household[]>([]);
+  const [notifications, setNotifications] = useState<UserNotification[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
@@ -45,9 +67,13 @@ export default function ResidentPortalPage() {
     async function loadRecords() {
       try {
         setIsLoading(true);
-        const households = await getHouseholds({ applicant_user_id: residentUser.id });
+        const [households, inboxItems] = await Promise.all([
+          getHouseholds({ applicant_user_id: residentUser.id }),
+          getUserNotifications(),
+        ]);
         if (!cancelled) {
           setRecords(households);
+          setNotifications(inboxItems);
         }
       } finally {
         if (!cancelled) {
@@ -57,15 +83,29 @@ export default function ResidentPortalPage() {
     }
 
     void loadRecords();
+    function handleDataChanged(event: WindowEventMap['mswdo-data-changed']) {
+      if (event.detail.table !== 'households' && event.detail.table !== 'user_notifications') {
+        return;
+      }
+
+      void loadRecords();
+    }
+
+    window.addEventListener('mswdo-data-changed', handleDataChanged);
 
     return () => {
       cancelled = true;
+      window.removeEventListener('mswdo-data-changed', handleDataChanged);
     };
   }, [router, user]);
 
   const pendingCount = useMemo(() => (
     records.filter((record) => getHouseholdRegistrationStatus(record) === 'pending').length
   ), [records]);
+  const unreadNotificationCount = useMemo(
+    () => notifications.filter((notification) => !notification.read_at).length,
+    [notifications],
+  );
 
   if (!user || !isResidentUser(user)) {
     return null;
@@ -94,6 +134,66 @@ export default function ResidentPortalPage() {
           );
         })}
       </div>
+
+      <CivicPanel className="mt-6 sm:p-6">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <CivicSectionHeading
+            icon={Bell}
+            title="Latest barangay notices"
+            description="Live distribution event updates for your resident account appear here with status changes and notes."
+          />
+          <Link
+            href="/resident/notifications"
+            className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
+          >
+            <Bell className="h-4 w-4" />
+            Open Notifications
+          </Link>
+        </div>
+
+        <div className="mt-6 flex flex-wrap gap-2">
+          <CivicBadge label={`${notifications.length} total notice${notifications.length === 1 ? '' : 's'}`} tone="slate" />
+          <CivicBadge label={`${unreadNotificationCount} unread`} tone={unreadNotificationCount > 0 ? 'amber' : 'emerald'} />
+        </div>
+
+        {notifications.length > 0 ? (
+          <div className="mt-5 space-y-3">
+            {notifications.slice(0, 2).map((notification) => {
+              const payload = parseDistributionEventNotification(notification);
+
+              return (
+                <div
+                  key={notification.id}
+                  className={`rounded-[24px] border px-4 py-4 ${
+                    notification.read_at
+                      ? 'border-slate-200 bg-slate-50'
+                      : 'border-cyan-200 bg-cyan-50/70'
+                  }`}
+                >
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="text-sm font-semibold text-slate-900">{notification.title}</p>
+                    <CivicBadge label={notification.read_at ? 'Read' : 'Unread'} tone={notification.read_at ? 'emerald' : 'amber'} />
+                    {payload ? (
+                      <CivicBadge
+                        label={DISTRIBUTION_NOTIFICATION_STATUS_LABELS[payload.status]}
+                        tone={STATUS_BADGE_TONES[payload.status]}
+                      />
+                    ) : null}
+                  </div>
+                  <p className="mt-2 text-sm leading-6 text-slate-600">{notification.body}</p>
+                  {payload?.notes?.trim() ? (
+                    <p className="mt-2 text-xs font-medium text-amber-800">Note: {payload.notes.trim()}</p>
+                  ) : null}
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="mt-5 rounded-[24px] border border-dashed border-slate-300 bg-slate-50 px-4 py-8 text-center text-sm text-slate-500">
+            No barangay distribution notices yet.
+          </div>
+        )}
+      </CivicPanel>
 
       <CivicPanel className="mt-6 sm:p-6">
         <div className="flex flex-wrap items-start justify-between gap-4">

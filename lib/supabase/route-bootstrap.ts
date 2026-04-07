@@ -34,7 +34,7 @@ const ROUTE_TABLES: Array<{
   },
   {
     prefix: '/resident',
-    tables: ['households'],
+    tables: ['households', 'user_notifications'],
   },
 ];
 

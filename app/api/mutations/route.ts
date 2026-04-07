@@ -24,6 +24,7 @@ import {
   deleteDistributionEventOnServer,
   releaseDistributionPackageOnServer,
   saveLocationMasterListOnServer,
+  markUserNotificationReadOnServer,
   updateDistributionEventOnServer,
   updateHouseholdOnServer,
   updateResidentHealthFlagsOnServer,
@@ -199,6 +200,21 @@ export async function POST(request: NextRequest) {
         );
 
         return NextResponse.json(data, {
+          headers: { 'Cache-Control': 'no-store' },
+        });
+      }
+      case 'mark_user_notification_read': {
+        const notificationId = typeof body.notificationId === 'string' ? body.notificationId : '';
+        if (!notificationId) {
+          return badRequest('notificationId is required.');
+        }
+
+        const notification = await markUserNotificationReadOnServer(
+          authResult.user,
+          notificationId,
+        );
+
+        return NextResponse.json({ notification }, {
           headers: { 'Cache-Control': 'no-store' },
         });
       }

@@ -39,6 +39,7 @@ export default function RegistrationStatusPage() {
       return;
     }
 
+
     if (!recordId) {
       router.push(isResidentUser(user) ? '/resident' : '/households');
       return;

@@ -9,6 +9,7 @@ export type SupabaseBootstrapTable =
   | 'package_templates'
   | 'distribution_events'
   | 'distribution_records'
+  | 'user_notifications'
   | 'incidents'
   | 'location_master_lists'
   | 'programs'
@@ -27,6 +28,7 @@ export const SUPABASE_BOOTSTRAP_TABLES: Array<{
   { table: 'package_templates', storeName: STORE_NAMES.package_templates },
   { table: 'distribution_events', storeName: STORE_NAMES.distribution_events },
   { table: 'distribution_records', storeName: STORE_NAMES.distribution_records },
+  { table: 'user_notifications', storeName: STORE_NAMES.user_notifications },
   { table: 'incidents', storeName: STORE_NAMES.incidents },
   { table: 'location_master_lists', storeName: STORE_NAMES.location_master_lists },
   { table: 'programs', storeName: STORE_NAMES.programs },
@@ -102,6 +104,13 @@ export function mapSupabaseRow(table: SupabaseBootstrapTable, row: Record<string
         ...base,
         ...metadata,
         syncStatus: 'synced' as const,
+      };
+    case 'user_notifications':
+      return {
+        ...base,
+        ...metadata,
+        read_at: toOptionalDate(base.read_at),
+        payload: base.payload && typeof base.payload === 'object' ? base.payload : {},
       };
     case 'location_master_lists':
       return {

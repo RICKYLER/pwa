@@ -208,6 +208,60 @@ function isMissingInventoryTrashSchemaError(
   );
 }
 
+function isMissingDistributionNotificationSchemaError(
+  error: { code?: string | null; message?: string | null } | null | undefined,
+) {
+  if (!error) {
+    return false;
+  }
+
+  if (
+    isMissingRpcFunctionError(error, 'create_distribution_event_bundle')
+    || isMissingRpcFunctionError(error, 'update_distribution_event_bundle')
+    || isMissingRpcFunctionError(error, 'sync_distribution_event_notifications')
+  ) {
+    return true;
+  }
+
+  const message = (error.message ?? '').toLowerCase();
+  return (
+    (
+      message.includes('distribution_events')
+      && message.includes('barangay_id')
+      && (
+        message.includes('schema cache')
+        || message.includes('does not exist')
+        || message.includes('could not find')
+      )
+    )
+    || (
+      message.includes('user_notifications')
+      && (
+        message.includes('event_id')
+        || message.includes('schema cache')
+        || message.includes('does not exist')
+        || message.includes('could not find')
+      )
+    )
+    || (
+      message.includes('user_notifications')
+      && (
+        message.includes('schema cache')
+        || message.includes('does not exist')
+        || message.includes('could not find')
+      )
+    )
+    || (
+      message.includes('users.status')
+      && (
+        message.includes('schema cache')
+        || message.includes('does not exist')
+        || message.includes('could not find')
+      )
+    )
+  );
+}
+
 async function getRemoteActorId(user: User) {
   return requireSupabaseUserId(user);
 }
@@ -219,6 +273,59 @@ async function resolveRemoteUserId(localUserId: string | null | undefined, fallb
   }
 
   return resolveSupabaseUserId(normalized, fallback);
+}
+
+async function createDistributionEventViaLegacyInsert(
+  event: Omit<DistributionEvent, 'syncStatus'> & { id: string },
+  remoteActorId: string,
+) {
+  const supabase = getSupabaseAdminClient();
+  const { data, error } = await supabase
+    .from('distribution_events')
+    .insert({
+      id: event.id,
+      event_name: event.event_name.trim(),
+      type: event.type,
+      incident_id: toOptionalString(event.incident_id),
+      target_scope: event.target_scope,
+      target_group: event.target_group,
+      package_items: event.package_items,
+      location: event.location.trim(),
+      gps_lat: typeof event.gps_lat === 'number' ? event.gps_lat : null,
+      gps_lng: typeof event.gps_lng === 'number' ? event.gps_lng : null,
+      scheduled_date: toDateOnlyString(event.scheduled_date),
+      status: event.status,
+      created_by: remoteActorId,
+      notes: toOptionalString(event.notes),
+      sync_status: 'synced',
+    })
+    .select('*')
+    .single();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return data;
+}
+
+async function updateDistributionEventViaLegacyUpdate(
+  eventId: string,
+  payload: Record<string, unknown>,
+) {
+  const supabase = getSupabaseAdminClient();
+  const { data, error } = await supabase
+    .from('distribution_events')
+    .update(payload)
+    .eq('id', eventId)
+    .select('*')
+    .single();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return data;
 }
 
 async function createAuditLogEntry(params: {
@@ -1156,30 +1263,63 @@ export async function createDistributionEventOnServer(
 
   const supabase = getSupabaseAdminClient();
   const remoteActorId = await getRemoteActorId(user);
-  const { data, error } = await supabase
-    .from('distribution_events')
-    .insert({
-      id: event.id,
-      event_name: event.event_name.trim(),
-      type: event.type,
-      incident_id: typeof event.incident_id === 'string' ? event.incident_id.trim() || null : null,
-      target_scope: event.target_scope,
-      target_group: event.target_group,
-      package_items: event.package_items,
-      location: event.location.trim(),
-      gps_lat: typeof event.gps_lat === 'number' ? event.gps_lat : null,
-      gps_lng: typeof event.gps_lng === 'number' ? event.gps_lng : null,
-      scheduled_date: event.scheduled_date,
-      status: event.status,
-      created_by: remoteActorId,
-      notes: typeof event.notes === 'string' ? event.notes.trim() || null : null,
-      sync_status: 'synced',
-    })
-    .select('*')
-    .single();
+  const scheduledDate = toDateOnlyString(event.scheduled_date);
+  if (!scheduledDate) {
+    throw new Error('Scheduled date is required.');
+  }
+
+  const { data, error } = await supabase.rpc('create_distribution_event_bundle', {
+    p_id: event.id,
+    p_event_name: event.event_name.trim(),
+    p_type: event.type,
+    p_incident_id: toOptionalString(event.incident_id),
+    p_target_scope: event.target_scope,
+    p_target_group: event.target_group,
+    p_package_items: event.package_items,
+    p_location: event.location.trim(),
+    p_gps_lat: typeof event.gps_lat === 'number' ? event.gps_lat : null,
+    p_gps_lng: typeof event.gps_lng === 'number' ? event.gps_lng : null,
+    p_scheduled_date: scheduledDate,
+    p_status: event.status,
+    p_notes: toOptionalString(event.notes),
+    p_actor_role: user.role,
+    p_actor_user_id: remoteActorId,
+  });
+
+  if (error && !isMissingDistributionNotificationSchemaError(error)) {
+    throw new Error(error.message);
+  }
 
   if (error) {
-    throw new Error(error.message);
+    const createdEvent = await createDistributionEventViaLegacyInsert(event, remoteActorId);
+
+    await createAuditLogEntry({
+      user,
+      action: 'CREATE',
+      entityType: 'distribution',
+      entityId: event.id,
+      changes: {
+        event_name: event.event_name,
+        type: event.type,
+        barangay_id: user.barangay_id,
+        location: event.location,
+        target_scope: event.target_scope,
+        target_group: event.target_group,
+        package_items: event.package_items,
+        notification_mode: 'legacy_fallback',
+      },
+    });
+
+    return createdEvent;
+  }
+
+  const createdEvent =
+    data && typeof data === 'object' && 'distribution_event' in data
+      ? (data as { distribution_event?: Record<string, unknown> }).distribution_event ?? null
+      : null;
+
+  if (!createdEvent) {
+    throw new Error('Distribution event bundle did not return the created event.');
   }
 
   await createAuditLogEntry({
@@ -1190,12 +1330,59 @@ export async function createDistributionEventOnServer(
     changes: {
       event_name: event.event_name,
       type: event.type,
+      barangay_id: user.barangay_id,
       location: event.location,
       target_scope: event.target_scope,
       target_group: event.target_group,
       package_items: event.package_items,
     },
   });
+
+  return createdEvent;
+}
+
+export async function markUserNotificationReadOnServer(
+  user: User,
+  notificationId: string,
+) {
+  if (user.role !== 'resident') {
+    throw new Error('Only resident accounts can update resident notifications.');
+  }
+
+  const supabase = getSupabaseAdminClient();
+  const remoteActorId = await getRemoteActorId(user);
+  const { data: existingNotification, error: existingError } = await supabase
+    .from('user_notifications')
+    .select('*')
+    .eq('id', notificationId)
+    .eq('user_id', remoteActorId)
+    .maybeSingle();
+
+  if (existingError) {
+    throw new Error(existingError.message);
+  }
+
+  if (!existingNotification) {
+    throw new Error('Notification not found.');
+  }
+
+  if (existingNotification.read_at) {
+    return existingNotification;
+  }
+
+  const { data, error } = await supabase
+    .from('user_notifications')
+    .update({
+      read_at: new Date().toISOString(),
+    })
+    .eq('id', notificationId)
+    .eq('user_id', remoteActorId)
+    .select('*')
+    .single();
+
+  if (error) {
+    throw new Error(error.message);
+  }
 
   return data;
 }
@@ -1210,10 +1397,16 @@ export async function updateDistributionEventOnServer(
   }
 
   const supabase = getSupabaseAdminClient();
+  const remoteActorId = await getRemoteActorId(user);
   const payload = stripUndefined({
     event_name: typeof updates.event_name === 'string' ? updates.event_name.trim() : undefined,
     type: updates.type,
-    incident_id: typeof updates.incident_id === 'string' ? updates.incident_id.trim() || null : undefined,
+    incident_id:
+      updates.incident_id === null
+        ? null
+        : typeof updates.incident_id === 'string'
+          ? updates.incident_id.trim() || null
+          : undefined,
     target_scope: updates.target_scope,
     target_group: updates.target_group,
     package_items: Array.isArray(updates.package_items) ? updates.package_items : undefined,
@@ -1222,19 +1415,52 @@ export async function updateDistributionEventOnServer(
     gps_lng: typeof updates.gps_lng === 'number' ? updates.gps_lng : undefined,
     scheduled_date: typeof updates.scheduled_date === 'string' ? updates.scheduled_date : undefined,
     status: updates.status,
-    notes: typeof updates.notes === 'string' ? updates.notes.trim() || null : undefined,
+    notes:
+      updates.notes === null
+        ? null
+        : typeof updates.notes === 'string'
+          ? updates.notes.trim() || null
+          : undefined,
     sync_status: 'synced',
   });
 
-  const { data, error } = await supabase
-    .from('distribution_events')
-    .update(payload)
-    .eq('id', eventId)
-    .select('*')
-    .single();
+  const rpcPayload = stripUndefined({
+    event_name: payload.event_name,
+    type: payload.type,
+    incident_id: 'incident_id' in payload ? payload.incident_id : undefined,
+    target_scope: payload.target_scope,
+    target_group: payload.target_group,
+    package_items: payload.package_items,
+    location: payload.location,
+    gps_lat: 'gps_lat' in payload ? payload.gps_lat : undefined,
+    gps_lng: 'gps_lng' in payload ? payload.gps_lng : undefined,
+    scheduled_date: payload.scheduled_date,
+    status: payload.status,
+    notes: 'notes' in payload ? payload.notes : undefined,
+  });
 
-  if (error) {
+  const { data, error } = await supabase.rpc('update_distribution_event_bundle', {
+    p_event_id: eventId,
+    p_updates: rpcPayload,
+    p_actor_role: user.role,
+    p_actor_user_id: remoteActorId,
+  });
+
+  if (error && !isMissingDistributionNotificationSchemaError(error)) {
     throw new Error(error.message);
+  }
+
+  const updatedEventFromRpc =
+    data && typeof data === 'object' && 'distribution_event' in data
+      ? (data as { distribution_event?: Record<string, unknown> }).distribution_event ?? null
+      : null;
+
+  const updatedEvent = error
+    ? await updateDistributionEventViaLegacyUpdate(eventId, payload)
+    : updatedEventFromRpc;
+
+  if (!updatedEvent) {
+    throw new Error('Distribution event bundle did not return the updated event.');
   }
 
   await createAuditLogEntry({
@@ -1245,7 +1471,7 @@ export async function updateDistributionEventOnServer(
     changes: updates as Record<string, unknown>,
   });
 
-  return data;
+  return updatedEvent;
 }
 
 export async function updateInventoryItemOnServer(

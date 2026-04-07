@@ -359,6 +359,7 @@ async function mapQueueItemToSupabaseRow(item: SyncQueueItem, syncActorId: strin
     case 'distribution_events':
       return {
         id: toRequiredString(data.id, 'distribution_event.id'),
+        barangay_id: toRequiredString(data.barangay_id, 'distribution_event.barangay_id'),
         event_name: toRequiredString(data.event_name, 'distribution_event.event_name'),
         type: toRequiredString(data.type, 'distribution_event.type'),
         incident_id: toOptionalString(data.incident_id),

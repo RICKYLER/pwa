@@ -46,6 +46,7 @@ export function getRealtimeTopicsForUser(user: User | null | undefined): string[
         ...topics,
         `user:${user.id}:registry`,
         `user:${user.id}:audit`,
+        `user:${user.id}:notifications`,
       ]);
     default:
       return uniqueTopics(topics);

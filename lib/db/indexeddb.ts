@@ -14,6 +14,7 @@ export const STORE_NAMES = {
   package_templates: 'package_templates',
   distribution_events: 'distribution_events',
   distribution_records: 'distribution_records',
+  user_notifications: 'user_notifications',
   incidents: 'incidents',
   location_master_lists: 'location_master_lists',
   audit_logs: 'audit_logs',

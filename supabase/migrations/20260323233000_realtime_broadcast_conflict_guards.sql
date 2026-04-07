@@ -269,14 +269,17 @@ declare
 begin
   foreach topic in array public.array_unique_trimmed(topics)
   loop
-    perform realtime.broadcast_changes(
+    perform realtime.send(
+      jsonb_build_object(
+        'schema', schema_name,
+        'table', table_name,
+        'operation', operation_name,
+        'record', new_record,
+        'old_record', old_record
+      ),
+      operation_name,
       topic,
-      operation_name,
-      operation_name,
-      table_name,
-      schema_name,
-      new_record,
-      old_record
+      true
     );
   end loop;
 end;
@@ -980,15 +983,19 @@ begin
     raise exception 'You are not allowed to update residents.';
   end if;
 
-  select r.*, h.barangay_id
-  into v_existing, v_household_barangay_id
-  from public.residents r
-  join public.households h on h.id = r.household_id
-  where r.id = p_resident_id;
+  select *
+  into v_existing
+  from public.residents
+  where id = p_resident_id;
 
   if not found then
     raise exception 'Resident not found.';
   end if;
+
+  select h.barangay_id
+  into v_household_barangay_id
+  from public.households h
+  where h.id = v_existing.household_id;
 
   if p_actor_role = 'encoder'
     and coalesce(p_actor_barangay_id, '') <> coalesce(v_household_barangay_id, '') then

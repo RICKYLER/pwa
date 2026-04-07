@@ -7,6 +7,7 @@ import {
   SUPABASE_BOOTSTRAP_TABLES,
   type SupabaseBootstrapTable,
 } from '@/lib/supabase/row-mapper';
+import { buildDistributionNotificationBody } from '@/lib/distribution-notifications';
 
 export const runtime = 'nodejs';
 
@@ -17,6 +18,43 @@ const VALID_BOOTSTRAP_TABLES = new Set<SupabaseBootstrapTable>(
 
 function uniqueStrings(values: Array<string | null | undefined>) {
   return [...new Set(values.filter((value): value is string => typeof value === 'string' && value.length > 0))];
+}
+
+function isMissingTableError(error: { message?: string | null } | null | undefined, tableName: string) {
+  if (!error?.message) {
+    return false;
+  }
+
+  const message = error.message.toLowerCase();
+  return (
+    message.includes(tableName.toLowerCase())
+    && (
+      message.includes('does not exist')
+      || message.includes('could not find the table')
+      || message.includes('schema cache')
+    )
+  );
+}
+
+function isMissingColumnError(
+  error: { message?: string | null } | null | undefined,
+  tableName: string,
+  columnName: string,
+) {
+  if (!error?.message) {
+    return false;
+  }
+
+  const message = error.message.toLowerCase();
+  return (
+    message.includes(tableName.toLowerCase())
+    && message.includes(columnName.toLowerCase())
+    && (
+      message.includes('does not exist')
+      || message.includes('schema cache')
+      || message.includes('could not find')
+    )
+  );
 }
 
 function parseRequestedTables(request: NextRequest) {
@@ -177,7 +215,51 @@ async function loadDistributionEvents() {
     .order('scheduled_date', { ascending: false });
 
   if (error) throw new Error(error.message);
-  return data ?? [];
+
+  const events = data ?? [];
+  const creatorIdsNeedingBarangay = uniqueStrings(events.map((event) => {
+    const barangayId = typeof event.barangay_id === 'string' ? event.barangay_id.trim() : '';
+    if (barangayId) {
+      return null;
+    }
+
+    return typeof event.created_by === 'string' ? event.created_by : null;
+  }));
+
+  if (!creatorIdsNeedingBarangay.length) {
+    return events;
+  }
+
+  const { data: creatorProfiles, error: creatorProfilesError } = await supabase
+    .from('users')
+    .select('id, barangay_id')
+    .in('id', creatorIdsNeedingBarangay);
+
+  if (creatorProfilesError) {
+    throw new Error(creatorProfilesError.message);
+  }
+
+  const creatorBarangayMap = new Map<string, string>();
+  for (const profile of creatorProfiles ?? []) {
+    if (typeof profile.id === 'string' && typeof profile.barangay_id === 'string' && profile.barangay_id.trim()) {
+      creatorBarangayMap.set(profile.id, profile.barangay_id.trim());
+    }
+  }
+
+  return events.map((event) => {
+    const existingBarangayId = typeof event.barangay_id === 'string' ? event.barangay_id.trim() : '';
+    if (existingBarangayId) {
+      return event;
+    }
+
+    const createdBy = typeof event.created_by === 'string' ? event.created_by : '';
+    const derivedBarangayId = creatorBarangayMap.get(createdBy) ?? '';
+
+    return {
+      ...event,
+      barangay_id: derivedBarangayId,
+    };
+  });
 }
 
 async function loadDistributionRecords() {
@@ -225,6 +307,113 @@ async function loadAuditLogs(remoteUserId: string | null, role: User['role']) {
   return data ?? [];
 }
 
+async function loadDerivedDistributionNotifications(
+  user: User,
+  notificationUserId: string | null,
+  options?: {
+    excludeEventIds?: string[];
+  },
+) {
+  if (user.role !== 'resident' || !notificationUserId) {
+    return [];
+  }
+
+  const supabase = getSupabaseAdminClient();
+  const { data, error } = await supabase
+    .from('distribution_events')
+    .select('id,event_name,type,target_scope,target_group,location,scheduled_date,status,notes')
+    .order('scheduled_date', { ascending: false })
+    .limit(50);
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  const excludedIds = new Set(options?.excludeEventIds ?? []);
+
+  return (data ?? [])
+    .filter((event) => typeof event.id === 'string' && !excludedIds.has(event.id))
+    .map((event) => ({
+      id: `legacy_dist_notice_${event.id}`,
+      user_id: notificationUserId,
+      event_id: event.id,
+      type: 'distribution_event',
+      title: event.event_name,
+      body: buildDistributionNotificationBody(event),
+      payload: {
+        event_id: event.id,
+        event_name: event.event_name,
+        type: event.type,
+        status: event.status,
+        target_scope: event.target_scope,
+        target_group: event.target_group,
+        scheduled_date: event.scheduled_date,
+        location: event.location,
+        ...(typeof event.notes === 'string' && event.notes.trim()
+          ? { notes: event.notes.trim() }
+          : {}),
+      },
+      read_at: null,
+      created_at: typeof event.scheduled_date === 'string'
+        ? new Date(`${event.scheduled_date}T00:00:00.000Z`).toISOString()
+        : new Date().toISOString(),
+      updated_at: typeof event.scheduled_date === 'string'
+        ? new Date(`${event.scheduled_date}T00:00:00.000Z`).toISOString()
+        : new Date().toISOString(),
+    }));
+}
+
+async function loadUserNotifications(
+  user: User,
+  remoteUserId: string | null,
+) {
+  if (user.role !== 'resident') {
+    return [];
+  }
+
+  const notificationUserId = remoteUserId ?? user.id;
+  if (!remoteUserId) {
+    return loadDerivedDistributionNotifications(user, notificationUserId);
+  }
+
+  const supabase = getSupabaseAdminClient();
+  const { data, error } = await supabase
+    .from('user_notifications')
+    .select('*')
+    .eq('user_id', remoteUserId)
+    .order('created_at', { ascending: false });
+
+  if (error) {
+    if (isMissingTableError(error, 'user_notifications')) {
+      return loadDerivedDistributionNotifications(user, notificationUserId);
+    }
+
+    throw new Error(error.message);
+  }
+
+  const storedNotifications = data ?? [];
+  const existingEventIds = uniqueStrings(storedNotifications.map((notification) => {
+    if (!notification || typeof notification !== 'object' || !('payload' in notification)) {
+      return null;
+    }
+
+    const payload = notification.payload;
+    return payload && typeof payload === 'object' && 'event_id' in payload && typeof payload.event_id === 'string'
+      ? payload.event_id
+      : null;
+  }));
+
+  const derivedNotifications = await loadDerivedDistributionNotifications(user, remoteUserId, {
+    excludeEventIds: existingEventIds,
+  }).catch(() => []);
+
+  return [...storedNotifications, ...derivedNotifications].sort((left, right) => {
+    const leftDate = typeof left.created_at === 'string' ? new Date(left.created_at).getTime() : 0;
+    const rightDate = typeof right.created_at === 'string' ? new Date(right.created_at).getTime() : 0;
+    return rightDate - leftDate;
+  });
+}
+
 async function buildBootstrapPayload(
   user: User,
   requestedTables?: SupabaseBootstrapTable[],
@@ -241,6 +430,7 @@ async function buildBootstrapPayload(
     || wants('beneficiaries');
   const shouldResolveRemoteUserId = getSupabaseAdminConfig().isConfigured && (
     wants('audit_logs')
+    || wants('user_notifications')
     || (needsHouseholds && user.role === 'resident')
   );
   const canReadInventory = user.role === 'admin' || user.role === 'encoder';
@@ -281,6 +471,10 @@ async function buildBootstrapPayload(
     payload.households = households;
   }
 
+  const userNotificationsPromise = wants('user_notifications')
+    ? loadUserNotifications(user, remoteUserId)
+    : null;
+
   let residents: Record<string, unknown>[] = [];
   let residentIds: string[] = [];
   if (needsResidents) {
@@ -317,6 +511,10 @@ async function buildBootstrapPayload(
 
   if (auditLogsPromise) {
     payload.audit_logs = await auditLogsPromise;
+  }
+
+  if (userNotificationsPromise) {
+    payload.user_notifications = await userNotificationsPromise;
   }
 
   if (inventoryBundlePromise) {

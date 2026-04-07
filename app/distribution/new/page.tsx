@@ -295,7 +295,6 @@ export default function NewDistributionPage() {
           scheduled_date: form.scheduled_date,
           status: form.status,
           notes: form.notes.trim() || undefined,
-          created_by: user.id,
         },
         user.id,
       );
@@ -694,4 +693,3 @@ export default function NewDistributionPage() {
     </div>
   );
 }
-

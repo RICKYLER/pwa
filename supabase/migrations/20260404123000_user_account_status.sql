@@ -1,5 +1,14 @@
 begin;
 
+lock table
+  public.users,
+  public.location_master_lists,
+  public.programs,
+  public.beneficiaries,
+  public.audit_logs,
+  public.sync_backups
+in access exclusive mode;
+
 alter table public.users
   add column if not exists status text not null default 'active';
 

@@ -13,6 +13,7 @@ export type DistributionType = 'regular' | 'emergency' | 'disaster_relief';
 export type DistributionStatus = 'planned' | 'ongoing' | 'completed';
 export type DistributionTargetScope = 'household' | 'resident';
 export type DistributionTargetGroup = 'all' | 'senior' | 'pwd' | 'pregnant' | 'minor' | 'low_income';
+export type UserNotificationType = 'distribution_event';
 export type InventoryItemStatus = 'active' | 'trashed';
 export type InventoryMovementType =
   | 'stock_in'
@@ -185,6 +186,7 @@ export interface PackageTemplate {
 
 export interface DistributionEvent {
   id: string;
+  barangay_id: string;
   event_name: string;
   type: DistributionType;
   incident_id?: string;
@@ -199,6 +201,18 @@ export interface DistributionEvent {
   created_by: string;
   notes?: string;
   syncStatus: SyncStatus;
+}
+
+export interface DistributionEventNotificationPayload {
+  event_id: string;
+  event_name: string;
+  type: DistributionType;
+  status: DistributionStatus;
+  target_scope: DistributionTargetScope;
+  target_group: DistributionTargetGroup;
+  scheduled_date: string;
+  location: string;
+  notes?: string;
 }
 
 export interface DistributedItem {
@@ -220,6 +234,19 @@ export interface DistributionRecord {
   distributor_id: string;
   notes?: string;
   syncStatus: SyncStatus;
+}
+
+export interface UserNotification {
+  id: string;
+  user_id: string;
+  event_id?: string;
+  type: UserNotificationType;
+  title: string;
+  body: string;
+  payload: DistributionEventNotificationPayload | Record<string, unknown>;
+  read_at?: Date;
+  createdAt: Date;
+  updatedAt: Date;
 }
 
 export interface Incident {
