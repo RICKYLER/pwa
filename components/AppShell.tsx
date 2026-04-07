@@ -7,6 +7,7 @@ import MobileHeader from '@/components/mobile/MobileHeader';
 import MobileSidebar from '@/components/mobile/MobileSidebar';
 import BottomNav from '@/components/mobile/BottomNav';
 import DesktopSidebar from '@/components/desktop/DesktopSidebar';
+import PwaInstallAction from '@/components/PwaInstallAction';
 import {
   Dialog,
   DialogContent,
@@ -54,6 +55,11 @@ function DesktopShell({ children }: AppShellProps) {
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(8,47,73,0.07),transparent_26%),radial-gradient(circle_at_bottom_left,rgba(13,148,136,0.06),transparent_20%)]" />
       <DesktopSidebar />
       <main className="relative ml-72 flex-1 overflow-y-auto">
+        <div className="sticky top-0 z-20 border-b border-slate-200/70 bg-white/80 backdrop-blur">
+          <div className="flex justify-end px-6 py-3">
+            <PwaInstallAction />
+          </div>
+        </div>
         {children}
       </main>
     </div>

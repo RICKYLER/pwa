@@ -84,6 +84,36 @@ const TARGET_GROUP_LABELS: Record<DistributionTargetGroup, string> = {
   low_income: 'Low Income',
 };
 
+const TARGET_SCOPE_OPTIONS: Array<{
+  value: DistributionTargetScope;
+  label: string;
+  description: string;
+}> = [
+  {
+    value: 'household',
+    label: 'Household release',
+    description: 'Release one package to each qualifying household.',
+  },
+  {
+    value: 'resident',
+    label: 'Resident release',
+    description: 'Release one package per matched resident.',
+  },
+];
+
+const TARGET_GROUP_OPTIONS: Array<{
+  value: DistributionTargetGroup;
+  label: string;
+  description: string;
+}> = [
+  { value: 'all', label: 'All', description: 'No vulnerability filter.' },
+  { value: 'senior', label: 'Senior', description: 'Residents aged 60 and above.' },
+  { value: 'pwd', label: 'PWD', description: 'Residents marked as persons with disability.' },
+  { value: 'pregnant', label: 'Pregnant', description: 'Residents marked as pregnant.' },
+  { value: 'minor', label: 'Minor', description: 'Residents aged 0 to 17.' },
+  { value: 'low_income', label: 'Low Income', description: 'Income-priority residents or households.' },
+];
+
 function sumDistributedUnits(items: DistributedItem[]) {
   return items.reduce((sum, item) => sum + item.quantity, 0);
 }
@@ -98,6 +128,7 @@ export default function DistributionDetailPage() {
   const [inventoryItems, setInventoryItems] = useState<InventoryItem[]>([]);
   const [eligibleHouseholds, setEligibleHouseholds] = useState<Household[]>([]);
   const [eligibleResidents, setEligibleResidents] = useState<Resident[]>([]);
+  const [matchedResidentsForHouseholds, setMatchedResidentsForHouseholds] = useState<Resident[]>([]);
   const [allHouseholds, setAllHouseholds] = useState<Household[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isEditing, setIsEditing] = useState(false);
@@ -113,6 +144,8 @@ export default function DistributionDetailPage() {
   const [isQuickUpdating, setIsQuickUpdating] = useState(false);
 
   const [editStatus, setEditStatus] = useState<DistributionEvent['status']>('planned');
+  const [editTargetScope, setEditTargetScope] = useState<DistributionTargetScope>('household');
+  const [editTargetGroup, setEditTargetGroup] = useState<DistributionTargetGroup>('all');
   const [editNotes, setEditNotes] = useState('');
   const [editLocation, setEditLocation] = useState('');
   const [editCoords, setEditCoords] = useState<{ lat: number; lng: number } | null>(null);
@@ -147,8 +180,10 @@ export default function DistributionDetailPage() {
     void load();
   }, [user, router, params.id]);
 
-  async function load() {
-    setIsLoading(true);
+  async function load(background = false) {
+    if (!background) {
+      setIsLoading(true);
+    }
 
     try {
       const distributionEvent = await getDistributionEvent(params.id);
@@ -163,12 +198,18 @@ export default function DistributionDetailPage() {
         getHouseholds({ status: 'active', registration_status: 'approved' }),
       ]);
 
-      const [householdTargets, residentTargets] = await Promise.all([
+      const [householdTargets, residentTargets, householdMatchResidents] = await Promise.all([
         distributionEvent.target_scope === 'household'
           ? getEligibleHouseholdsForEvent(distributionEvent)
           : Promise.resolve([]),
         distributionEvent.target_scope === 'resident'
           ? getEligibleResidentsForEvent(distributionEvent)
+          : Promise.resolve([]),
+        distributionEvent.target_scope === 'household' && distributionEvent.target_group !== 'all'
+          ? getEligibleResidentsForEvent({
+              barangay_id: distributionEvent.barangay_id,
+              target_group: distributionEvent.target_group,
+            })
           : Promise.resolve([]),
       ]);
 
@@ -178,7 +219,10 @@ export default function DistributionDetailPage() {
       setAllHouseholds(households);
       setEligibleHouseholds(householdTargets);
       setEligibleResidents(residentTargets);
+      setMatchedResidentsForHouseholds(householdMatchResidents);
       setEditStatus(distributionEvent.status);
+      setEditTargetScope(distributionEvent.target_scope);
+      setEditTargetGroup(distributionEvent.target_group);
       setEditNotes(distributionEvent.notes || '');
       setEditLocation(distributionEvent.location || '');
       setEditCoords(
@@ -195,8 +239,12 @@ export default function DistributionDetailPage() {
       } else {
         setMapCoords(null);
       }
+    } catch (loadError) {
+      console.error(loadError);
     } finally {
-      setIsLoading(false);
+      if (!background) {
+        setIsLoading(false);
+      }
     }
   }
 
@@ -252,12 +300,16 @@ export default function DistributionDetailPage() {
     if (!deferredSearch) return eligibleHouseholds;
 
     return eligibleHouseholds.filter((household) => {
+      const matchedResidents = matchedResidentsForHouseholds
+        .filter((resident) => resident.household_id === household.id)
+        .map((resident) => `${resident.full_name} ${resident.relationship_to_head}`);
       const haystack = [
         household.head_name,
         household.purok_sitio,
         household.street_address,
         household.barangay_name,
         household.municipality,
+        ...matchedResidents,
       ]
         .filter(Boolean)
         .join(' ')
@@ -265,7 +317,7 @@ export default function DistributionDetailPage() {
 
       return haystack.includes(deferredSearch);
     });
-  }, [eligibleHouseholds, deferredSearch]);
+  }, [eligibleHouseholds, deferredSearch, matchedResidentsForHouseholds]);
 
   const filteredResidents = useMemo(() => {
     if (!deferredSearch) return eligibleResidents;
@@ -302,6 +354,18 @@ export default function DistributionDetailPage() {
     return eligibleResidents.find((resident) => resident.id === selectedResidentId) ?? null;
   }, [event?.target_scope, eligibleResidents, selectedResidentId]);
 
+  const matchedResidentsByHouseholdId = useMemo(() => {
+    const entries = new Map<string, Resident[]>();
+
+    matchedResidentsForHouseholds.forEach((resident) => {
+      const current = entries.get(resident.household_id) ?? [];
+      current.push(resident);
+      entries.set(resident.household_id, current);
+    });
+
+    return entries;
+  }, [matchedResidentsForHouseholds]);
+
   useEffect(() => {
     const defaultReceiver =
       event?.target_scope === 'household'
@@ -329,12 +393,16 @@ export default function DistributionDetailPage() {
 
       const updated = await updateDistributionEvent(event.id, {
         status: editStatus,
+        target_scope: editTargetScope,
+        target_group: editTargetGroup,
         notes: editNotes.trim() || undefined,
         ...locationUpdate,
       });
 
       setEvent(updated);
       setIsEditing(false);
+      setEditTargetScope(updated.target_scope);
+      setEditTargetGroup(updated.target_group);
 
       if (updated.gps_lat && updated.gps_lng) {
         setMapCoords({ lat: updated.gps_lat, lng: updated.gps_lng });
@@ -342,6 +410,8 @@ export default function DistributionDetailPage() {
         geocodedRef.current = false;
         setMapCoords(null);
       }
+
+      await load(true);
     } catch (saveError) {
       console.error(saveError);
     } finally {
@@ -450,6 +520,12 @@ export default function DistributionDetailPage() {
       ? Boolean(selectedHousehold && servedHouseholdIds.has(selectedHousehold.id))
       : Boolean(selectedResident && servedResidentIds.has(selectedResident.id));
   const hasLowPackageStock = packageStock.some((item) => item.lowStock);
+  const targetCountLabel =
+    event.target_scope === 'household'
+      ? event.target_group === 'all'
+        ? `${eligibleHouseholds.length} household${eligibleHouseholds.length !== 1 ? 's' : ''}`
+        : `${eligibleHouseholds.length} household${eligibleHouseholds.length !== 1 ? 's' : ''} · ${matchedResidentsForHouseholds.length} ${TARGET_GROUP_LABELS[event.target_group].toLowerCase()} match${matchedResidentsForHouseholds.length !== 1 ? 'es' : ''}`
+      : `${eligibleResidents.length} resident${eligibleResidents.length !== 1 ? 's' : ''}`;
   const releaseDisabled =
     !canManage ||
     event.status === 'completed' ||
@@ -517,6 +593,8 @@ export default function DistributionDetailPage() {
                 onClick={() => {
                   setIsEditing(false);
                   setEditStatus(event.status);
+                  setEditTargetScope(event.target_scope);
+                  setEditTargetGroup(event.target_group);
                   setEditNotes(event.notes || '');
                   setEditLocation(event.location || '');
                   setEditCoords(
@@ -627,6 +705,50 @@ export default function DistributionDetailPage() {
               </div>
             </div>
           </div>
+
+          {isEditing ? (
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                <label className="mb-1.5 block text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                  Target Scope
+                </label>
+                <select
+                  value={editTargetScope}
+                  onChange={(e) => setEditTargetScope(e.target.value as DistributionTargetScope)}
+                  className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-500/30"
+                >
+                  {TARGET_SCOPE_OPTIONS.map((scope) => (
+                    <option key={scope.value} value={scope.value}>
+                      {scope.label}
+                    </option>
+                  ))}
+                </select>
+                <p className="mt-2 text-[11px] leading-5 text-slate-500">
+                  {TARGET_SCOPE_OPTIONS.find((scope) => scope.value === editTargetScope)?.description}
+                </p>
+              </div>
+
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                <label className="mb-1.5 block text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                  Target Group
+                </label>
+                <select
+                  value={editTargetGroup}
+                  onChange={(e) => setEditTargetGroup(e.target.value as DistributionTargetGroup)}
+                  className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-500/30"
+                >
+                  {TARGET_GROUP_OPTIONS.map((group) => (
+                    <option key={group.value} value={group.value}>
+                      {group.label}
+                    </option>
+                  ))}
+                </select>
+                <p className="mt-2 text-[11px] leading-5 text-slate-500">
+                  {TARGET_GROUP_OPTIONS.find((group) => group.value === editTargetGroup)?.description}
+                </p>
+              </div>
+            </div>
+          ) : null}
 
           {isEditing ? (
             <div>
@@ -794,9 +916,7 @@ export default function DistributionDetailPage() {
                   </p>
                 </div>
                 <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-500">
-                  {event.target_scope === 'household'
-                    ? `${eligibleHouseholds.length} household${eligibleHouseholds.length !== 1 ? 's' : ''}`
-                    : `${eligibleResidents.length} resident${eligibleResidents.length !== 1 ? 's' : ''}`}
+                  {targetCountLabel}
                 </span>
               </div>
 
@@ -824,6 +944,7 @@ export default function DistributionDetailPage() {
               <div className="max-h-72 space-y-2 overflow-y-auto pr-1">
                 {event.target_scope === 'household'
                   ? filteredHouseholds.map((household) => {
+                      const matchedResidents = matchedResidentsByHouseholdId.get(household.id) ?? [];
                       const selected = selectedHouseholdId === household.id;
                       const served = servedHouseholdIds.has(household.id);
 
@@ -846,6 +967,17 @@ export default function DistributionDetailPage() {
                               <p className="mt-0.5 text-xs text-slate-400">
                                 {household.purok_sitio} · {household.street_address}
                               </p>
+                              {event.target_group !== 'all' && matchedResidents.length > 0 ? (
+                                <p className="mt-1 text-[11px] text-emerald-700">
+                                  {matchedResidents.length} {TARGET_GROUP_LABELS[event.target_group].toLowerCase()}
+                                  {matchedResidents.length !== 1 ? 's' : ''}:{' '}
+                                  {matchedResidents
+                                    .slice(0, 2)
+                                    .map((resident) => resident.full_name)
+                                    .join(', ')}
+                                  {matchedResidents.length > 2 ? ` +${matchedResidents.length - 2} more` : ''}
+                                </p>
+                              ) : null}
                             </div>
                             {served ? (
                               <span className="rounded-full bg-amber-100 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.16em] text-amber-700">
@@ -911,6 +1043,13 @@ export default function DistributionDetailPage() {
                       <p className="mt-0.5 text-xs text-slate-500">
                         {selectedHousehold.purok_sitio} · {selectedHousehold.street_address}
                       </p>
+                      {event.target_group !== 'all' && (matchedResidentsByHouseholdId.get(selectedHousehold.id)?.length ?? 0) > 0 ? (
+                        <p className="mt-1 text-[11px] text-emerald-700">
+                          {(matchedResidentsByHouseholdId.get(selectedHousehold.id) ?? [])
+                            .map((resident) => resident.full_name)
+                            .join(', ')}
+                        </p>
+                      ) : null}
                     </div>
                     {selectedAlreadyServed ? (
                       <span className="rounded-full bg-amber-100 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.16em] text-amber-700">
@@ -1004,6 +1143,18 @@ export default function DistributionDetailPage() {
               {releaseSuccess ? (
                 <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
                   {releaseSuccess}
+                </div>
+              ) : null}
+
+              {event.target_scope === 'household' && event.target_group !== 'all' && eligibleHouseholds.length === 0 ? (
+                <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                  No qualifying {TARGET_GROUP_LABELS[event.target_group].toLowerCase()} households were found yet for this event. Check the audience setting or the household member birthdates and flags.
+                </div>
+              ) : null}
+
+              {event.target_scope === 'resident' && eligibleResidents.length === 0 ? (
+                <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                  No qualifying residents were found yet for this event. Check the audience setting or the resident vulnerability data first.
                 </div>
               ) : null}
 

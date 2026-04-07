@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+import { getAnalyticsBarangayScope, getAnalyticsScopeLabel } from '@/lib/analytics-scope';
 import { getCurrentUser } from '@/lib/auth';
 import { getDashboardStats } from '@/lib/db/queries';
 import { ArrowLeft, Download, Printer, Users, Home, Baby, UserCheck, HeartPulse, Accessibility, Wallet, TrendingUp } from 'lucide-react';
@@ -28,7 +29,7 @@ export default function MonthlyReportPage() {
     async function loadData() {
       try {
         setIsLoading(true);
-        const dashStats = await getDashboardStats(currentUser.barangay_id);
+        const dashStats = await getDashboardStats(getAnalyticsBarangayScope(currentUser));
         setStats(dashStats);
       } catch (error) {
         console.error('Error loading report:', error);
@@ -45,7 +46,7 @@ export default function MonthlyReportPage() {
     setIsExporting(true);
     try {
       const { exportMonthlyReportPDF } = await import('@/lib/pdf/exportReport');
-      exportMonthlyReportPDF(stats, user.barangay_id ?? '');
+      exportMonthlyReportPDF(stats, user.role === 'admin' ? 'Municipal-wide' : (user.barangay_id ?? ''));
     } finally {
       setIsExporting(false);
     }
@@ -77,6 +78,7 @@ export default function MonthlyReportPage() {
     { label: 'Chronic Illness', value: stats.chronic_count, icon: HeartPulse, color: 'text-purple-600', bg: 'bg-purple-50' },
     { label: 'Low-Income Families', value: stats.low_income_count, icon: Wallet, color: 'text-amber-600', bg: 'bg-amber-50' },
   ];
+  const scopeLabel = getAnalyticsScopeLabel(user);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-indigo-50/30 print:bg-white">
@@ -130,8 +132,8 @@ export default function MonthlyReportPage() {
               </div>
               <h1 className="text-3xl font-bold text-white mb-2">MSWDO Household Census</h1>
               <p className="text-indigo-200 font-medium">{monthYear}</p>
-              {user.barangay_id && (
-                <p className="text-indigo-300 text-sm mt-1">{user.barangay_id}</p>
+              {scopeLabel && (
+                <p className="text-indigo-300 text-sm mt-1">{user.role === 'admin' ? 'Municipal-wide coverage' : scopeLabel}</p>
               )}
             </div>
           </div>

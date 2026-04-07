@@ -9,9 +9,10 @@ import { HouseholdRegistrationWizard } from '@/components/forms/household-regist
 import type { MemberDraft } from '@/components/forms/household-form';
 import ResidentShell from '@/components/resident/ResidentShell';
 import { getCurrentUser, hasPermission } from '@/lib/auth';
-import { createHouseholdBundle } from '@/lib/db/households';
+import { createHouseholdBundle, getHouseholds } from '@/lib/db/households';
 import type { Household } from '@/lib/db/schema';
 import { CivicBadge, CivicPanel, CivicSectionHeading } from '@/components/ui/civic-primitives';
+import { resolveResidentActiveApprovedHousehold } from '@/lib/resident-households';
 
 export default function HouseholdRegistrationPage() {
   const router = useRouter();
@@ -19,17 +20,42 @@ export default function HouseholdRegistrationPage() {
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    if (!user) {
-      router.push('/login');
-      return;
+    let cancelled = false;
+
+    async function preparePage() {
+      if (!user) {
+        router.push('/login');
+        return;
+      }
+
+      if (user.role !== 'resident' && !hasPermission('create_household')) {
+        router.push('/households');
+        return;
+      }
+
+      if (user.role === 'resident') {
+        try {
+          const households = await getHouseholds({ applicant_user_id: user.id });
+          const activeHousehold = resolveResidentActiveApprovedHousehold(households);
+          if (!cancelled && activeHousehold) {
+            router.replace('/resident/household');
+            return;
+          }
+        } catch (error) {
+          console.error('Failed to resolve resident register redirect:', error);
+        }
+      }
+
+      if (!cancelled) {
+        setReady(true);
+      }
     }
 
-    if (user.role !== 'resident' && !hasPermission('create_household')) {
-      router.push('/households');
-      return;
-    }
+    void preparePage();
 
-    setReady(true);
+    return () => {
+      cancelled = true;
+    };
   }, [router, user]);
 
   async function handleSubmit(

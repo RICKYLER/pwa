@@ -21,7 +21,7 @@ create table if not exists public.users (
   name text not null default '',
   role text not null default 'resident'
     check (role in ('admin', 'encoder', 'health_worker', 'responder', 'resident')),
-  barangay_id text not null default 'barangay-1',
+  barangay_id text not null default 'anitapan',
   must_change_password boolean not null default false,
   email_verification_required boolean not null default false,
   email_verified_at timestamptz,
@@ -100,7 +100,7 @@ begin
 
   v_barangay_id := coalesce(
     nullif(trim(new.raw_user_meta_data ->> 'barangay_id'), ''),
-    'barangay-1'
+    'anitapan'
   );
 
   insert into public.users (
@@ -170,7 +170,7 @@ select
       then au.raw_user_meta_data ->> 'role'
     else 'resident'
   end,
-  coalesce(nullif(trim(au.raw_user_meta_data ->> 'barangay_id'), ''), 'barangay-1'),
+  coalesce(nullif(trim(au.raw_user_meta_data ->> 'barangay_id'), ''), 'anitapan'),
   false,
   au.email_confirmed_at is null,
   au.email_confirmed_at

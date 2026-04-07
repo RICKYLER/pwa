@@ -2,6 +2,7 @@ import { promises as fs } from 'fs';
 import path from 'path';
 import { createHash, randomBytes, scrypt as scryptCallback, timingSafeEqual } from 'crypto';
 import { promisify } from 'util';
+import { DEFAULT_BARANGAY_ID } from '@/lib/barangays';
 import type { User, UserAccountStatus, UserRole } from '@/lib/db/schema';
 import { resolveWritableFilePath } from '@/lib/server/runtime-storage';
 
@@ -167,7 +168,7 @@ async function createInitialStore(): Promise<AuthStore> {
         password: 'mswdoooadmin123',
         name: 'MSWDO Main Admin',
         role: 'admin',
-        barangay_id: 'barangay-1',
+        barangay_id: DEFAULT_BARANGAY_ID,
       }),
     ]),
     password_setup_tokens: [],

@@ -1,119 +1,144 @@
 ﻿'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import Link from 'next/link';
-import { ArrowUpRight, BarChart3, FileText, Home, ShieldAlert, Users } from 'lucide-react';
-import { getCurrentUser, hasPermission } from '@/lib/auth';
-import { getDashboardStats } from '@/lib/db/queries';
+import { AlertTriangle, Clock3, Home, ShieldAlert, Users } from 'lucide-react';
+import { ReportsLivePreviewCards } from '@/components/reports/ReportsLivePreviewCards';
+import { MobilePageHeader } from '@/components/mobile/mobile-primitives';
 import { CivicBadge, CivicPage, CivicPanel } from '@/components/ui/civic-primitives';
-import { MobileListCard, MobilePageHeader } from '@/components/mobile/mobile-primitives';
+import { getAnalyticsBarangayScope } from '@/lib/analytics-scope';
+import { getCurrentUser, hasPermission } from '@/lib/auth';
+import { getDashboardStats, getTopPuroksByHouseholds } from '@/lib/db/queries';
 
-const REPORTS = [
-  {
-    title: 'Monthly demographic summary',
-    desc: 'Population by age group with household averages.',
-    icon: BarChart3,
-    href: '/reports/monthly',
-    badge: 'Monthly',
-    tone: 'navy' as const,
-  },
-  {
-    title: 'Vulnerable groups summary',
-    desc: 'Breakdown by children, seniors, PWDs, and more.',
-    icon: Users,
-    href: '/reports/vulnerable',
-    badge: 'Vulnerable',
-    tone: 'rose' as const,
-  },
-  {
-    title: 'Household census listing',
-    desc: 'Complete masterlist organized by purok or sitio.',
-    icon: FileText,
-    href: '/reports/households',
-    badge: 'Census',
-    tone: 'emerald' as const,
-  },
-];
+type Stats = Awaited<ReturnType<typeof getDashboardStats>>;
 
 export default function ReportsMobile() {
   const router = useRouter();
   const user = getCurrentUser();
-  const [stats, setStats] = useState<any>(null);
+  const [stats, setStats] = useState<Stats | null>(null);
+  const [topHouseholdPuroks, setTopHouseholdPuroks] = useState<Array<{ purok: string; households: number }>>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [lastUpdatedAt, setLastUpdatedAt] = useState<Date | null>(null);
 
-  useEffect(() => {
+  const loadReports = useCallback(async (background = false) => {
     if (!user || !hasPermission('view_reports')) {
       router.push('/dashboard');
       return;
     }
 
-    const activeUser = user;
+    try {
+      if (!background) {
+        setIsLoading(true);
+      }
 
-    async function load() {
-      setIsLoading(true);
-      setStats(await getDashboardStats(activeUser.barangay_id));
-      setIsLoading(false);
+      const analyticsBarangayId = getAnalyticsBarangayScope(user);
+      const [nextStats, nextTopHouseholdPuroks] = await Promise.all([
+        getDashboardStats(analyticsBarangayId),
+        getTopPuroksByHouseholds(analyticsBarangayId, 4),
+      ]);
+
+      setStats(nextStats);
+      setTopHouseholdPuroks(nextTopHouseholdPuroks);
+      setLastUpdatedAt(new Date());
+      setError('');
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : 'Failed to load report previews.');
+    } finally {
+      if (!background) {
+        setIsLoading(false);
+      }
+    }
+  }, [router, user]);
+
+  useEffect(() => {
+    void loadReports();
+  }, [loadReports]);
+
+  useEffect(() => {
+    function handleDataChanged(event: WindowEventMap['mswdo-data-changed']) {
+      if (!['households', 'residents', 'vulnerability_flags'].includes(event.detail.table)) {
+        return;
+      }
+
+      void loadReports(true);
     }
 
-    void load();
-  }, [router, user]);
+    window.addEventListener('mswdo-data-changed', handleDataChanged);
+    return () => window.removeEventListener('mswdo-data-changed', handleDataChanged);
+  }, [loadReports]);
 
   if (!user) return null;
 
   const totalVulnerable = stats
     ? stats.children_count + stats.seniors_count + stats.pwd_count + stats.pregnant_count + stats.chronic_count
     : 0;
+  const lastUpdatedLabel = lastUpdatedAt
+    ? lastUpdatedAt.toLocaleTimeString('en-PH', { hour: 'numeric', minute: '2-digit' })
+    : (isLoading ? 'Syncing...' : 'Waiting');
 
   return (
     <CivicPage className="space-y-4 px-4 py-4">
       <MobilePageHeader
         title="Reports"
-        subtitle="Generate official MSWDO exports without carrying the full desktop report center into mobile."
+        subtitle="Live preview cards for the latest census, vulnerability, and household counts."
       />
 
-      <div className="grid grid-cols-3 gap-2">
-        {[
-          { label: 'Households', value: stats?.total_households ?? 0, icon: Home },
-          { label: 'Population', value: stats?.total_population ?? 0, icon: Users },
-          { label: 'Vulnerable', value: totalVulnerable, icon: ShieldAlert },
-        ].map((stat) => {
-          const Icon = stat.icon;
-          return (
-            <CivicPanel key={stat.label} className="rounded-[22px] p-3 text-center">
-              <div className="mx-auto flex h-9 w-9 items-center justify-center rounded-[16px] bg-slate-100 text-slate-700">
-                <Icon className="h-4 w-4" />
+      <CivicPanel className="rounded-[24px] p-4">
+        <div className="flex flex-wrap items-center gap-2">
+          <CivicBadge label="Realtime previews" tone="navy" />
+          <CivicBadge label="Snapshot exports" tone="slate" />
+        </div>
+        <div className="mt-4 grid grid-cols-2 gap-2">
+          {[
+            { label: 'Households', value: isLoading ? '—' : (stats?.total_households ?? 0).toLocaleString(), icon: Home },
+            { label: 'Population', value: isLoading ? '—' : (stats?.total_population ?? 0).toLocaleString(), icon: Users },
+            { label: 'Vulnerable', value: isLoading ? '—' : totalVulnerable.toLocaleString(), icon: ShieldAlert },
+            { label: 'Updated', value: lastUpdatedLabel, icon: Clock3 },
+          ].map((item) => {
+            const Icon = item.icon;
+            return (
+              <div key={item.label} className="rounded-[20px] border border-slate-200 bg-slate-50 px-3 py-3">
+                <div className="flex items-center gap-2 text-slate-500">
+                  <Icon className="h-4 w-4" />
+                  <span className="text-[11px] font-semibold uppercase tracking-[0.14em]">{item.label}</span>
+                </div>
+                <p className="mt-3 text-lg font-black tracking-tight text-slate-950">{item.value}</p>
               </div>
-              <p className="mt-3 text-lg font-black tracking-tight text-slate-950">{isLoading ? '--' : stat.value}</p>
-              <p className="mt-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">{stat.label}</p>
-            </CivicPanel>
-          );
-        })}
-      </div>
+            );
+          })}
+        </div>
+      </CivicPanel>
 
-      <div className="space-y-2">
-        {REPORTS.map((report) => {
-          const Icon = report.icon;
-          return (
-            <Link key={report.href} href={report.href} className="block">
-              <MobileListCard
-                title={report.title}
-                subtitle={report.desc}
-                leading={<Icon className="h-5 w-5" />}
-                trailing={<ArrowUpRight className="h-4 w-4 text-slate-300" />}
-                status={<CivicBadge label={report.badge} tone={report.tone} className="text-[10px]" />}
-                meta={(
-                  <div className="flex items-center justify-between gap-3 text-xs text-slate-500">
-                    <span>Open report</span>
-                    <span className="text-slate-400">PDF, CSV, or print</span>
-                  </div>
-                )}
-              />
-            </Link>
-          );
-        })}
-      </div>
+      {error ? (
+        <CivicPanel className="rounded-[24px] border-red-200 bg-red-50/95 p-4">
+          <div className="flex items-center gap-3 text-sm text-red-700">
+            <AlertTriangle className="h-4 w-4" />
+            {error}
+          </div>
+        </CivicPanel>
+      ) : null}
+
+      <ReportsLivePreviewCards stats={stats} topHouseholdPuroks={topHouseholdPuroks} compact />
+
+      <CivicPanel className="rounded-[24px] p-4">
+        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">Export formats</p>
+        <div className="mt-3 flex flex-wrap gap-2">
+          {[
+            { label: 'PDF', description: 'Print-ready' },
+            { label: 'CSV', description: 'Spreadsheet' },
+            { label: 'Print', description: 'Browser print' },
+          ].map((item) => (
+            <div
+              key={item.label}
+              className="flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-2"
+            >
+              <span className="text-[11px] font-bold uppercase tracking-[0.14em] text-slate-900">{item.label}</span>
+              <span className="text-xs text-slate-500">{item.description}</span>
+            </div>
+          ))}
+        </div>
+      </CivicPanel>
     </CivicPage>
   );
 }
-

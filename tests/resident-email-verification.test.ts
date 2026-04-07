@@ -15,7 +15,7 @@ test('resident accounts must verify email before they can log in', async () => {
       name: 'Resident Example',
       email: 'resident@example.com',
       password: 'resident123',
-      barangay_id: 'barangay-1',
+      barangay_id: 'anitapan',
     });
 
     assert.equal(resident.email_verification_required, true);

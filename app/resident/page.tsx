@@ -15,6 +15,7 @@ import {
   DISTRIBUTION_NOTIFICATION_STATUS_LABELS,
   parseDistributionEventNotification,
 } from '@/lib/distribution-notifications';
+import { resolveResidentActiveApprovedHousehold } from '@/lib/resident-households';
 
 declare global {
   interface WindowEventMap {
@@ -102,6 +103,10 @@ export default function ResidentPortalPage() {
   const pendingCount = useMemo(() => (
     records.filter((record) => getHouseholdRegistrationStatus(record) === 'pending').length
   ), [records]);
+  const activeHousehold = useMemo(
+    () => resolveResidentActiveApprovedHousehold(records),
+    [records],
+  );
   const unreadNotificationCount = useMemo(
     () => notifications.filter((notification) => !notification.read_at).length,
     [notifications],
@@ -114,7 +119,11 @@ export default function ResidentPortalPage() {
   return (
     <ResidentShell
       title="Resident Portal"
-      subtitle="Create a household registration and track its approval progress."
+      subtitle={
+        activeHousehold
+          ? 'Your latest approved household is active. Review your members and keep the household record up to date.'
+          : 'Create a household registration and track its approval progress.'
+      }
     >
       <div className="grid gap-4 sm:grid-cols-3">
         {[
@@ -134,6 +143,26 @@ export default function ResidentPortalPage() {
           );
         })}
       </div>
+
+      {activeHousehold ? (
+        <div className="mt-6 rounded-[28px] border border-emerald-200 bg-emerald-50 px-5 py-4 text-sm text-emerald-900 shadow-[0_18px_46px_-36px_rgba(15,23,42,0.24)]">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className="font-semibold">Your household is approved and active.</p>
+              <p className="mt-1 text-emerald-800">
+                Open your household page to review members, address details, and add new household members.
+              </p>
+            </div>
+            <Link
+              href="/resident/household"
+              className="inline-flex items-center gap-2 rounded-full bg-cyan-950 px-4 py-2.5 text-sm font-semibold text-white hover:bg-cyan-900"
+            >
+              <FileText className="h-4 w-4" />
+              Open My Household
+            </Link>
+          </div>
+        </div>
+      ) : null}
 
       <CivicPanel className="mt-6 sm:p-6">
         <div className="flex flex-wrap items-start justify-between gap-4">
@@ -200,14 +229,18 @@ export default function ResidentPortalPage() {
           <CivicSectionHeading
             icon={FileText}
             title="My registration records"
-            description="Every record you submit appears here with its current review status."
+            description={
+              activeHousehold
+                ? 'Your approved household is ready. Older submissions stay here for reference.'
+                : 'Every record you submit appears here with its current review status.'
+            }
           />
           <Link
-            href="/households/register"
+            href={activeHousehold ? '/resident/household' : '/households/register'}
             className="inline-flex items-center gap-2 rounded-full bg-cyan-950 px-4 py-2.5 text-sm font-semibold text-white hover:bg-cyan-900"
           >
             <FileText className="h-4 w-4" />
-            New Registration
+            {activeHousehold ? 'Open My Household' : 'New Registration'}
           </Link>
         </div>
 
@@ -226,6 +259,9 @@ export default function ResidentPortalPage() {
                       <div className="flex flex-wrap items-center gap-2">
                         <h3 className="text-base font-semibold text-slate-900">{record.head_name}</h3>
                         <CivicBadge label={formatRegistrationStatusLabel(getHouseholdRegistrationStatus(record))} tone="amber" />
+                        {activeHousehold?.id === record.id ? (
+                          <CivicBadge label="Active household" tone="emerald" />
+                        ) : null}
                       </div>
                       <p className="mt-2 text-sm text-slate-500">
                         {record.street_address}, {record.purok_sitio}, {record.barangay_name}, {record.municipality}
@@ -284,11 +320,11 @@ export default function ResidentPortalPage() {
               Start a new household registration, use your location or pin the map, then wait for admin approval.
             </p>
             <Link
-              href="/households/register"
+              href={activeHousehold ? '/resident/household' : '/households/register'}
               className="mt-5 inline-flex items-center gap-2 rounded-full bg-cyan-950 px-4 py-2.5 text-sm font-semibold text-white hover:bg-cyan-900"
             >
               <FileText className="h-4 w-4" />
-              Start Registration
+              {activeHousehold ? 'Open My Household' : 'Start Registration'}
             </Link>
           </div>
         )}

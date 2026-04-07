@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { AlertTriangle, Cloud, CloudCheck } from 'lucide-react';
 import { flushSyncQueueNow, getPendingSyncCount } from '@/lib/db/client-sync';
 import { clearLegacyLocalDatabase } from '@/lib/db/indexeddb';
-import { bootstrapCurrentPathData } from '@/lib/supabase/route-bootstrap';
+import PwaInstallDialog from '@/components/PwaInstallDialog';
 import PwaInstallPrompt from '@/components/PwaInstallPrompt';
 
 declare global {
@@ -108,10 +108,6 @@ export default function PwaBootstrap() {
           setPendingSyncCount(afterCount);
         }
 
-        if (beforeCount > 0 && afterCount < beforeCount) {
-          await bootstrapCurrentPathData(true);
-        }
-
         if (beforeCount > 0 && afterCount >= beforeCount && !cancelled) {
           setSyncError('Some realtime updates are still pending. Please stay online and try again.');
         }
@@ -175,6 +171,7 @@ export default function PwaBootstrap() {
 
   return (
     <>
+      <PwaInstallDialog />
       <PwaInstallPrompt />
 
       {!isOnline ? (

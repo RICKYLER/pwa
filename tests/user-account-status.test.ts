@@ -15,7 +15,7 @@ test('staff accounts can be deactivated and reactivated without deleting the rec
       name: 'Encoder Example',
       email: 'encoder@example.com',
       role: 'encoder',
-      barangay_id: 'barangay-1',
+      barangay_id: 'anitapan',
     });
 
     assert.equal(staff.status, 'active');

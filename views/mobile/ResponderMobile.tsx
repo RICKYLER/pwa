@@ -1,6 +1,6 @@
 ﻿'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   CheckCircle2,
@@ -36,6 +36,20 @@ import type {
 } from '@/lib/db/schema';
 import { openResponderMapLocation } from '@/lib/responder-map-links';
 import { useResponderMapControls } from '@/hooks/useResponderMapControls';
+import {
+  getResponderCoverageLabel,
+  getResponderMappedHouseholds,
+} from '@/lib/responder-households';
+
+declare global {
+  interface WindowEventMap {
+    'mswdo-data-changed': CustomEvent<{
+      source: 'supabase';
+      table: string;
+      mode: 'hydrate' | 'change';
+    }>;
+  }
+}
 
 interface PriorityHousehold {
   household: Household;
@@ -186,6 +200,7 @@ export default function ResponderMobile() {
   const [selectionOpen, setSelectionOpen] = useState(false);
   const [queueOpen, setQueueOpen] = useState(false);
   const [priorityOpen, setPriorityOpen] = useState(false);
+  const reloadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const loadData = useCallback(async () => {
     if (!user) return;
@@ -194,27 +209,22 @@ export default function ResponderMobile() {
     try {
       await seedDemoIncidents(user.id);
 
-      const [allIncidents, allHouseholds, allResidents, allFlags, ongoingEvents] = await Promise.all([
+      const [allIncidents, allApprovedHouseholds, allResidents, allFlags, ongoingEvents] = await Promise.all([
         getIncidents(),
         getHouseholds({
-          barangay_id: user.barangay_id,
           registration_status: 'approved',
         }),
         db.getAll<Resident>(STORE_NAMES.residents),
         db.getAll<VulnerabilityFlags>(STORE_NAMES.vulnerability_flags),
         getDistributionEvents({ status: 'ongoing' }),
       ]);
+      const allHouseholds = getResponderMappedHouseholds(allApprovedHouseholds, user);
 
       setIncidents(allIncidents);
       setEvents(ongoingEvents);
-      setMapHouseholds(
-        allHouseholds.filter(
-          (household) => household.status === 'active' && household.gps_lat !== undefined && household.gps_long !== undefined,
-        ),
-      );
+      setMapHouseholds(allHouseholds);
 
       const householdsWithScores: PriorityHousehold[] = allHouseholds
-        .filter((household) => household.status === 'active')
         .map((household) => {
           const residentsInHousehold = allResidents.filter(
             (resident) => resident.household_id === household.id && resident.status === 'active',
@@ -234,6 +244,17 @@ export default function ResponderMobile() {
     }
   }, [user]);
 
+  const scheduleLoad = useCallback((delayMs = 0) => {
+    if (reloadTimerRef.current !== null) {
+      clearTimeout(reloadTimerRef.current);
+    }
+
+    reloadTimerRef.current = setTimeout(() => {
+      reloadTimerRef.current = null;
+      void loadData();
+    }, delayMs);
+  }, [loadData]);
+
   useEffect(() => {
     if (!user) {
       router.push('/login');
@@ -245,8 +266,31 @@ export default function ResponderMobile() {
       return;
     }
 
-    void loadData();
-  }, [loadData, router, user]);
+    scheduleLoad();
+  }, [router, scheduleLoad, user]);
+
+  useEffect(() => {
+    if (!user) {
+      return;
+    }
+
+    function handleDataChanged(event: WindowEventMap['mswdo-data-changed']) {
+      if (!['households', 'residents', 'vulnerability_flags', 'incidents', 'distribution_events'].includes(event.detail.table)) {
+        return;
+      }
+
+      scheduleLoad(event.detail.mode === 'hydrate' ? 140 : 40);
+    }
+
+    window.addEventListener('mswdo-data-changed', handleDataChanged);
+    return () => {
+      window.removeEventListener('mswdo-data-changed', handleDataChanged);
+      if (reloadTimerRef.current !== null) {
+        clearTimeout(reloadTimerRef.current);
+        reloadTimerRef.current = null;
+      }
+    };
+  }, [scheduleLoad, user]);
 
   async function changeIncidentStatus(id: string, newStatus: IncidentStatus) {
     const updated = await updateIncidentStatus(id, newStatus);
@@ -503,7 +547,7 @@ export default function ResponderMobile() {
       <CivicPage className="space-y-4 px-4 py-4 pb-40">
         <MobilePageHeader
           title="Field response"
-          subtitle={loading ? 'Loading field operations...' : `${activeIncidents.length} active incidents and ${priorities.length} priority households.`}
+          subtitle={loading ? 'Loading field operations...' : `${activeIncidents.length} active incidents · ${mapHouseholds.length} verified household pins · ${getResponderCoverageLabel(user)}`}
           primaryAction={(
             <Button
               type="button"
@@ -535,9 +579,12 @@ export default function ResponderMobile() {
             <div>
               <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Map workspace</p>
               <h2 className="mt-1 text-lg font-black tracking-tight text-slate-950">Field map</h2>
-              <p className="mt-1 text-sm text-slate-500">Tap markers to open the selection drawer. Queue work stays below the fold in drawers.</p>
+              <p className="mt-1 text-sm text-slate-500">Only approved and location-verified households appear here. Tap markers to open the selection drawer.</p>
             </div>
-            <CivicBadge label={mapControls.activeBaseLayer.label} tone="navy" className="text-[10px]" />
+            <div className="flex flex-col items-end gap-1">
+              <CivicBadge label={`${mapHouseholds.length} verified pins`} tone="emerald" className="text-[10px]" />
+              <CivicBadge label={mapControls.activeBaseLayer.label} tone="navy" className="text-[10px]" />
+            </div>
           </div>
 
           <ResponderLeafletMap

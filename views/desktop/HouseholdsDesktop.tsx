@@ -8,7 +8,7 @@ import { getCurrentUser, hasPermission } from '@/lib/auth';
 import { getAllPuroks, getHouseholds } from '@/lib/db/households';
 import { getResidentsInHousehold } from '@/lib/db/residents';
 import type { Household } from '@/lib/db/schema';
-import { formatRegistrationStatusLabel, getHouseholdRegistrationStatus, isHouseholdApproved } from '@/lib/household-registration';
+import { formatRegistrationStatusLabel, getHouseholdRegistrationStatus } from '@/lib/household-registration';
 import { hasHouseholdPin } from '@/lib/map-pins';
 import {
   CivicBadge,
@@ -26,6 +26,13 @@ const STATUS_CFG = {
   active: { label: 'Active', tone: 'emerald' as const },
   moved_out: { label: 'Moved out', tone: 'amber' as const },
   deceased: { label: 'Deceased', tone: 'slate' as const },
+};
+
+const REGISTRATION_TONE = {
+  approved: 'emerald' as const,
+  pending: 'amber' as const,
+  needs_correction: 'amber' as const,
+  rejected: 'rose' as const,
 };
 
 export default function HouseholdsDesktop() {
@@ -50,14 +57,20 @@ export default function HouseholdsDesktop() {
       setIsLoading(true);
     }
 
-    const allHouseholds = await getHouseholds({ barangay_id: user.barangay_id });
+    const allHouseholds = user.role === 'admin'
+      ? await getHouseholds()
+      : await getHouseholds({ barangay_id: user.barangay_id });
     setHouseholds(allHouseholds);
     const counts: Record<string, number> = {};
     for (const household of allHouseholds) {
       counts[household.id] = (await getResidentsInHousehold(household.id)).length;
     }
     setMemberCounts(counts);
-    setPuroks(await getAllPuroks(user.barangay_id));
+    setPuroks(
+      user.role === 'admin'
+        ? [...new Set(allHouseholds.map((household) => household.purok_sitio).filter(Boolean))].sort()
+        : await getAllPuroks(user.barangay_id),
+    );
 
     if (!background) {
       setIsLoading(false);
@@ -109,7 +122,11 @@ export default function HouseholdsDesktop() {
       <CivicHero
         eyebrow="Census Records"
         title="Households"
-        description={isLoading ? 'Loading household records...' : `${households.length} records tracked in ${user.barangay_id}.`}
+        description={isLoading
+          ? 'Loading household records...'
+          : user.role === 'admin'
+            ? `${households.length} records tracked across all barangays.`
+            : `${households.length} records tracked in ${user.barangay_id}.`}
         aside={pendingCount > 0 ? <CivicBadge label={`${pendingCount} pending review`} tone="amber" /> : null}
       />
 
@@ -197,6 +214,13 @@ export default function HouseholdsDesktop() {
           {filtered.map((household) => {
             const status = STATUS_CFG[household.status as keyof typeof STATUS_CFG] ?? STATUS_CFG.active;
             const registrationStatus = getHouseholdRegistrationStatus(household);
+            const locationSummary = user.role === 'admin'
+              ? [
+                household.barangay_name || household.barangay_id,
+                household.street_address,
+                household.purok_sitio,
+              ].filter(Boolean).join(' · ')
+              : `${household.street_address} · ${household.purok_sitio}`;
             return (
               <Link
                 key={household.id}
@@ -210,12 +234,14 @@ export default function HouseholdsDesktop() {
                     </div>
                     <div className="min-w-0">
                       <p className="truncate text-sm font-bold text-slate-950">{household.head_name}</p>
-                      <p className="mt-1 truncate text-xs text-slate-500">{household.street_address} · {household.purok_sitio}</p>
+                      <p className="mt-1 truncate text-xs text-slate-500">{locationSummary}</p>
                       <div className="mt-2 flex flex-wrap gap-1">
                         <CivicBadge label={status.label} tone={status.tone} className="text-[10px]" />
-                        {!isHouseholdApproved(household) ? (
-                          <CivicBadge label={formatRegistrationStatusLabel(registrationStatus)} tone="amber" className="text-[10px]" />
-                        ) : null}
+                        <CivicBadge
+                          label={formatRegistrationStatusLabel(registrationStatus)}
+                          tone={REGISTRATION_TONE[registrationStatus] ?? 'slate'}
+                          className="text-[10px]"
+                        />
                         {hasHouseholdPin(household) ? <CivicBadge label="Pinned" tone="navy" className="text-[10px]" /> : null}
                       </div>
                     </div>

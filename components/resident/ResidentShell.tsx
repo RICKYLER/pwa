@@ -1,13 +1,14 @@
 'use client';
 
 import type { ReactNode } from 'react';
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { AlertTriangle, LogOut, ShieldCheck } from 'lucide-react';
 import { getCurrentUser, logout } from '@/lib/auth';
 import { useSessionAccessIssue } from '@/hooks/useSessionAccessIssue';
-import { RESIDENT_NAV_ITEMS, getPageMeta, isPathActive } from '@/lib/navigation';
+import { getResidentNavItems, getPageMeta, isPathActive } from '@/lib/navigation';
+import PwaInstallAction from '@/components/PwaInstallAction';
 import { CivicHero } from '@/components/ui/civic-primitives';
 import {
   Dialog,
@@ -18,6 +19,18 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
+import { getHouseholds } from '@/lib/db/households';
+import { resolveResidentActiveApprovedHousehold } from '@/lib/resident-households';
+
+declare global {
+  interface WindowEventMap {
+    'mswdo-data-changed': CustomEvent<{
+      source: 'supabase';
+      table: string;
+      mode: 'hydrate' | 'change';
+    }>;
+  }
+}
 
 interface ResidentShellProps {
   title: string;
@@ -34,6 +47,52 @@ export default function ResidentShell({ title, subtitle, children }: ResidentShe
   const meta = getPageMeta(pathname);
   const accessIssue = useSessionAccessIssue(user, user?.role === 'resident');
   const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const [hasActiveHousehold, setHasActiveHousehold] = useState(() => pathname.startsWith('/resident/household'));
+
+  useEffect(() => {
+    if (!user || user.role !== 'resident') {
+      return;
+    }
+
+    const residentUser = user;
+    let cancelled = false;
+
+    async function loadActiveHouseholdState() {
+      try {
+        const households = await getHouseholds({ applicant_user_id: residentUser.id });
+        if (!cancelled) {
+          setHasActiveHousehold(Boolean(resolveResidentActiveApprovedHousehold(households)));
+        }
+      } catch (error) {
+        console.error('Failed to resolve resident household navigation state:', error);
+        if (!cancelled && pathname.startsWith('/resident/household')) {
+          setHasActiveHousehold(true);
+        }
+      }
+    }
+
+    void loadActiveHouseholdState();
+
+    function handleDataChanged(event: WindowEventMap['mswdo-data-changed']) {
+      if (event.detail.table !== 'households') {
+        return;
+      }
+
+      void loadActiveHouseholdState();
+    }
+
+    window.addEventListener('mswdo-data-changed', handleDataChanged);
+
+    return () => {
+      cancelled = true;
+      window.removeEventListener('mswdo-data-changed', handleDataChanged);
+    };
+  }, [pathname, user]);
+
+  const navItems = useMemo(
+    () => getResidentNavItems({ hasActiveHousehold, pathname }),
+    [hasActiveHousehold, pathname],
+  );
 
   async function handleLogout() {
     await logout();
@@ -69,7 +128,7 @@ export default function ResidentShell({ title, subtitle, children }: ResidentShe
           </div>
 
           <nav className="flex flex-wrap items-center gap-2">
-            {RESIDENT_NAV_ITEMS.map((item) => {
+            {navItems.map((item) => {
               const Icon = item.icon;
               const active = isPathActive(pathname, item.href);
               return (
@@ -88,6 +147,7 @@ export default function ResidentShell({ title, subtitle, children }: ResidentShe
                 </Link>
               );
             })}
+            <PwaInstallAction className="border-cyan-900/15 bg-cyan-50 text-cyan-950 hover:border-cyan-300 hover:bg-cyan-100" />
             <button
               type="button"
               onClick={() => {

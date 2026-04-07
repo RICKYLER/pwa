@@ -5,6 +5,7 @@ import {
   buildResidentAnalyticsRecords,
   calculateDashboardStats,
   calculateHeatmapData,
+  calculateTopPuroksByHouseholds,
   calculateTopPuroksByPopulation,
   calculateTopPuroksByVulnerability,
   filterResidentAnalyticsRecords,
@@ -12,7 +13,7 @@ import {
 import { getCurrentVulnerabilityFlagsMapForResidents } from './vulnerability';
 import type { Resident, VulnerabilityFlags, Household } from './schema';
 
-async function getBarangayAnalyticsContext(barangay_id: string): Promise<{
+async function getBarangayAnalyticsContext(barangay_id?: string | null): Promise<{
   households: Household[];
   residents: Resident[];
   records: Array<{
@@ -22,7 +23,7 @@ async function getBarangayAnalyticsContext(barangay_id: string): Promise<{
   }>;
 }> {
   const households = await getHouseholds({
-    barangay_id,
+    ...(barangay_id ? { barangay_id } : {}),
     status: 'active',
     registration_status: 'approved',
   });
@@ -46,7 +47,7 @@ async function getBarangayAnalyticsContext(barangay_id: string): Promise<{
 /**
  * Get dashboard statistics for municipality
  */
-export async function getDashboardStats(barangay_id: string) {
+export async function getDashboardStats(barangay_id?: string | null) {
   try {
     const { households, records } = await getBarangayAnalyticsContext(barangay_id);
     return calculateDashboardStats(households, records);
@@ -60,7 +61,7 @@ export async function getDashboardStats(barangay_id: string) {
  * Get top puroks by population
  */
 export async function getTopPuroksByPopulation(
-  barangay_id: string,
+  barangay_id?: string | null,
   limit: number = 3
 ): Promise<Array<{ purok: string; population: number }>> {
   try {
@@ -73,10 +74,26 @@ export async function getTopPuroksByPopulation(
 }
 
 /**
+ * Get top puroks by household count
+ */
+export async function getTopPuroksByHouseholds(
+  barangay_id?: string | null,
+  limit: number = 3
+): Promise<Array<{ purok: string; households: number }>> {
+  try {
+    const { households } = await getBarangayAnalyticsContext(barangay_id);
+    return calculateTopPuroksByHouseholds(households, limit);
+  } catch (error) {
+    console.error('Error getting top puroks by households:', error);
+    throw error;
+  }
+}
+
+/**
  * Get top puroks by vulnerability count
  */
 export async function getTopPuroksByVulnerability(
-  barangay_id: string,
+  barangay_id?: string | null,
   limit: number = 3
 ): Promise<Array<{ purok: string; vulnerable_count: number }>> {
   try {
@@ -92,7 +109,7 @@ export async function getTopPuroksByVulnerability(
  * Get all vulnerable residents with filters
  */
 export async function getVulnerableResidents(
-  barangay_id: string,
+  barangay_id?: string | null,
   filters?: {
     vulnerability_type?: 'child' | 'senior' | 'pwd' | 'pregnant' | 'chronic' | 'low_income';
     purok_sitio?: string;
@@ -127,7 +144,7 @@ export async function searchResidents(query: string): Promise<Resident[]> {
 /**
  * Get heatmap data by purok
  */
-export async function getHeatmapData(barangay_id: string): Promise<Array<{
+export async function getHeatmapData(barangay_id?: string | null): Promise<Array<{
   purok: string;
   total_residents: number;
   vulnerable_count: number;

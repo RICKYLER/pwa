@@ -3,6 +3,7 @@ import test from 'node:test';
 import {
   buildResidentAnalyticsRecords,
   calculateDashboardStats,
+  calculateTopPuroksByHouseholds,
   calculateTopPuroksByPopulation,
 } from '../lib/db/reporting';
 import type { Household, Resident, VulnerabilityFlags } from '../lib/db/schema';
@@ -11,7 +12,7 @@ function makeHousehold(overrides: Partial<Household>): Household {
   return {
     id: overrides.id ?? 'hh-default',
     head_name: overrides.head_name ?? 'Default Household',
-    barangay_id: overrides.barangay_id ?? 'barangay-1',
+    barangay_id: overrides.barangay_id ?? 'anitapan',
     purok_sitio: overrides.purok_sitio ?? 'Purok 1',
     street_address: overrides.street_address ?? 'Default Street',
     status: overrides.status ?? 'active',
@@ -61,8 +62,8 @@ function makeFlags(overrides: Partial<VulnerabilityFlags>): VulnerabilityFlags {
 
 test('dashboard stats only count residents attached to the selected barangay households', () => {
   const barangayHouseholds = [
-    makeHousehold({ id: 'hh-1', barangay_id: 'barangay-1', purok_sitio: 'Purok 1' }),
-    makeHousehold({ id: 'hh-2', barangay_id: 'barangay-1', purok_sitio: 'Purok 2' }),
+    makeHousehold({ id: 'hh-1', barangay_id: 'anitapan', purok_sitio: 'Purok 1' }),
+    makeHousehold({ id: 'hh-2', barangay_id: 'anitapan', purok_sitio: 'Purok 2' }),
   ];
 
   const residents = [
@@ -127,5 +128,19 @@ test('top puroks by population count residents instead of households', () => {
   assert.deepEqual(topPuroks, [
     { purok: 'Purok 1', population: 4 },
     { purok: 'Purok 2', population: 1 },
+  ]);
+});
+
+test('top puroks by households count approved household density by purok', () => {
+  const households = [
+    makeHousehold({ id: 'hh-1', purok_sitio: 'Purok 2' }),
+    makeHousehold({ id: 'hh-2', purok_sitio: 'Purok 1' }),
+    makeHousehold({ id: 'hh-3', purok_sitio: 'Purok 1' }),
+    makeHousehold({ id: 'hh-4', purok_sitio: 'Purok 3' }),
+  ];
+
+  assert.deepEqual(calculateTopPuroksByHouseholds(households, 2), [
+    { purok: 'Purok 1', households: 2 },
+    { purok: 'Purok 2', households: 1 },
   ]);
 });

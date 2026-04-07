@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState, type KeyboardEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { getCurrentUser, hasRole } from '@/lib/auth';
 import { getIncidents, updateIncidentStatus, seedDemoIncidents } from '@/lib/db/incidents';
@@ -16,6 +16,20 @@ import ResponderSelectionSummary from '@/components/ResponderSelectionSummary';
 import { CivicBadge, CivicChipButton, CivicPanel } from '@/components/ui/civic-primitives';
 import { openResponderMapLocation } from '@/lib/responder-map-links';
 import { useResponderMapControls } from '@/hooks/useResponderMapControls';
+import {
+  getResponderCoverageLabel,
+  getResponderMappedHouseholds,
+} from '@/lib/responder-households';
+
+declare global {
+  interface WindowEventMap {
+    'mswdo-data-changed': CustomEvent<{
+      source: 'supabase';
+      table: string;
+      mode: 'hydrate' | 'change';
+    }>;
+  }
+}
 
 const SEVERITY_CFG = {
   critical: { label: 'Critical', dot: 'bg-red-500', badge: 'bg-red-50 text-red-700 border-red-200' },
@@ -105,20 +119,7 @@ export default function ResponderDesktop() {
   const [activeTab, setActiveTab] = useState<'incidents' | 'priorities' | 'events'>('incidents');
   const [updatingId, setUpdatingId] = useState<string | null>(null);
   const [visitedIds, setVisitedIds] = useState<Set<string>>(new Set());
-
-  useEffect(() => {
-    if (!user) {
-      router.push('/login');
-      return;
-    }
-
-    if (!hasRole(['responder', 'admin'])) {
-      router.push('/dashboard');
-      return;
-    }
-
-    void load();
-  }, [router, user]);
+  const reloadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const load = useCallback(async () => {
     if (!user) return;
@@ -126,30 +127,22 @@ export default function ResponderDesktop() {
 
     try {
       await seedDemoIncidents(user.id);
-      const [allIncidents, households, residents, flags, ongoingEvents] = await Promise.all([
+      const [allIncidents, allHouseholds, residents, flags, ongoingEvents] = await Promise.all([
         getIncidents(),
         getHouseholds({
-          barangay_id: user.barangay_id,
           registration_status: 'approved',
         }),
         db.getAll<Resident>(STORE_NAMES.residents),
         db.getAll<VulnerabilityFlags>(STORE_NAMES.vulnerability_flags),
         getDistributionEvents({ status: 'ongoing' }),
       ]);
+      const households = getResponderMappedHouseholds(allHouseholds, user);
 
       setIncidents(allIncidents);
       setEvents(ongoingEvents);
-      setMapHouseholds(
-        households.filter(
-          (household) =>
-            household.status === 'active'
-            && household.gps_lat !== undefined
-            && household.gps_long !== undefined,
-        ),
-      );
+      setMapHouseholds(households);
 
       const scored: PriorityHousehold[] = households
-        .filter((household) => household.status === 'active')
         .map((household) => {
           const residentsInHousehold = residents.filter(
             (resident) => resident.household_id === household.id && resident.status === 'active',
@@ -175,6 +168,54 @@ export default function ResponderDesktop() {
       setLoading(false);
     }
   }, [user]);
+
+  const scheduleLoad = useCallback((delayMs = 0) => {
+    if (reloadTimerRef.current !== null) {
+      clearTimeout(reloadTimerRef.current);
+    }
+
+    reloadTimerRef.current = setTimeout(() => {
+      reloadTimerRef.current = null;
+      void load();
+    }, delayMs);
+  }, [load]);
+
+  useEffect(() => {
+    if (!user) {
+      router.push('/login');
+      return;
+    }
+
+    if (!hasRole(['responder', 'admin'])) {
+      router.push('/dashboard');
+      return;
+    }
+
+    scheduleLoad();
+  }, [router, scheduleLoad, user]);
+
+  useEffect(() => {
+    if (!user) {
+      return;
+    }
+
+    function handleDataChanged(event: WindowEventMap['mswdo-data-changed']) {
+      if (!['households', 'residents', 'vulnerability_flags', 'incidents', 'distribution_events'].includes(event.detail.table)) {
+        return;
+      }
+
+      scheduleLoad(event.detail.mode === 'hydrate' ? 140 : 40);
+    }
+
+    window.addEventListener('mswdo-data-changed', handleDataChanged);
+    return () => {
+      window.removeEventListener('mswdo-data-changed', handleDataChanged);
+      if (reloadTimerRef.current !== null) {
+        clearTimeout(reloadTimerRef.current);
+        reloadTimerRef.current = null;
+      }
+    };
+  }, [scheduleLoad, user]);
 
   async function handleStatusUpdate(id: string, status: IncidentStatus) {
     setUpdatingId(id);
@@ -203,7 +244,7 @@ export default function ResponderDesktop() {
               <div>
                 <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-cyan-100/70">Response Operations</p>
                 <h2 className="mt-3 text-2xl font-black tracking-tight">{user.name}</h2>
-                <p className="mt-1 text-sm text-cyan-100/80">Field responder for {user.barangay_id}</p>
+                <p className="mt-1 text-sm text-cyan-100/80">{getResponderCoverageLabel(user)}</p>
               </div>
               <button
                 onClick={() => void load()}
@@ -485,6 +526,7 @@ export default function ResponderDesktop() {
               <p className="mt-1 text-sm text-slate-500">Weather, basemap, and selected-item detail now stay in the operations rail.</p>
             </div>
             <div className="flex flex-wrap gap-2">
+              <CivicBadge label={`${mapHouseholds.length} verified household pins`} tone="emerald" />
               <CivicBadge label={`${mapControls.activeBaseLayer.label} base`} tone="navy" />
               <CivicBadge
                 label={mapControls.weatherOverlayVisible ? mapControls.activeLayerSummary : 'Weather hidden'}

@@ -11,6 +11,8 @@ const bootstrapPromises = new Map<string, Promise<void>>();
 const hydratedBootstrapKeys = new Set<string>();
 const SUPABASE_BOOTSTRAP_TIMEOUT_MS = 15_000;
 const FULL_BOOTSTRAP_TABLES = SUPABASE_BOOTSTRAP_TABLES.map((entry) => entry.table);
+const FORCE_BOOTSTRAP_COOLDOWN_MS = 900;
+const lastBootstrapStartedAt = new Map<string, number>();
 
 function normalizeRequestedTables(tables: SupabaseBootstrapTable[]) {
   const validTables = new Set(FULL_BOOTSTRAP_TABLES);
@@ -121,16 +123,23 @@ export async function bootstrapSupabaseTables(
   }
 
   const bootstrapKey = getBootstrapKey(requestedTables);
+  const existingPromise = bootstrapPromises.get(bootstrapKey);
+  if (existingPromise) {
+    return existingPromise;
+  }
+
   if (!options?.force && hydratedBootstrapKeys.has(bootstrapKey)) {
     return;
   }
 
-  const existingPromise = bootstrapPromises.get(bootstrapKey);
-  if (!options?.force && existingPromise) {
-    return existingPromise;
+  const now = Date.now();
+  const lastStartedAt = lastBootstrapStartedAt.get(bootstrapKey) ?? 0;
+  if (options?.force && now - lastStartedAt < FORCE_BOOTSTRAP_COOLDOWN_MS) {
+    return;
   }
 
   const bootstrapPromise = (async () => {
+    lastBootstrapStartedAt.set(bootstrapKey, Date.now());
     const response = await fetchBootstrapResponse(requestedTables).catch((error) => {
       if (error instanceof Error && error.name === 'AbortError') {
         console.warn(`Supabase bootstrap timed out after ${SUPABASE_BOOTSTRAP_TIMEOUT_MS}ms.`);

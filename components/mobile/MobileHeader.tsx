@@ -2,6 +2,7 @@
 
 import { usePathname } from 'next/navigation';
 import { Menu } from 'lucide-react';
+import PwaInstallAction from '@/components/PwaInstallAction';
 import { getCurrentUser } from '@/lib/auth';
 import { getPageMeta } from '@/lib/navigation';
 import { cn } from '@/lib/utils';
@@ -42,11 +43,18 @@ export default function MobileHeader({ title, onMenuClick }: MobileHeaderProps) 
           </div>
         </div>
 
-        <div className={cn(
-          'flex h-11 min-w-11 items-center justify-center rounded-full border border-slate-200 bg-white px-3 text-xs font-bold text-slate-700 shadow-sm',
-          initials.length > 1 ? 'tracking-[0.12em]' : '',
-        )}>
-          {initials}
+        <div className="flex items-center gap-2">
+          <PwaInstallAction
+            iconOnly
+            label="Download App"
+            className="border-cyan-200 bg-cyan-50 text-cyan-950 hover:border-cyan-300 hover:bg-cyan-100"
+          />
+          <div className={cn(
+            'flex h-11 min-w-11 items-center justify-center rounded-full border border-slate-200 bg-white px-3 text-xs font-bold text-slate-700 shadow-sm',
+            initials.length > 1 ? 'tracking-[0.12em]' : '',
+          )}>
+            {initials}
+          </div>
         </div>
       </div>
     </header>

@@ -1,3 +1,5 @@
+export const DEFAULT_BARANGAY_ID = 'anitapan' as const;
+
 export const BARANGAY_IDS = [
   'anitapan',
   'cabuyuan',
@@ -9,7 +11,7 @@ export const BARANGAY_IDS = [
   'pangibiran',
   'pindasan',
   'san-antonio',
-  'tagnan',
+  'tagnanan',
 ] as const;
 
 export type BarangayId = (typeof BARANGAY_IDS)[number];
@@ -25,7 +27,7 @@ export const BARANGAY_OPTIONS: ReadonlyArray<{ id: BarangayId; label: string }> 
   { id: 'pangibiran', label: 'Pangibiran' },
   { id: 'pindasan', label: 'Pindasan' },
   { id: 'san-antonio', label: 'San Antonio' },
-  { id: 'tagnan', label: 'Tagnan' },
+  { id: 'tagnanan', label: 'Tagnanan' },
 ];
 
 const BARANGAY_LABELS: Record<BarangayId, string> = {
@@ -39,7 +41,7 @@ const BARANGAY_LABELS: Record<BarangayId, string> = {
   pangibiran: 'Pangibiran',
   pindasan: 'Pindasan',
   'san-antonio': 'San Antonio',
-  tagnan: 'Tagnan',
+  tagnanan: 'Tagnanan',
 };
 
 export function isBarangayId(value: string): value is BarangayId {

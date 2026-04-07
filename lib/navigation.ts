@@ -153,41 +153,76 @@ export const ADMIN_NAV_ITEMS: AppNavItem[] = [
   },
 ];
 
-export const RESIDENT_NAV_ITEMS: AppNavItem[] = [
-  {
-    href: '/resident',
-    label: 'Resident Portal',
-    mobileLabel: 'Portal',
-    description: 'Submitted records and approval status',
-    pageTitle: 'Resident Portal',
-    pageEyebrow: 'Resident Services',
-    icon: Home,
-    perm: null,
-    group: 'Resident',
-  },
-  {
-    href: '/resident/notifications',
-    label: 'Notifications',
-    mobileLabel: 'Inbox',
-    description: 'Distribution notices and resident updates',
-    pageTitle: 'Notifications',
-    pageEyebrow: 'Resident Services',
-    icon: Bell,
-    perm: null,
-    group: 'Resident',
-  },
-  {
-    href: '/households/register',
-    label: 'New Registration',
-    mobileLabel: 'Register',
-    description: 'Create and submit a new household record',
-    pageTitle: 'New Registration',
-    pageEyebrow: 'Resident Services',
-    icon: FileText,
-    perm: null,
-    group: 'Resident',
-  },
+const RESIDENT_PORTAL_NAV_ITEM: AppNavItem = {
+  href: '/resident',
+  label: 'Resident Portal',
+  mobileLabel: 'Portal',
+  description: 'Submitted records and approval status',
+  pageTitle: 'Resident Portal',
+  pageEyebrow: 'Resident Services',
+  icon: Home,
+  perm: null,
+  group: 'Resident',
+};
+
+const RESIDENT_NOTIFICATIONS_NAV_ITEM: AppNavItem = {
+  href: '/resident/notifications',
+  label: 'Notifications',
+  mobileLabel: 'Inbox',
+  description: 'Distribution notices and resident updates',
+  pageTitle: 'Notifications',
+  pageEyebrow: 'Resident Services',
+  icon: Bell,
+  perm: null,
+  group: 'Resident',
+};
+
+const RESIDENT_HOUSEHOLD_NAV_ITEM: AppNavItem = {
+  href: '/resident/household',
+  label: 'My Household',
+  mobileLabel: 'Household',
+  description: 'Approved household members and resident details',
+  pageTitle: 'My Household',
+  pageEyebrow: 'Resident Services',
+  icon: Users,
+  perm: null,
+  group: 'Resident',
+};
+
+const RESIDENT_REGISTER_NAV_ITEM: AppNavItem = {
+  href: '/households/register',
+  label: 'New Registration',
+  mobileLabel: 'Register',
+  description: 'Create and submit a new household record',
+  pageTitle: 'New Registration',
+  pageEyebrow: 'Resident Services',
+  icon: FileText,
+  perm: null,
+  group: 'Resident',
+};
+
+const RESIDENT_ALL_NAV_ITEMS: AppNavItem[] = [
+  RESIDENT_PORTAL_NAV_ITEM,
+  RESIDENT_NOTIFICATIONS_NAV_ITEM,
+  RESIDENT_HOUSEHOLD_NAV_ITEM,
+  RESIDENT_REGISTER_NAV_ITEM,
 ];
+
+export function getResidentNavItems(options?: {
+  hasActiveHousehold?: boolean;
+  pathname?: string | null;
+}): AppNavItem[] {
+  const showHousehold = Boolean(options?.hasActiveHousehold)
+    || Boolean(options?.pathname && isPathActive(options.pathname, RESIDENT_HOUSEHOLD_NAV_ITEM.href));
+
+  return [
+    RESIDENT_PORTAL_NAV_ITEM,
+    RESIDENT_NOTIFICATIONS_NAV_ITEM,
+    showHousehold ? RESIDENT_HOUSEHOLD_NAV_ITEM : RESIDENT_REGISTER_NAV_ITEM,
+  ];
+}
+
+export const RESIDENT_NAV_ITEMS: AppNavItem[] = getResidentNavItems();
 
 export function isPathActive(pathname: string, href: string): boolean {
   return pathname === href || (href !== '/dashboard' && href !== '/resident' && pathname.startsWith(href));
@@ -208,7 +243,7 @@ export function getPageMeta(pathname: string) {
   const matched =
     matchPath(STAFF_NAV_ITEMS, pathname)
     ?? matchPath(ADMIN_NAV_ITEMS, pathname)
-    ?? matchPath(RESIDENT_NAV_ITEMS, pathname);
+    ?? matchPath(RESIDENT_ALL_NAV_ITEMS, pathname);
 
   if (matched) {
     return {

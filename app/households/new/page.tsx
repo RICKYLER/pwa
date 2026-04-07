@@ -3,6 +3,7 @@
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { getCurrentUser, hasPermission } from '@/lib/auth';
+import { DEFAULT_BARANGAY_ID } from '@/lib/barangays';
 import { createHouseholdBundle } from '@/lib/db/households';
 import { HouseholdForm, MemberDraft } from '@/components/forms/household-form';
 import { ArrowLeft } from 'lucide-react';
@@ -29,7 +30,7 @@ export default function AddHouseholdPage() {
 
       await createHouseholdBundle({
         ...data,
-        barangay_id: user?.barangay_id || 'barangay-1',
+        barangay_id: user?.barangay_id || DEFAULT_BARANGAY_ID,
       }, members);
 
       router.push('/households');

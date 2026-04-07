@@ -82,10 +82,63 @@ export default function RegistrationStatusPage() {
   const timeline = useMemo(() => {
     return record ? buildRegistrationTimeline(record) : [];
   }, [record]);
+  const registrationStatus = record ? getHouseholdRegistrationStatus(record) : null;
+  const isApprovedRecord = registrationStatus === 'approved';
+  const isApprovedActiveRecord = isApprovedRecord && record?.status === 'active';
 
   if (!user) {
     return null;
   }
+
+  const statusPresentation = (() => {
+    switch (registrationStatus) {
+      case 'approved':
+        return {
+          panelClassName: 'border-emerald-200 bg-gradient-to-br from-emerald-50 to-white sm:p-8',
+          badgeLabel: 'Approved',
+          badgeTone: 'emerald' as const,
+          title: 'Your household registration is approved.',
+          description: 'Your household is now active in the resident portal. Open My Household to review members and add new ones.',
+          nextTitle: 'Household ready',
+          nextDescription: 'Your household is active. You can now open the household page to review the approved details and add members.',
+          nextClassName: 'rounded-[32px] border border-emerald-200 bg-emerald-50 px-5 py-4 text-sm text-emerald-800',
+        };
+      case 'rejected':
+        return {
+          panelClassName: 'border-rose-200 bg-gradient-to-br from-rose-50 to-white sm:p-8',
+          badgeLabel: 'Rejected',
+          badgeTone: 'rose' as const,
+          title: 'Your registration was not approved.',
+          description: 'Review the notes below and submit a corrected household registration when you are ready.',
+          nextTitle: 'What happens next',
+          nextDescription: 'Review the admin notes, update the details that need attention, then submit a new registration.',
+          nextClassName: 'rounded-[32px] border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-800',
+        };
+      case 'needs_correction':
+        return {
+          panelClassName: 'border-amber-200 bg-gradient-to-br from-amber-50 to-white sm:p-8',
+          badgeLabel: 'Needs Correction',
+          badgeTone: 'amber' as const,
+          title: 'Your registration needs correction.',
+          description: 'The admin reviewed the record and needs a corrected submission before approval can continue.',
+          nextTitle: 'What happens next',
+          nextDescription: 'Check the review notes, update the information that needs correction, and submit a corrected registration.',
+          nextClassName: 'rounded-[32px] border border-amber-200 bg-amber-50 px-5 py-4 text-sm text-amber-800',
+        };
+      case 'pending':
+      default:
+        return {
+          panelClassName: 'border-amber-200 bg-gradient-to-br from-amber-50 to-white sm:p-8',
+          badgeLabel: 'Pending review',
+          badgeTone: 'amber' as const,
+          title: 'Your registration is under admin review.',
+          description: 'The record was submitted successfully and is now waiting for location review and admin approval.',
+          nextTitle: 'What happens next',
+          nextDescription: 'Admin will review the location, check the map pin quality, and either approve, reject, or request a correction.',
+          nextClassName: 'rounded-[32px] border border-emerald-200 bg-emerald-50 px-5 py-4 text-sm text-emerald-800',
+        };
+    }
+  })();
 
   const content = (
       <div className="mx-auto max-w-[1000px] space-y-6 p-4 sm:p-6 lg:p-8">
@@ -106,21 +159,36 @@ export default function RegistrationStatusPage() {
           </div>
         ) : record ? (
           <>
-            <CivicPanel className="border-amber-200 bg-gradient-to-br from-amber-50 to-white sm:p-8">
+            <CivicPanel className={statusPresentation.panelClassName}>
               <div className="flex flex-wrap items-start justify-between gap-4">
                 <div>
-                  <CivicBadge label="Pending review" tone="amber" />
-                  <h1 className="mt-4 text-3xl font-bold text-slate-900">Your registration is under admin review.</h1>
+                  <CivicBadge label={statusPresentation.badgeLabel} tone={statusPresentation.badgeTone} />
+                  <h1 className="mt-4 text-3xl font-bold text-slate-900">{statusPresentation.title}</h1>
                   <p className="mt-2 max-w-2xl text-sm text-slate-600">
-                    The record was submitted successfully and is now waiting for location review and admin approval.
+                    {statusPresentation.description}
                   </p>
+                  {isResidentUser(user) && isApprovedActiveRecord ? (
+                    <Link
+                      href="/resident/household"
+                      className="mt-4 inline-flex items-center gap-2 rounded-full bg-cyan-950 px-4 py-2.5 text-sm font-semibold text-white hover:bg-cyan-900"
+                    >
+                      <ShieldCheck className="h-4 w-4" />
+                      Open My Household
+                    </Link>
+                  ) : null}
                 </div>
                 <div className="rounded-3xl border border-amber-100 bg-white px-5 py-4 shadow-sm">
                   <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Current status</p>
                   <p className="mt-2 text-lg font-bold text-slate-900">
-                    {formatRegistrationStatusLabel(getHouseholdRegistrationStatus(record))}
+                    {formatRegistrationStatusLabel(registrationStatus ?? 'pending')}
                   </p>
-                  <p className="mt-1 text-xs text-slate-500">Submitted {formatDate(record.registration_submitted_at)}</p>
+                  <p className="mt-1 text-xs text-slate-500">
+                    {isApprovedRecord ? 'Reviewed' : 'Submitted'} {formatDate(
+                      (isApprovedRecord ? record.registration_reviewed_at : record.registration_submitted_at)
+                      || record.registration_submitted_at
+                      || record.createdAt,
+                    )}
+                  </p>
                 </div>
               </div>
             </CivicPanel>
@@ -197,13 +265,13 @@ export default function RegistrationStatusPage() {
               </CivicPanel>
             </div>
 
-            <div className="rounded-[32px] border border-emerald-200 bg-emerald-50 px-5 py-4 text-sm text-emerald-800">
+            <div className={statusPresentation.nextClassName}>
               <div className="flex items-start gap-3">
                 <CheckCircle2 className="mt-0.5 h-4 w-4 flex-shrink-0" />
                 <div>
-                  <p className="font-semibold">What happens next</p>
+                  <p className="font-semibold">{statusPresentation.nextTitle}</p>
                   <p className="mt-1">
-                    Admin will review the location, check the map pin quality, and either approve, reject, or request a correction.
+                    {statusPresentation.nextDescription}
                   </p>
                 </div>
               </div>
@@ -222,7 +290,11 @@ export default function RegistrationStatusPage() {
     return (
       <ResidentShell
         title="Registration Status"
-        subtitle="Track your submission while it moves through admin review."
+        subtitle={
+          isApprovedActiveRecord
+            ? 'Your approved household is ready. Open My Household to review members and add new ones.'
+            : 'Track your submission while it moves through admin review.'
+        }
       >
         {content}
       </ResidentShell>

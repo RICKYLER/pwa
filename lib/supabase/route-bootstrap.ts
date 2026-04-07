@@ -33,6 +33,10 @@ const ROUTE_TABLES: Array<{
     tables: ['inventory_items', 'inventory_movements', 'package_templates'],
   },
   {
+    prefix: '/resident/household',
+    tables: ['households', 'residents', 'vulnerability_flags', 'user_notifications'],
+  },
+  {
     prefix: '/resident',
     tables: ['households', 'user_notifications'],
   },

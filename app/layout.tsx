@@ -3,6 +3,7 @@ import { Analytics } from '@vercel/analytics/next'
 import AuthBootstrap from '@/components/AuthBootstrap'
 import GoogleMapsProvider from '@/components/GoogleMapsProvider'
 import PwaBootstrap from '@/components/PwaBootstrap'
+import { PwaInstallProvider } from '@/hooks/usePwaInstall'
 import './globals.css'
 
 export const metadata: Metadata = {
@@ -70,12 +71,14 @@ export default function RootLayout({
         <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
       </head>
       <body className="font-sans antialiased">
-        <PwaBootstrap />
-        <AuthBootstrap>
-          <GoogleMapsProvider>
-            {children}
-          </GoogleMapsProvider>
-        </AuthBootstrap>
+        <PwaInstallProvider>
+          <PwaBootstrap />
+          <AuthBootstrap>
+            <GoogleMapsProvider>
+              {children}
+            </GoogleMapsProvider>
+          </AuthBootstrap>
+        </PwaInstallProvider>
         <Analytics />
       </body>
     </html>

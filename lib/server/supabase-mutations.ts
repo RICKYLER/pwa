@@ -731,6 +731,174 @@ async function createHouseholdBundleWithoutRpc(
   };
 }
 
+type RemoteHouseholdMembershipRow = {
+  id: string;
+  barangay_id: string | null;
+  applicant_user_id: string | null;
+  registration_status: string | null;
+  status: string | null;
+  registration_reviewed_at: string | null;
+  updated_at: string | null;
+  created_at: string | null;
+};
+
+function toRemoteHouseholdTimestamp(value: string | null | undefined) {
+  if (!value) {
+    return 0;
+  }
+
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? 0 : parsed.getTime();
+}
+
+function compareRemoteHouseholdMembershipRows(
+  left: RemoteHouseholdMembershipRow,
+  right: RemoteHouseholdMembershipRow,
+) {
+  return (
+    toRemoteHouseholdTimestamp(right.registration_reviewed_at)
+    - toRemoteHouseholdTimestamp(left.registration_reviewed_at)
+    || toRemoteHouseholdTimestamp(right.updated_at) - toRemoteHouseholdTimestamp(left.updated_at)
+    || toRemoteHouseholdTimestamp(right.created_at) - toRemoteHouseholdTimestamp(left.created_at)
+  );
+}
+
+async function resolveResidentApprovedActiveHouseholdOnServer(remoteActorId: string) {
+  const supabase = getSupabaseAdminClient();
+  const { data, error } = await supabase
+    .from('households')
+    .select('id, barangay_id, applicant_user_id, registration_status, status, registration_reviewed_at, updated_at, created_at')
+    .eq('applicant_user_id', remoteActorId)
+    .eq('registration_status', 'approved')
+    .eq('status', 'active');
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  if (!data?.length) {
+    return null;
+  }
+
+  return [...data].sort(compareRemoteHouseholdMembershipRows)[0] ?? null;
+}
+
+async function createResidentWithoutRpc(
+  user: User,
+  resident: Omit<Resident, 'createdAt' | 'updatedAt' | 'syncStatus'> & { id: string },
+  remoteActorId: string,
+) {
+  if (!['admin', 'encoder', 'resident'].includes(user.role)) {
+    throw new Error('You are not allowed to add household members.');
+  }
+
+  const householdId = toOptionalString(resident.household_id);
+  if (!householdId) {
+    throw new Error('Resident household_id is required.');
+  }
+
+  const supabase = getSupabaseAdminClient();
+  const { data: household, error: householdError } = await supabase
+    .from('households')
+    .select('id, barangay_id, applicant_user_id, registration_status, status, registration_reviewed_at, updated_at, created_at')
+    .eq('id', householdId)
+    .limit(1)
+    .single();
+
+  if (householdError) {
+    throw new Error(householdError.message);
+  }
+
+  if (!household) {
+    throw new Error('Target household not found.');
+  }
+
+  if (user.role === 'encoder' && household.barangay_id !== user.barangay_id) {
+    throw new Error('You can only add residents inside your barangay.');
+  }
+
+  if (user.role === 'resident') {
+    const activeHousehold = await resolveResidentApprovedActiveHouseholdOnServer(remoteActorId);
+    if (!activeHousehold || activeHousehold.id !== household.id) {
+      throw new Error('Residents can only add members to their latest approved active household.');
+    }
+  }
+
+  let createdResident: Record<string, unknown> | null = null;
+
+  try {
+    const residentPayload = stripUndefined({
+      id: toOptionalString(resident.id),
+      household_id: householdId,
+      full_name: toOptionalString(resident.full_name) ?? '',
+      birthdate: toDateOnlyString(resident.birthdate) ?? new Date().toISOString().slice(0, 10),
+      gender: resident.gender === 'F' ? 'F' : 'M',
+      relationship_to_head: toOptionalString(resident.relationship_to_head) ?? '',
+      status: resident.status ?? 'active',
+      civil_status: toOptionalString(resident.civil_status),
+      occupation: toOptionalString(resident.occupation),
+      income_level: toOptionalString(resident.income_level),
+      contact_number: toOptionalString(resident.contact_number),
+      sync_status: 'synced',
+    });
+
+    const { data: insertedResident, error: createResidentError } = await supabase
+      .from('residents')
+      .insert(residentPayload)
+      .select('*')
+      .single();
+
+    if (createResidentError) {
+      throw new Error(createResidentError.message);
+    }
+
+    if (!insertedResident) {
+      throw new Error('Resident could not be created.');
+    }
+
+    createdResident = insertedResident;
+
+    const vulnerabilitySeed: HouseholdMemberDraft = {
+      full_name: toOptionalString(insertedResident.full_name) ?? '',
+      birthdate: toDateOnlyString(insertedResident.birthdate) ?? new Date().toISOString().slice(0, 10),
+      gender: insertedResident.gender === 'F' ? 'F' : 'M',
+      relationship_to_head: toOptionalString(insertedResident.relationship_to_head) ?? '',
+      civil_status: toOptionalString(insertedResident.civil_status) ?? undefined,
+      occupation: toOptionalString(insertedResident.occupation) ?? undefined,
+      income_level: toOptionalString(insertedResident.income_level) ?? undefined,
+      is_pregnant: false,
+      is_pwd: false,
+      has_chronic_illness: false,
+    };
+
+    const { data: createdFlag, error: flagsError } = await supabase
+      .from('vulnerability_flags')
+      .upsert(buildVulnerabilityFlagsPayload(insertedResident.id, vulnerabilitySeed), {
+        onConflict: 'resident_id',
+      })
+      .select('*')
+      .single();
+
+    if (flagsError) {
+      throw new Error(flagsError.message);
+    }
+
+    return {
+      resident: insertedResident,
+      vulnerability_flags: createdFlag ? [createdFlag] : [],
+    };
+  } catch (error) {
+    if (createdResident?.id) {
+      await supabase
+        .from('residents')
+        .delete()
+        .eq('id', createdResident.id);
+    }
+
+    throw error;
+  }
+}
+
 export async function createAuditLogOnServer(params: {
   user: User;
   action: string;
@@ -796,14 +964,27 @@ export async function createResidentOnServer(
   resident: Omit<Resident, 'createdAt' | 'updatedAt' | 'syncStatus'> & { id: string },
 ) {
   const supabase = getSupabaseAdminClient();
-  const { data, error } = await supabase.rpc('create_resident_bundle', {
-    p_resident: resident,
-    p_actor_role: user.role,
-    p_actor_barangay_id: user.barangay_id,
-  });
+  const remoteActorId = await getRemoteActorId(user);
+  let data: unknown = null;
 
-  if (error) {
-    throw new Error(error.message);
+  if (user.role === 'resident') {
+    data = await createResidentWithoutRpc(user, resident, remoteActorId);
+  } else {
+    const { data: rpcData, error } = await supabase.rpc('create_resident_bundle', {
+      p_resident: resident,
+      p_actor_role: user.role,
+      p_actor_barangay_id: user.barangay_id,
+    });
+
+    if (error) {
+      if (isMissingRpcFunctionError(error, 'create_resident_bundle')) {
+        data = await createResidentWithoutRpc(user, resident, remoteActorId);
+      } else {
+        throw new Error(error.message);
+      }
+    } else {
+      data = rpcData;
+    }
   }
 
   await createAuditLogEntry({
@@ -832,6 +1013,10 @@ export async function updateResidentOnServer(
     chronic_conditions?: string[];
   },
 ) {
+  if (!['admin', 'encoder'].includes(user.role)) {
+    throw new Error('You are not allowed to update residents.');
+  }
+
   const supabase = getSupabaseAdminClient();
   const { data, error } = await supabase.rpc('update_resident_bundle', {
     p_resident_id: residentId,

@@ -126,8 +126,8 @@ async function loadResidentsForHouseholds(householdIds: string[]) {
   return data ?? [];
 }
 
-async function loadVulnerabilityFlags(residentIds: string[], role: User['role']) {
-  if (!residentIds.length || !['admin', 'encoder', 'health_worker', 'responder'].includes(role)) {
+async function loadVulnerabilityFlags(residentIds: string[]) {
+  if (!residentIds.length) {
     return [];
   }
 
@@ -489,7 +489,7 @@ async function buildBootstrapPayload(
   }
 
   const [vulnerabilityFlags, beneficiaries] = await Promise.all([
-    wants('vulnerability_flags') ? loadVulnerabilityFlags(residentIds, user.role) : Promise.resolve([]),
+    wants('vulnerability_flags') ? loadVulnerabilityFlags(residentIds) : Promise.resolve([]),
     wants('beneficiaries') ? loadBeneficiaries(user, residentIds) : Promise.resolve([]),
   ]);
 

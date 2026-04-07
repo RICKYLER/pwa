@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { AlertTriangle, Baby, FileText, Home, Package, ShieldAlert, Users } from 'lucide-react';
+import { getAnalyticsBarangayScope, getAnalyticsScopeLabel } from '@/lib/analytics-scope';
 import { db } from '@/lib/db/indexeddb';
 import { getDashboardStats, getTopPuroksByPopulation, getTopPuroksByVulnerability } from '@/lib/db/queries';
 import { getDefaultRouteForUser, hasPermission, restoreSession } from '@/lib/auth';
@@ -60,10 +61,11 @@ export default function DashboardDesktop() {
       }
 
       setUser(restoredUser);
+      const analyticsBarangayId = getAnalyticsBarangayScope(restoredUser);
       const [dashboardStats, , vulnerable] = await Promise.all([
-        getDashboardStats(restoredUser.barangay_id),
-        getTopPuroksByPopulation(restoredUser.barangay_id),
-        getTopPuroksByVulnerability(restoredUser.barangay_id),
+        getDashboardStats(analyticsBarangayId),
+        getTopPuroksByPopulation(analyticsBarangayId),
+        getTopPuroksByVulnerability(analyticsBarangayId),
       ]);
 
       setStats(dashboardStats);
@@ -100,6 +102,10 @@ export default function DashboardDesktop() {
   const totalVulnerable = stats
     ? stats.children_count + stats.seniors_count + stats.pwd_count + stats.pregnant_count + stats.chronic_count
     : 0;
+  const scopeLabel = getAnalyticsScopeLabel(user);
+  const residentsDescription = user.role === 'admin'
+    ? `${(stats?.total_population ?? 0).toLocaleString()} residents currently tracked across all barangays.`
+    : `${(stats?.total_population ?? 0).toLocaleString()} residents currently tracked in ${scopeLabel}.`;
 
   const quickLinks = [
     { href: '/households/new', label: 'Add household', description: 'Create a new record', icon: Home, tone: 'navy' as const, perm: 'create_household' },
@@ -113,7 +119,7 @@ export default function DashboardDesktop() {
       <CivicHero
         eyebrow="Municipal Operations"
         title={`${greeting()}, ${user.name?.split(' ')[0] ?? 'there'}`}
-        description={isLoading ? 'Loading municipal census metrics...' : `${(stats?.total_population ?? 0).toLocaleString()} residents currently tracked across the civic console.`}
+        description={isLoading ? 'Loading municipal census metrics...' : residentsDescription}
         aside={<CivicBadge label={new Date().toLocaleDateString('en-PH', { month: 'long', day: 'numeric', year: 'numeric' })} tone="navy" />}
       >
         <div className="mt-4 flex flex-wrap gap-2">
@@ -137,7 +143,7 @@ export default function DashboardDesktop() {
           icon={Home}
           label="Total households"
           value={isLoading ? '—' : stats?.total_households.toLocaleString() ?? '0'}
-          hint="Approved and draft records in the current barangay."
+          hint={user.role === 'admin' ? 'Approved active households across all barangays.' : `Approved active households in ${scopeLabel}.`}
           tone="navy"
         />
         <CivicKpiCard

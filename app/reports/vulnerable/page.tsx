@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+import { getAnalyticsBarangayScope, getAnalyticsScopeLabel } from '@/lib/analytics-scope';
 import { getCurrentUser } from '@/lib/auth';
 import { getDashboardStats, getVulnerableResidents, getTopPuroksByVulnerability } from '@/lib/db/queries';
 import {
@@ -36,9 +37,10 @@ export default function VulnerableReportPage() {
         const u = user;
         async function load() {
             setIsLoading(true);
+            const analyticsBarangayId = getAnalyticsBarangayScope(u);
             const [s, puroks] = await Promise.all([
-                getDashboardStats(u.barangay_id),
-                getTopPuroksByVulnerability(u.barangay_id, 10),
+                getDashboardStats(analyticsBarangayId),
+                getTopPuroksByVulnerability(analyticsBarangayId, 10),
             ]);
             setStats(s);
             setTopPuroks(puroks);
@@ -52,7 +54,7 @@ export default function VulnerableReportPage() {
         setIsExporting(true);
         try {
             const { exportVulnerableReportPDF } = await import('@/lib/pdf/exportReport');
-            exportVulnerableReportPDF(stats, topPuroks, user.barangay_id ?? '');
+            exportVulnerableReportPDF(stats, topPuroks, user.role === 'admin' ? 'Municipal-wide' : (user.barangay_id ?? ''));
         } finally {
             setIsExporting(false);
         }
@@ -68,6 +70,7 @@ export default function VulnerableReportPage() {
     );
 
     const totalPop = stats?.total_population ?? 0;
+    const scopeLabel = getAnalyticsScopeLabel(user);
     const counts: Record<string, number> = {
         child: stats?.children_count ?? 0,
         senior: stats?.seniors_count ?? 0,
@@ -113,7 +116,7 @@ export default function VulnerableReportPage() {
                             </div>
                             <h1 className="text-3xl font-bold text-white mb-2">Vulnerable Groups Summary</h1>
                             <p className="text-rose-200 font-medium">{monthYear}</p>
-                            {user?.barangay_id && <p className="text-rose-300 text-sm mt-1">{user.barangay_id}</p>}
+                            {scopeLabel && <p className="text-rose-300 text-sm mt-1">{user.role === 'admin' ? 'Municipal-wide coverage' : scopeLabel}</p>}
                         </div>
                     </div>
 

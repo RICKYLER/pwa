@@ -113,6 +113,25 @@ export function calculateTopPuroksByPopulation(
     .slice(0, limit);
 }
 
+export function calculateTopPuroksByHouseholds(
+  households: Household[],
+  limit = 3,
+): Array<{ purok: string; households: number }> {
+  const counts = new Map<string, number>();
+
+  households.forEach((household) => {
+    counts.set(
+      household.purok_sitio,
+      (counts.get(household.purok_sitio) || 0) + 1,
+    );
+  });
+
+  return Array.from(counts.entries())
+    .map(([purok, households]) => ({ purok, households }))
+    .sort((left, right) => comparePurokCounts(left, right, (item) => item.households))
+    .slice(0, limit);
+}
+
 export function calculateTopPuroksByVulnerability(
   records: ResidentAnalyticsRecord[],
   limit = 3,

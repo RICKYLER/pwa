@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { AlertTriangle, Baby, FileText, Home, Package, ShieldAlert, Users } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { getAnalyticsBarangayScope, getAnalyticsScopeLabel } from '@/lib/analytics-scope';
 import { db } from '@/lib/db/indexeddb';
 import { getDashboardStats } from '@/lib/db/queries';
 import { getDefaultRouteForUser, hasPermission, restoreSession } from '@/lib/auth';
@@ -60,7 +61,7 @@ export default function DashboardMobile() {
       }
 
       setUser(restoredUser);
-      const dashboardStats = await getDashboardStats(restoredUser.barangay_id);
+      const dashboardStats = await getDashboardStats(getAnalyticsBarangayScope(restoredUser));
       setStats(dashboardStats);
       setError('');
     } catch (loadError) {
@@ -94,6 +95,10 @@ export default function DashboardMobile() {
   const totalVulnerable = stats
     ? stats.children_count + stats.seniors_count + stats.pwd_count + stats.pregnant_count + stats.chronic_count
     : 0;
+  const scopeLabel = getAnalyticsScopeLabel(user);
+  const heroDescription = user.role === 'admin'
+    ? `${(stats?.total_population ?? 0).toLocaleString()} residents are represented across all barangays.`
+    : `${(stats?.total_population ?? 0).toLocaleString()} residents are represented in ${scopeLabel}.`;
 
   const quickActions = [
     hasPermission('create_household') && { href: '/households/new', label: 'Add household', icon: Home },
@@ -116,7 +121,7 @@ export default function DashboardMobile() {
       <CivicHero
         eyebrow="Municipal Operations"
         title={`${greeting()}, ${user.name?.split(' ')[0] ?? 'there'}`}
-        description={isLoading ? 'Loading the latest civic overview...' : `${(stats?.total_population ?? 0).toLocaleString()} residents are represented in the current census.`}
+        description={isLoading ? 'Loading the latest civic overview...' : heroDescription}
         className="px-4 py-4 sm:px-5 sm:py-5"
       >
         <div className="mt-4 flex flex-wrap gap-2">
