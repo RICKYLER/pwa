@@ -7,14 +7,14 @@ import { PwaInstallProvider } from '@/hooks/usePwaInstall'
 import './globals.css'
 
 export const metadata: Metadata = {
-  title: 'MSWDO Census PWA',
-  description: 'Municipal household census management system with live Supabase realtime sync',
+  title: 'E-Mabini',
+  description: 'E-Mabini: A Dynamic Household Census and Disaster Management System',
   generator: 'v0.app',
-  applicationName: 'MSWDO Census',
+  applicationName: 'E-Mabini',
   appleWebApp: {
     capable: true,
     statusBarStyle: 'black-translucent',
-    title: 'MSWDO Census',
+    title: 'E-Mabini',
   },
   formatDetection: {
     telephone: true,

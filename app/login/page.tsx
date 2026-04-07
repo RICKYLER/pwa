@@ -171,13 +171,13 @@ export default function LoginPage() {
   return (
     <CivicAuthShell
       heroEyebrow="Civic access"
-      heroTitle="Secure municipal access for staff operations and resident services."
-      heroDescription="Use your assigned account to enter the MSWDO civic system. Staff accounts open operational tools, while verified residents continue to self-service registration and status tracking."
-      heroBadge="Barangay-1 service network"
+      heroTitle="E-Mabini: A Dynamic Household Census and Disaster Management System"
+      heroDescription="Use your assigned account to access E-Mabini. Staff accounts open operational tools, while verified residents continue to self-service registration and status tracking."
+      heroBadge="Municipality of Mabini"
       heroFootnote="Residents should use their own account. Staff credentials stay reserved for operations and review."
       panelEyebrow="Account sign in"
       panelTitle="Welcome back"
-      panelDescription="Sign in with your assigned account to continue. Staff users land on the operations workspace, and verified residents land on the self-service portal."
+      panelDescription="Sign in with your assigned account to continue in E-Mabini. Staff users land on the operations workspace, and verified residents land on the self-service portal."
       panelAside={
         <div className="inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-3.5 py-1.5 text-[11px] font-semibold uppercase tracking-[0.18em] text-emerald-700">
           <ShieldCheck className="h-4 w-4" />
@@ -205,10 +205,10 @@ export default function LoginPage() {
               </p>
               <p className="mt-1 leading-5 text-amber-900">
                 {sessionReason === 'account-removed'
-                  ? 'An administrator removed this resident account. Contact MSWDO if you need clarification.'
+                  ? 'An administrator removed this resident account. Contact the E-Mabini administrator if you need clarification.'
                   : sessionReason === 'account-deactivated'
-                    ? 'An administrator deactivated this account. Contact MSWDO if you need access restored.'
-                    : 'An administrator updated this account. Sign in again or contact MSWDO if you need help.'}
+                    ? 'An administrator deactivated this account. Contact the E-Mabini administrator if you need access restored.'
+                    : 'An administrator updated this account. Sign in again or contact the E-Mabini administrator if you need help.'}
               </p>
             </div>
           ) : null}

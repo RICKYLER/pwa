@@ -1,8 +1,8 @@
 {
-  "name": "MSWDO Household Census PWA",
-  "short_name": "MSWDO Census",
+  "name": "E-Mabini: A Dynamic Household Census and Disaster Management System",
+  "short_name": "E-Mabini",
   "id": "/",
-  "description": "Municipal household census management system with live Supabase realtime sync",
+  "description": "E-Mabini: A Dynamic Household Census and Disaster Management System",
   "start_url": "/",
   "display_override": ["window-controls-overlay", "standalone"],
   "display": "standalone",

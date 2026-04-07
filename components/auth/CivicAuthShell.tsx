@@ -67,7 +67,7 @@ export default function CivicAuthShell({
                   <ShieldCheck className="h-5 w-5" />
                 </div>
                 <div className="min-w-0">
-                  <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">MSWDO Civic Console</p>
+                  <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">E-Mabini</p>
                   <p className="truncate text-sm font-bold text-cyan-950">{heroBadge}</p>
                 </div>
               </div>
