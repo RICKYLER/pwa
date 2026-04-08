@@ -92,6 +92,7 @@ const DEMO_INCIDENT_SEEDS: DemoIncidentSeed[] = [
 ];
 
 const ACTIVE_DEMO_INCIDENT_SEEDS = DEMO_INCIDENT_SEEDS.filter((seed) => !seed.archived);
+const DEMO_INCIDENT_SEEDING_ENABLED = process.env.NEXT_PUBLIC_ENABLE_RESPONDER_DEMO_INCIDENTS === 'true';
 
 function resolveIncidentCoordinates(location: string) {
     return DEMO_INCIDENT_COORDINATES[location] ?? null;
@@ -273,8 +274,13 @@ export async function updateIncidentStatus(
  * Seed a few demo incidents so the Responder view always has data to show
  */
 export async function seedDemoIncidents(reporterId: string): Promise<void> {
+    // Keep demo seeding opt-in so opening `/responder` never mutates live deployments.
+    if (!DEMO_INCIDENT_SEEDING_ENABLED) {
+        return;
+    }
+
     try {
-        await bootstrapCurrentPathData(true);
+        await bootstrapCurrentPathData();
 
         const existing = await db.getAll<Incident>(STORE_NAMES.incidents);
         const existingDemoIds = new Set(
@@ -291,16 +297,20 @@ export async function seedDemoIncidents(reporterId: string): Promise<void> {
 
         for (const seed of missingSeeds) {
             try {
-                await createIncidentWithId(seed.id, {
-                    type: seed.type,
-                    location: seed.location,
-                    gps_lat: DEMO_INCIDENT_COORDINATES[seed.location]!.gps_lat,
-                    gps_lng: DEMO_INCIDENT_COORDINATES[seed.location]!.gps_lng,
-                    severity: seed.severity,
-                    status: seed.status,
-                    reported_by: reporterId,
-                    reported_at: new Date(Date.now() - (1000 * 60 * seed.minutesAgo)),
-                    description: seed.description,
+                await runServerMutation({
+                    action: 'create_incident',
+                    incident: {
+                        id: seed.id,
+                        type: seed.type,
+                        location: seed.location,
+                        gps_lat: DEMO_INCIDENT_COORDINATES[seed.location]!.gps_lat,
+                        gps_lng: DEMO_INCIDENT_COORDINATES[seed.location]!.gps_lng,
+                        severity: seed.severity,
+                        status: seed.status,
+                        reported_by: reporterId,
+                        reported_at: new Date(Date.now() - (1000 * 60 * seed.minutesAgo)),
+                        description: seed.description,
+                    },
                 });
             } catch (error) {
                 const message = error instanceof Error ? error.message.toLowerCase() : '';

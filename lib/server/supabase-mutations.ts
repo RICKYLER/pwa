@@ -1894,7 +1894,7 @@ export async function createIncidentOnServer(
       location: incident.location.trim(),
       gps_lat: typeof incident.gps_lat === 'number' ? incident.gps_lat : null,
       gps_lng: typeof incident.gps_lng === 'number' ? incident.gps_lng : null,
-      severity: incident.severity,
+      severity: incident.severity,  
       status: incident.status,
       reported_by: remoteActorId,
       reported_at: toIsoString(incident.reported_at) ?? new Date().toISOString(),
