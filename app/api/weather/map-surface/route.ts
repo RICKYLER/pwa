@@ -9,7 +9,8 @@ export const maxDuration = 60;
 
 const API_KEY = process.env.OPENWEATHER_API_KEY?.trim() ?? '';
 const SAMPLE_CACHE_TTL_MS = 10 * 60 * 1000;
-const MAX_EFFECTIVE_SURFACE_SAMPLES = 24;
+const MAX_EFFECTIVE_SURFACE_SAMPLES = 42;
+const SURFACE_SAMPLE_COORDINATE_PRECISION = 3;
 
 interface SurfacePointData {
   time: string | null;
@@ -182,8 +183,10 @@ async function fetchSurfacePointData(
   lng: number,
   unixTime: number | null,
 ) {
-  const sampledLat = round(lat, 2);
-  const sampledLng = round(lng, 2);
+  // Keep small-area wind surfaces distinct; 2-decimal rounding can collapse
+  // multiple barangay-scale grid points into the same forecast sample.
+  const sampledLat = round(lat, SURFACE_SAMPLE_COORDINATE_PRECISION);
+  const sampledLng = round(lng, SURFACE_SAMPLE_COORDINATE_PRECISION);
   const bucket = unixTime ? Math.round(unixTime / 3600) : 'live';
   const cacheKey = `${sampledLat}:${sampledLng}:${bucket}`;
   const cached = sampleCache.get(cacheKey);

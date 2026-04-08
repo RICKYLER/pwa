@@ -39,7 +39,7 @@ function toFlowVector(speedKph: number | null, directionDeg: number | null): Vec
   const safeSpeed = speedKph ?? 0;
   const toDirection = directionDeg === null ? 180 : (directionDeg + 180) % 360;
   const radians = ((toDirection - 90) * Math.PI) / 180;
-  const magnitude = clamp(safeSpeed / 28, 0.1, 2.6);
+  const magnitude = clamp(safeSpeed / 28, 0, 2.6);
 
   return {
     vx: Math.cos(radians) * magnitude,
@@ -190,7 +190,7 @@ export default function ResponderWindFieldOverlay({
         const field = sampleField(particle.x, particle.y);
         const previousX = particle.x;
         const previousY = particle.y;
-        const turbulence = 0.18;
+        const turbulence = clamp(field.speed / 500, 0.006, 0.08);
         const noiseX = (Math.random() - 0.5) * turbulence;
         const noiseY = (Math.random() - 0.5) * turbulence;
         const drift = (delta / 16) * particle.speed * 3.1;

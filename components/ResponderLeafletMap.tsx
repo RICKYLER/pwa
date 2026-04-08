@@ -179,6 +179,10 @@ function resolveWeatherTileOpacity(
     return normalizedOpacity;
   }
 
+  if (layerId === 'WND') {
+    return Math.min(normalizedOpacity, 0.38);
+  }
+
   if (layerId === 'PR0') {
     return Math.min(normalizedOpacity, 0.22);
   }
@@ -579,7 +583,10 @@ export default function ResponderLeafletMap({
   const weatherOverlayVisible = showWeather && activeLayerIds.length > 0;
   const windLayerSelected = activeLayerIds.includes('WND');
   const animatedWindReady = windLayerSelected && weatherOverlayVisible && Boolean(windSurfaceData);
-  const suppressStaticWindTiles = windLayerSelected && weatherOverlayVisible && !windSurfaceError;
+  const suppressStaticWindSpeedTile = windLayerSelected
+    && weatherOverlayVisible
+    && animatedWindReady
+    && !windSurfaceError;
   const windSurfaceGrid = useMemo(
     () => resolveWindSurfaceGrid(
       mapViewport?.width ?? 0,
@@ -941,7 +948,7 @@ export default function ResponderLeafletMap({
       const effectiveOpacity = resolveWeatherTileOpacity(typedLayerId, overlayOpacity, windLayerSelected);
       const shouldShowLayer = showWeather
         && activeLayerIds.includes(typedLayerId)
-        && !((typedLayerId === 'WND' || typedLayerId === 'WS10') && suppressStaticWindTiles);
+        && !(typedLayerId === 'WS10' && suppressStaticWindSpeedTile);
       const existingLayer = weatherTileRefs.current[typedLayerId];
 
       if (!shouldShowLayer) {
@@ -1016,7 +1023,7 @@ export default function ResponderLeafletMap({
     animatedWindReady,
     overlayOpacity,
     showWeather,
-    suppressStaticWindTiles,
+    suppressStaticWindSpeedTile,
     viewportReady,
     windLayerSelected,
   ]);
@@ -1078,7 +1085,7 @@ export default function ResponderLeafletMap({
     }
 
     const visibleWeatherLayerIds = showWeather
-      ? activeLayerIds.filter((layerId) => !((layerId === 'WND' || layerId === 'WS10') && suppressStaticWindTiles))
+      ? activeLayerIds.filter((layerId) => !(layerId === 'WS10' && suppressStaticWindSpeedTile))
       : [];
 
     const timeoutId = window.setTimeout(() => {
@@ -1138,7 +1145,7 @@ export default function ResponderLeafletMap({
     baseLayerReady,
     mapViewport,
     showWeather,
-    suppressStaticWindTiles,
+    suppressStaticWindSpeedTile,
   ]);
 
   useEffect(() => {
