@@ -432,6 +432,48 @@ async function deleteRowsByUserReference(
   }
 }
 
+async function nullUserReferenceRows(
+  tableName: UserLinkedTableName,
+  columnName: 'user_id' | 'synced_by',
+  userId: string,
+) {
+  const supabase = getSupabaseAdminClient();
+  const { error } = await supabase
+    .from(tableName)
+    .update({ [columnName]: null })
+    .eq(columnName, userId);
+
+  if (error) {
+    throw new Error(`Failed to detach ${tableName}: ${error.message}`);
+  }
+}
+
+async function clearLinkedHistoryForDeletedUser(userId: string) {
+  const linkedTables: Array<{ tableName: UserLinkedTableName; columnName: 'user_id' | 'synced_by' }> = [
+    { tableName: 'audit_logs', columnName: 'user_id' },
+    { tableName: 'sync_backups', columnName: 'synced_by' },
+  ];
+
+  for (const { tableName, columnName } of linkedTables) {
+    try {
+      await nullUserReferenceRows(tableName, columnName, userId);
+      continue;
+    } catch (error) {
+      if (isMissingTableError(error, tableName)) {
+        continue;
+      }
+    }
+
+    try {
+      await deleteRowsByUserReference(tableName, columnName, userId);
+    } catch (error) {
+      if (!isMissingTableError(error, tableName)) {
+        throw error;
+      }
+    }
+  }
+}
+
 async function getTokenByHash(
   tableName: 'password_setup_tokens' | 'email_verification_tokens',
   rawToken: string,
@@ -636,28 +678,15 @@ export async function deleteUserAccount(userId: string): Promise<void> {
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown delete failure.';
 
-    // Older schemas keep audit and sync history on restrictive foreign keys.
-    // For resident accounts, clear those history rows and retry the auth delete.
-    if (existing.role === 'resident' && message.toLowerCase().includes('database error deleting user')) {
-      try {
-        await deleteRowsByUserReference('audit_logs', 'user_id', userId);
-      } catch (cleanupError) {
-        if (!isMissingTableError(cleanupError, 'audit_logs')) {
-          throw cleanupError;
-        }
-      }
-
-      try {
-        await deleteRowsByUserReference('sync_backups', 'synced_by', userId);
-      } catch (cleanupError) {
-        if (!isMissingTableError(cleanupError, 'sync_backups')) {
-          throw cleanupError;
-        }
-      }
+    // Older schemas can still block auth deletion when user-linked history rows
+    // are on restrictive foreign keys. Detach those references when possible,
+    // and fall back to clearing the legacy rows before retrying.
+    if (message.toLowerCase().includes('database error deleting user')) {
+      await clearLinkedHistoryForDeletedUser(userId);
 
       await attemptDelete().catch((retryError) => {
         throw new Error(
-          `Failed to delete the Supabase user after resident cleanup: ${
+          `Failed to delete the Supabase user after linked-history cleanup: ${
             retryError instanceof Error ? retryError.message : 'unknown error'
           }`,
         );

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import {
@@ -15,9 +15,11 @@ import {
   Trash2,
   Users,
 } from 'lucide-react';
+import { getAnalyticsBarangayScope, getAnalyticsScopeLabel } from '@/lib/analytics-scope';
 import { getCurrentUser, hasPermission } from '@/lib/auth';
 import MapLocationPicker from '@/components/MapLocationPicker';
-import { createDistributionEvent } from '@/lib/db/distribution';
+import { isResidentOnlyTargetGroup } from '@/lib/distribution-audience';
+import { createDistributionEvent, getDistributionAudienceStats } from '@/lib/db/distribution';
 import { getInventoryItems, getPackageTemplates } from '@/lib/db/inventory';
 import type {
   DistributedItem,
@@ -101,6 +103,13 @@ export default function NewDistributionPage() {
   const [packageItemId, setPackageItemId] = useState('');
   const [selectedTemplateId, setSelectedTemplateId] = useState('');
   const [packageQuantity, setPackageQuantity] = useState('1');
+  const [audienceStats, setAudienceStats] = useState<{
+    totalHouseholds: number;
+    totalResidents: number;
+    eligibleHouseholds: number;
+    eligibleResidents: number;
+  } | null>(null);
+  const [isLoadingAudience, setIsLoadingAudience] = useState(false);
 
   const [form, setForm] = useState({
     event_name: '',
@@ -115,6 +124,24 @@ export default function NewDistributionPage() {
     status: 'planned' as const,
     notes: '',
   });
+
+  const loadAudiencePreview = useCallback(async () => {
+    if (!user) {
+      setAudienceStats(null);
+      return;
+    }
+
+    try {
+      setIsLoadingAudience(true);
+      const stats = await getDistributionAudienceStats({
+        barangay_id: getAnalyticsBarangayScope(user),
+        target_group: form.target_group,
+      });
+      setAudienceStats(stats);
+    } finally {
+      setIsLoadingAudience(false);
+    }
+  }, [form.target_group, user]);
 
   useEffect(() => {
     if (!user || !hasPermission('manage_inventory')) {
@@ -146,6 +173,33 @@ export default function NewDistributionPage() {
     loadInventory();
   }, [user, router]);
 
+  useEffect(() => {
+    if (!user || !hasPermission('manage_inventory')) {
+      return;
+    }
+
+    void loadAudiencePreview();
+  }, [loadAudiencePreview, user]);
+
+  useEffect(() => {
+    if (!user) {
+      return;
+    }
+
+    function handleDataChanged(event: CustomEvent<{ table: string }>) {
+      if (!['households', 'residents', 'vulnerability_flags'].includes(event.detail.table)) {
+        return;
+      }
+
+      void loadAudiencePreview();
+    }
+
+    window.addEventListener('mswdo-data-changed', handleDataChanged as EventListener);
+    return () => {
+      window.removeEventListener('mswdo-data-changed', handleDataChanged as EventListener);
+    };
+  }, [loadAudiencePreview, user]);
+
   const selectedInventoryItem = useMemo(
     () => inventoryItems.find((item) => item.id === packageItemId),
     [inventoryItems, packageItemId],
@@ -154,9 +208,34 @@ export default function NewDistributionPage() {
     () => packageTemplates.find((template) => template.id === selectedTemplateId) ?? null,
     [packageTemplates, selectedTemplateId],
   );
+  const selectedTargetGroupLabel = useMemo(
+    () => TARGET_GROUPS.find((group) => group.value === form.target_group)?.label ?? 'All',
+    [form.target_group],
+  );
+  const audienceScopeLabel = useMemo(
+    () => getAnalyticsScopeLabel(user),
+    [user],
+  );
 
   function setField<K extends keyof typeof form>(field: K, value: (typeof form)[K]) {
     setForm((current) => ({ ...current, [field]: value }));
+    setError('');
+  }
+
+  function handleTargetScopeSelect(nextScope: DistributionTargetScope) {
+    if (nextScope === 'household' && isResidentOnlyTargetGroup(form.target_group)) {
+      return;
+    }
+
+    setField('target_scope', nextScope);
+  }
+
+  function handleTargetGroupSelect(nextGroup: DistributionTargetGroup) {
+    setForm((current) => ({
+      ...current,
+      target_group: nextGroup,
+      target_scope: isResidentOnlyTargetGroup(nextGroup) ? 'resident' : current.target_scope,
+    }));
     setError('');
   }
 
@@ -435,16 +514,21 @@ export default function NewDistributionPage() {
                 {TARGET_SCOPES.map((scope) => {
                   const Icon = scope.icon;
                   const active = form.target_scope === scope.value;
+                  const disabled =
+                    scope.value === 'household' && isResidentOnlyTargetGroup(form.target_group);
 
                   return (
                     <button
                       key={scope.value}
                       type="button"
-                      onClick={() => setField('target_scope', scope.value)}
+                      onClick={() => handleTargetScopeSelect(scope.value)}
+                      disabled={disabled}
                       className={`rounded-2xl border p-4 text-left transition-all ${
                         active
                           ? 'border-emerald-300 bg-emerald-50 text-emerald-700 shadow-sm'
-                          : 'border-slate-200 bg-slate-50 text-slate-600 hover:border-slate-300'
+                          : disabled
+                            ? 'cursor-not-allowed border-slate-200 bg-slate-100 text-slate-300'
+                            : 'border-slate-200 bg-slate-50 text-slate-600 hover:border-slate-300'
                       }`}
                     >
                       <div className="flex items-center gap-2">
@@ -458,7 +542,7 @@ export default function NewDistributionPage() {
                         <div>
                           <p className="text-sm font-bold">{scope.label}</p>
                           <p className="mt-0.5 text-[11px] leading-tight opacity-80">
-                            {scope.desc}
+                            {disabled ? 'Senior, PWD, pregnant, and minor use resident release.' : scope.desc}
                           </p>
                         </div>
                       </div>
@@ -478,7 +562,7 @@ export default function NewDistributionPage() {
                       <button
                         key={group.value}
                         type="button"
-                        onClick={() => setField('target_group', group.value)}
+                        onClick={() => handleTargetGroupSelect(group.value)}
                         className={`rounded-xl border px-3 py-3 text-left transition-all ${
                           active
                             ? 'border-slate-900 bg-slate-900 text-white shadow-sm'
@@ -496,6 +580,43 @@ export default function NewDistributionPage() {
                       </button>
                     );
                   })}
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-emerald-200 bg-emerald-50/60 p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-xs font-bold uppercase tracking-wider text-emerald-700">
+                      Audience Preview
+                    </p>
+                    <p className="mt-1 text-[11px] leading-5 text-emerald-800/80">
+                      {isResidentOnlyTargetGroup(form.target_group)
+                        ? `${selectedTargetGroupLabel} is a member-based audience, so this event will use resident release automatically across ${audienceScopeLabel}.`
+                        : form.target_group === 'all'
+                          ? `This event will show all ${form.target_scope === 'resident' ? 'residents' : 'eligible households'} across ${audienceScopeLabel}.`
+                          : `This event will only show ${selectedTargetGroupLabel.toLowerCase()} ${form.target_scope === 'resident' ? 'residents' : 'households with matching members'} across ${audienceScopeLabel}.`}
+                    </p>
+                  </div>
+                  {isLoadingAudience ? <Loader2 className="h-4 w-4 animate-spin text-emerald-600" /> : null}
+                </div>
+
+                <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                  <div className="rounded-xl border border-emerald-100 bg-white/80 px-3 py-3">
+                    <p className="text-2xl font-bold text-slate-900">
+                      {audienceStats?.eligibleHouseholds ?? 0}
+                    </p>
+                    <p className="text-xs font-medium text-slate-500">Matching Households</p>
+                  </div>
+                  <div className="rounded-xl border border-emerald-100 bg-white/80 px-3 py-3">
+                    <p className="text-2xl font-bold text-slate-900">
+                      {audienceStats?.eligibleResidents ?? 0}
+                    </p>
+                    <p className="text-xs font-medium text-slate-500">
+                      {form.target_group === 'all'
+                        ? 'Residents in Scope'
+                        : `${selectedTargetGroupLabel} Matches`}
+                    </p>
+                  </div>
                 </div>
               </div>
             </div>

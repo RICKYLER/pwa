@@ -26,6 +26,7 @@ import {
   OPENWEATHER_WIND_PARTICLE_LAYER_ID,
   type OpenWeatherMapLayerId,
 } from '@/lib/openweather-map-layers';
+import { fetchJsonWithCache } from '@/lib/client-fetch-cache';
 
 interface OpenWeatherMapControlProps {
   map: google.maps.Map | null;
@@ -121,6 +122,10 @@ function roundCoordinate(value: number) {
   return Math.round(value * 100) / 100;
 }
 
+function roundViewportEdge(value: number) {
+  return Math.round(value * 1000) / 1000;
+}
+
 function clamp(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max);
 }
@@ -179,6 +184,20 @@ function windDirectionLabel(direction: number | null, cardinal: string | null) {
 
 function isSurfaceLayerId(layerId: OpenWeatherMapLayerId): layerId is SurfaceLayerId {
   return layerId === 'APM' || layerId === 'CL';
+}
+
+function isSameViewport(
+  current: MapViewportSnapshot | null,
+  next: MapViewportSnapshot,
+) {
+  return current !== null
+    && current.north === next.north
+    && current.south === next.south
+    && current.east === next.east
+    && current.west === next.west
+    && current.zoom === next.zoom
+    && current.heading === next.heading
+    && current.tilt === next.tilt;
 }
 
 function hexToRgb(hex: string) {
@@ -739,15 +758,17 @@ export default function OpenWeatherMapControl({
 
       const northEast = bounds.getNorthEast();
       const southWest = bounds.getSouthWest();
-      setMapViewport({
-        north: Math.round(northEast.lat() * 1000) / 1000,
-        south: Math.round(southWest.lat() * 1000) / 1000,
-        east: Math.round(northEast.lng() * 1000) / 1000,
-        west: Math.round(southWest.lng() * 1000) / 1000,
+      const nextViewport = {
+        north: roundViewportEdge(northEast.lat()),
+        south: roundViewportEdge(southWest.lat()),
+        east: roundViewportEdge(northEast.lng()),
+        west: roundViewportEdge(southWest.lng()),
         zoom,
         heading: map.getHeading?.() ?? 0,
         tilt: map.getTilt?.() ?? 0,
-      });
+      };
+
+      setMapViewport((current) => (isSameViewport(current, nextViewport) ? current : nextViewport));
     };
 
     syncCenter();
@@ -820,18 +841,13 @@ export default function OpenWeatherMapControl({
           lat: String(coords.lat),
           lng: String(coords.lng),
         });
-
-        const response = await fetch(`/api/weather?${params.toString()}`, {
-          cache: 'no-store',
-        });
-        const payload = await response.json();
-
-        if (!response.ok) {
-          throw new Error(payload?.error || `HTTP ${response.status}`);
-        }
+        const payload = await fetchJsonWithCache<FieldResponseWeatherPayload>(
+          `/api/weather?${params.toString()}`,
+          { ttlMs: 10 * 60 * 1000 },
+        );
 
         if (cancelled) return;
-        setWeather(payload as FieldResponseWeatherPayload);
+        setWeather(payload);
         setWeatherError(null);
       } catch (error) {
         if (cancelled) return;
@@ -907,17 +923,13 @@ export default function OpenWeatherMapControl({
           params.set('date', String(selectedUnixTime));
         }
 
-        const response = await fetch(`/api/weather/map-surface?${params.toString()}`, {
-          cache: 'no-store',
-        });
-        const payload = await response.json();
-
-        if (!response.ok) {
-          throw new Error(payload?.error || `HTTP ${response.status}`);
-        }
+        const payload = await fetchJsonWithCache<MapWeatherSurfacePayload>(
+          `/api/weather/map-surface?${params.toString()}`,
+          { ttlMs: 5 * 60 * 1000 },
+        );
 
         if (!cancelled) {
-          setSurfaceData(payload as MapWeatherSurfacePayload);
+          setSurfaceData(payload);
         }
       } catch (error) {
         if (!cancelled) {

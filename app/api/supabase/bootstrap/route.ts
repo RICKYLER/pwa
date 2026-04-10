@@ -207,7 +207,7 @@ async function loadInventoryBundle() {
   };
 }
 
-async function loadDistributionEvents() {
+async function loadDistributionEvents(user: User) {
   const supabase = getSupabaseAdminClient();
   const { data, error } = await supabase
     .from('distribution_events')
@@ -227,7 +227,12 @@ async function loadDistributionEvents() {
   }));
 
   if (!creatorIdsNeedingBarangay.length) {
-    return events;
+    return user.role === 'admin'
+      ? events
+      : events.filter((event) => (
+        typeof event.barangay_id === 'string'
+        && event.barangay_id.trim() === user.barangay_id
+      ));
   }
 
   const { data: creatorProfiles, error: creatorProfilesError } = await supabase
@@ -246,7 +251,7 @@ async function loadDistributionEvents() {
     }
   }
 
-  return events.map((event) => {
+  const hydratedEvents = events.map((event) => {
     const existingBarangayId = typeof event.barangay_id === 'string' ? event.barangay_id.trim() : '';
     if (existingBarangayId) {
       return event;
@@ -260,6 +265,15 @@ async function loadDistributionEvents() {
       barangay_id: derivedBarangayId,
     };
   });
+
+  if (user.role === 'admin') {
+    return hydratedEvents;
+  }
+
+  return hydratedEvents.filter((event) => (
+    typeof event.barangay_id === 'string'
+    && event.barangay_id.trim() === user.barangay_id
+  ));
 }
 
 async function loadDistributionRecords() {
@@ -445,7 +459,7 @@ async function buildBootstrapPayload(
   const auditLogsPromise = wants('audit_logs') ? loadAuditLogs(remoteUserId, user.role) : null;
   const incidentsPromise = wants('incidents') && canReadIncidents ? loadIncidents() : null;
   const distributionEventsPromise = wants('distribution_events') && canReadDistributionEvents
-    ? loadDistributionEvents()
+    ? loadDistributionEvents(user)
     : null;
   const distributionRecordsPromise = wants('distribution_records') && canReadDistributionRecords
     ? loadDistributionRecords()

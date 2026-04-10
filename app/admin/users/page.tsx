@@ -42,6 +42,8 @@ interface ToastState {
   msg: string;
 }
 
+type AccountAction = 'delete' | 'deactivate' | 'reactivate';
+
 function normalizeUser(user: User): User {
   return {
     ...user,
@@ -60,7 +62,7 @@ export default function AdminUsersPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [toast, setToast] = useState<ToastState | null>(null);
-  const [actionConfirm, setActionConfirm] = useState<{ userId: string; action: 'delete' | 'deactivate' } | null>(null);
+  const [actionConfirm, setActionConfirm] = useState<{ userId: string; action: AccountAction } | null>(null);
   const [actionLoadingId, setActionLoadingId] = useState<string | null>(null);
 
   const usersByRole = useMemo(() => (
@@ -201,7 +203,7 @@ export default function AdminUsersPage() {
 
       setActionConfirm(null);
       await loadUsers();
-      showToast('success', 'Account deleted.');
+      showToast('success', 'Account permanently deleted.');
     } catch (error) {
       showToast('error', error instanceof Error ? error.message : 'Unable to delete account.');
     } finally {
@@ -515,7 +517,7 @@ export default function AdminUsersPage() {
                         <div className="flex flex-shrink-0 items-center gap-1">
                           {confirmAction === 'delete' ? (
                             <>
-                              <span className="mr-1 text-xs font-semibold text-red-600">Delete?</span>
+                              <span className="mr-1 text-xs font-semibold text-red-600">Permanent delete?</span>
                               <button
                                 onClick={() => {
                                   void handleDelete(user.id);
@@ -523,7 +525,7 @@ export default function AdminUsersPage() {
                                 disabled={isActionLoading}
                                 className="rounded-lg bg-red-600 px-2.5 py-1.5 text-xs font-bold text-white transition hover:bg-red-700"
                               >
-                                {isActionLoading ? 'Deleting…' : 'Yes'}
+                                {isActionLoading ? 'Deleting…' : 'Delete forever'}
                               </button>
                               <button
                                 onClick={() => setActionConfirm(null)}
@@ -551,6 +553,25 @@ export default function AdminUsersPage() {
                                 No
                               </button>
                             </>
+                          ) : confirmAction === 'reactivate' ? (
+                            <>
+                              <span className="mr-1 text-xs font-semibold text-emerald-700">Reactivate?</span>
+                              <button
+                                onClick={() => {
+                                  void handleStatusChange(user, 'active');
+                                }}
+                                disabled={isActionLoading}
+                                className="rounded-lg bg-emerald-600 px-2.5 py-1.5 text-xs font-bold text-white transition hover:bg-emerald-700"
+                              >
+                                {isActionLoading ? 'Saving…' : 'Yes'}
+                              </button>
+                              <button
+                                onClick={() => setActionConfirm(null)}
+                                className="rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs font-medium text-slate-500"
+                              >
+                                No
+                              </button>
+                            </>
                           ) : (
                             <>
                               <button
@@ -562,13 +583,10 @@ export default function AdminUsersPage() {
                               {!isMe && !isResidentAccount && (
                                 isInactive ? (
                                   <button
-                                    onClick={() => {
-                                      void handleStatusChange(user, 'active');
-                                    }}
-                                    disabled={isActionLoading}
-                                    className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700 transition hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-60"
+                                    onClick={() => setActionConfirm({ userId: user.id, action: 'reactivate' })}
+                                    className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700 transition hover:bg-emerald-100"
                                   >
-                                    {isActionLoading ? 'Saving…' : 'Reactivate'}
+                                    Reactivate
                                   </button>
                                 ) : (
                                   <button
@@ -579,12 +597,14 @@ export default function AdminUsersPage() {
                                   </button>
                                 )
                               )}
-                              {!isMe && isResidentAccount && (
+                              {!isMe && (
                                 <button
                                   onClick={() => setActionConfirm({ userId: user.id, action: 'delete' })}
-                                  className="rounded-xl p-2 text-slate-400 transition hover:bg-red-50 hover:text-red-600"
+                                  className="inline-flex items-center gap-1 rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-semibold text-red-700 transition hover:bg-red-100"
+                                  title="Permanently delete account"
                                 >
-                                  <Trash2 className="h-4 w-4" />
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                  Permanent Delete
                                 </button>
                               )}
                             </>

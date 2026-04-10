@@ -19,6 +19,7 @@ import {
   getWeatherPaneName,
   type ResponderBaseMapLayerId,
 } from '@/lib/responder-map-config';
+import { fetchJsonWithCache } from '@/lib/client-fetch-cache';
 
 declare global {
   interface Window {
@@ -166,6 +167,25 @@ let leafletRuntimePromise: Promise<LeafletRuntime> | null = null;
 
 function clampNumber(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max);
+}
+
+function roundViewportValue(value: number, digits = 4) {
+  const factor = 10 ** digits;
+  return Math.round(value * factor) / factor;
+}
+
+function isSameViewport(
+  current: MapViewportSnapshot | null,
+  next: MapViewportSnapshot,
+) {
+  return current !== null
+    && current.north === next.north
+    && current.south === next.south
+    && current.east === next.east
+    && current.west === next.west
+    && current.width === next.width
+    && current.height === next.height
+    && current.zoom === next.zoom;
 }
 
 function resolveWeatherTileOpacity(
@@ -655,15 +675,16 @@ export default function ResponderLeafletMap({
 
     const syncViewport = () => {
       const bounds = map.getBounds();
-      setMapViewport({
-        north: bounds.getNorth(),
-        south: bounds.getSouth(),
-        east: bounds.getEast(),
-        west: bounds.getWest(),
+      const nextViewport = {
+        north: roundViewportValue(bounds.getNorth()),
+        south: roundViewportValue(bounds.getSouth()),
+        east: roundViewportValue(bounds.getEast()),
+        west: roundViewportValue(bounds.getWest()),
         width: containerRef.current?.clientWidth ?? 0,
         height: containerRef.current?.clientHeight ?? 0,
         zoom: map.getZoom(),
-      });
+      };
+      setMapViewport((current) => (isSameViewport(current, nextViewport) ? current : nextViewport));
     };
 
     const handleMapClick = () => {
@@ -1043,15 +1064,16 @@ export default function ResponderLeafletMap({
       Object.values(weatherTileRefs.current).forEach((layer) => layer?.redraw?.());
 
       const bounds = map.getBounds();
-      setMapViewport({
-        north: bounds.getNorth(),
-        south: bounds.getSouth(),
-        east: bounds.getEast(),
-        west: bounds.getWest(),
+      const nextViewport = {
+        north: roundViewportValue(bounds.getNorth()),
+        south: roundViewportValue(bounds.getSouth()),
+        east: roundViewportValue(bounds.getEast()),
+        west: roundViewportValue(bounds.getWest()),
         width: containerRef.current?.clientWidth ?? 0,
         height: containerRef.current?.clientHeight ?? 0,
         zoom: map.getZoom(),
-      });
+      };
+      setMapViewport((current) => (isSameViewport(current, nextViewport) ? current : nextViewport));
     };
 
     const animationFrame = window.requestAnimationFrame(refreshMapCanvas);
@@ -1169,18 +1191,16 @@ export default function ResponderLeafletMap({
           cols: String(windSurfaceGrid.cols),
           rows: String(windSurfaceGrid.rows),
         });
-        const response = await fetch(`/api/weather/map-surface?${params.toString()}`, {
-          cache: 'no-store',
-          signal: controller.signal,
-        });
-        const payload = await response.json();
-
-        if (!response.ok) {
-          throw new Error(typeof payload?.error === 'string' ? payload.error : 'Could not load wind flow.');
-        }
+        const payload = await fetchJsonWithCache<WindSurfacePayload>(
+          `/api/weather/map-surface?${params.toString()}`,
+          {
+            signal: controller.signal,
+            ttlMs: 5 * 60 * 1000,
+          },
+        );
 
         if (!controller.signal.aborted) {
-          setWindSurfaceData(payload as WindSurfacePayload);
+          setWindSurfaceData(payload);
         }
       } catch (error) {
         if (controller.signal.aborted) return;

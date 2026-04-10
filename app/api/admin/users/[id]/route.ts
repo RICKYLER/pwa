@@ -116,13 +116,6 @@ export async function DELETE(
       return NextResponse.json({ error: 'User not found.' }, { status: 404 });
     }
 
-    if (existingUser.role !== 'resident') {
-      return NextResponse.json(
-        { error: 'Staff accounts must be deactivated instead of deleted.' },
-        { status: 400 },
-      );
-    }
-
     await deleteUserAccount(id);
 
     if (existingUser.email) {
@@ -133,7 +126,9 @@ export async function DELETE(
           entity_type: 'user',
           entity_id: id,
           changes: {
+            deleted_user_name: existingUser.name,
             deleted_user_email: existingUser.email,
+            deleted_user_role: existingUser.role,
             source: 'admin_delete_user',
           },
         });

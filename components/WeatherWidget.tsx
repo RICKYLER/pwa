@@ -24,6 +24,7 @@ import {
   Sunset,
   Wind,
 } from 'lucide-react';
+import { clearCachedJson, fetchJsonWithCache } from '@/lib/client-fetch-cache';
 import type { FieldResponseWeatherPayload } from '@/lib/weather';
 
 const REFRESH_INTERVAL_MS = 15 * 60 * 1000;
@@ -208,8 +209,9 @@ export default function WeatherWidget({
   const [isMinimized, setIsMinimized] = useState(defaultMinimized);
   const [containerWidth, setContainerWidth] = useState<number | null>(null);
   const [isMinimizeOverride, setIsMinimizeOverride] = useState(false);
+  const locationKey = `${lat ?? 'none'}:${lng ?? 'none'}`;
 
-  async function fetchWeather() {
+  async function fetchWeather(forceRefresh = false) {
     setLoading(true);
     setError(null);
 
@@ -217,17 +219,15 @@ export default function WeatherWidget({
       const params = new URLSearchParams();
       if (lat !== undefined) params.set('lat', String(lat));
       if (lng !== undefined) params.set('lng', String(lng));
-
-      const response = await fetch(`/api/weather?${params.toString()}`, {
-        cache: 'no-store',
-      });
-      const payload = await response.json();
-
-      if (!response.ok) {
-        throw new Error(payload?.error || `HTTP ${response.status}`);
+      const url = `/api/weather?${params.toString()}`;
+      if (forceRefresh) {
+        clearCachedJson(url);
       }
+      const payload = await fetchJsonWithCache<FieldResponseWeatherPayload>(url, {
+        ttlMs: REFRESH_INTERVAL_MS,
+      });
 
-      setWeather(payload as FieldResponseWeatherPayload);
+      setWeather(payload);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Could not load weather';
       setError(friendlyWeatherError(message));
@@ -237,10 +237,9 @@ export default function WeatherWidget({
   }
 
   useEffect(() => {
-    fetchWeather();
-    const interval = setInterval(fetchWeather, REFRESH_INTERVAL_MS);
-    return () => clearInterval(interval);
-  }, [lat, lng]);
+    if (isMinimized) return;
+    void fetchWeather();
+  }, [isMinimized, locationKey]);
 
   useEffect(() => {
     if (mode !== 'full') {
@@ -277,6 +276,33 @@ export default function WeatherWidget({
     setIsMinimized(isTightFull);
   }, [autoMinimizeInTightPanel, isMinimizeOverride, isTightFull, mode]);
 
+  if (isMinimized && !weather) {
+    return (
+      <div className={`overflow-hidden rounded-[28px] border border-slate-200/90 bg-white shadow-[0_20px_60px_-40px_rgba(15,23,42,0.42)] ${className}`}>
+        <div className="flex items-center justify-between gap-3 px-4 py-3">
+          <div>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-[#5870a8]">
+              OpenWeather Forecast
+            </p>
+            <p className="mt-1 text-sm text-slate-600">
+              Weather is paused to save API usage.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={handleToggleMinimized}
+            className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 shadow-sm"
+            aria-expanded={!isMinimized}
+            title="Open weather"
+          >
+            <ChevronDown className="h-4 w-4" />
+            Open
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   if (loading && !weather) {
     return (
       <div className={`flex items-center gap-2 rounded-3xl border border-sky-100 bg-sky-50 px-4 py-3 ${className}`}>
@@ -293,7 +319,7 @@ export default function WeatherWidget({
         <span className="text-xs text-rose-700">{error}</span>
         <button
           type="button"
-          onClick={fetchWeather}
+          onClick={() => fetchWeather(true)}
           className="ml-auto inline-flex items-center gap-1 text-xs font-semibold text-rose-700"
         >
           <RefreshCw className="h-3.5 w-3.5" />
@@ -571,7 +597,7 @@ export default function WeatherWidget({
                 <div className="flex items-center gap-1.5">
                   <button
                     type="button"
-                    onClick={fetchWeather}
+                    onClick={() => fetchWeather(true)}
                     disabled={loading}
                     className="rounded-full border border-slate-200 bg-white p-2 text-slate-600 shadow-sm transition hover:bg-slate-50"
                     title="Refresh weather"
@@ -680,7 +706,7 @@ export default function WeatherWidget({
               <div className={isTightFull ? 'grid w-full grid-cols-2 gap-2' : 'grid w-full grid-cols-2 gap-2 sm:flex sm:w-auto sm:flex-none'}>
                 <button
                   type="button"
-                  onClick={fetchWeather}
+                  onClick={() => fetchWeather(true)}
                   disabled={loading}
                   className="inline-flex items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50"
                   title="Refresh weather"

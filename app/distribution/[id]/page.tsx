@@ -1,6 +1,6 @@
 'use client';
 
-import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import {
@@ -8,12 +8,12 @@ import {
   Calendar,
   CheckCircle2,
   Clock,
+  Download,
   Edit2,
   FileText,
   Loader2,
   MapPin,
   Package,
-  Printer,
   Save,
   Search,
   ShieldCheck,
@@ -22,10 +22,16 @@ import {
   Users,
   X,
 } from 'lucide-react';
+import { getAnalyticsBarangayScope, getAnalyticsScopeLabel } from '@/lib/analytics-scope';
 import { getCurrentUser, hasPermission } from '@/lib/auth';
 import MapLocationPicker from '@/components/MapLocationPicker';
 import MapView from '@/components/MapView';
 import {
+  coerceDistributionTargetScope,
+  isResidentOnlyTargetGroup,
+} from '@/lib/distribution-audience';
+import {
+  getDistributionAudienceStats,
   getDistributionEvent,
   getDistributionRecords,
   getEligibleHouseholdsForEvent,
@@ -129,6 +135,12 @@ export default function DistributionDetailPage() {
   const [eligibleHouseholds, setEligibleHouseholds] = useState<Household[]>([]);
   const [eligibleResidents, setEligibleResidents] = useState<Resident[]>([]);
   const [matchedResidentsForHouseholds, setMatchedResidentsForHouseholds] = useState<Resident[]>([]);
+  const [audienceStats, setAudienceStats] = useState<{
+    totalHouseholds: number;
+    totalResidents: number;
+    eligibleHouseholds: number;
+    eligibleResidents: number;
+  } | null>(null);
   const [allHouseholds, setAllHouseholds] = useState<Household[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isEditing, setIsEditing] = useState(false);
@@ -142,6 +154,7 @@ export default function DistributionDetailPage() {
   const [receivedByName, setReceivedByName] = useState('');
   const [releaseNotes, setReleaseNotes] = useState('');
   const [isQuickUpdating, setIsQuickUpdating] = useState(false);
+  const [isExportingPdf, setIsExportingPdf] = useState(false);
 
   const [editStatus, setEditStatus] = useState<DistributionEvent['status']>('planned');
   const [editTargetScope, setEditTargetScope] = useState<DistributionTargetScope>('household');
@@ -151,9 +164,18 @@ export default function DistributionDetailPage() {
   const [editCoords, setEditCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [mapCoords, setMapCoords] = useState<{ lat: number; lng: number } | null>(null);
   const geocodedRef = useRef(false);
+  const latestLoadRequestIdRef = useRef(0);
   const [mapsReady, setMapsReady] = useState(false);
 
   const deferredSearch = useDeferredValue(releaseSearch.trim().toLowerCase());
+  const audienceBarangayScope = useMemo(
+    () => getAnalyticsBarangayScope(user),
+    [user],
+  );
+  const audienceScopeLabel = useMemo(
+    () => getAnalyticsScopeLabel(user),
+    [user],
+  );
 
   useEffect(() => {
     if (typeof window !== 'undefined' && window.google) {
@@ -171,52 +193,82 @@ export default function DistributionDetailPage() {
     return () => clearInterval(id);
   }, []);
 
-  useEffect(() => {
-    if (!user || !hasPermission('view_reports')) {
-      router.push('/distribution');
-      return;
-    }
+  const load = useCallback(async (background = false) => {
+    const requestId = ++latestLoadRequestIdRef.current;
 
-    void load();
-  }, [user, router, params.id]);
-
-  async function load(background = false) {
     if (!background) {
       setIsLoading(true);
     }
 
     try {
-      const distributionEvent = await getDistributionEvent(params.id);
+      let distributionEvent = await getDistributionEvent(params.id);
       if (!distributionEvent) {
         router.push('/distribution');
         return;
       }
 
-      const [distributionRecords, stockItems, households] = await Promise.all([
+      const normalizedTargetScope = coerceDistributionTargetScope(
+        distributionEvent.target_scope,
+        distributionEvent.target_group,
+      );
+      if (normalizedTargetScope !== distributionEvent.target_scope) {
+        try {
+          distributionEvent = await updateDistributionEvent(distributionEvent.id, {
+            target_scope: normalizedTargetScope,
+          });
+        } catch (repairError) {
+          console.error('Failed to repair distribution target scope:', repairError);
+          distributionEvent = {
+            ...distributionEvent,
+            target_scope: normalizedTargetScope,
+          };
+        }
+      }
+
+      const audienceBarangayId = user?.role === 'admin'
+        ? undefined
+        : audienceBarangayScope ?? distributionEvent.barangay_id;
+
+      const [distributionRecords, stockItems, households, nextAudienceStats] = await Promise.all([
         getDistributionRecords(distributionEvent.id),
         getInventoryItems(),
         getHouseholds({ status: 'active', registration_status: 'approved' }),
+        getDistributionAudienceStats({
+          barangay_id: audienceBarangayId,
+          target_group: distributionEvent.target_group,
+        }),
       ]);
 
       const [householdTargets, residentTargets, householdMatchResidents] = await Promise.all([
         distributionEvent.target_scope === 'household'
-          ? getEligibleHouseholdsForEvent(distributionEvent)
+          ? getEligibleHouseholdsForEvent({
+              barangay_id: audienceBarangayId,
+              target_group: distributionEvent.target_group,
+            })
           : Promise.resolve([]),
         distributionEvent.target_scope === 'resident'
-          ? getEligibleResidentsForEvent(distributionEvent)
+          ? getEligibleResidentsForEvent({
+              barangay_id: audienceBarangayId,
+              target_group: distributionEvent.target_group,
+            })
           : Promise.resolve([]),
         distributionEvent.target_scope === 'household' && distributionEvent.target_group !== 'all'
           ? getEligibleResidentsForEvent({
-              barangay_id: distributionEvent.barangay_id,
+              barangay_id: audienceBarangayId,
               target_group: distributionEvent.target_group,
             })
           : Promise.resolve([]),
       ]);
 
+      if (requestId !== latestLoadRequestIdRef.current) {
+        return;
+      }
+
       setEvent(distributionEvent);
       setRecords(distributionRecords);
       setInventoryItems(stockItems);
       setAllHouseholds(households);
+      setAudienceStats(nextAudienceStats);
       setEligibleHouseholds(householdTargets);
       setEligibleResidents(residentTargets);
       setMatchedResidentsForHouseholds(householdMatchResidents);
@@ -242,11 +294,39 @@ export default function DistributionDetailPage() {
     } catch (loadError) {
       console.error(loadError);
     } finally {
-      if (!background) {
+      if (!background && requestId === latestLoadRequestIdRef.current) {
         setIsLoading(false);
       }
     }
-  }
+  }, [audienceBarangayScope, params.id, router, user]);
+
+  useEffect(() => {
+    if (!user || !hasPermission('view_reports')) {
+      router.push('/distribution');
+      return;
+    }
+
+    void load();
+  }, [load, router, user]);
+
+  useEffect(() => {
+    if (!user) {
+      return;
+    }
+
+    function handleDataChanged(event: CustomEvent<{ table: string }>) {
+      if (!['households', 'residents', 'vulnerability_flags', 'distribution_events', 'distribution_records', 'inventory_items'].includes(event.detail.table)) {
+        return;
+      }
+
+      void load(true);
+    }
+
+    window.addEventListener('mswdo-data-changed', handleDataChanged as EventListener);
+    return () => {
+      window.removeEventListener('mswdo-data-changed', handleDataChanged as EventListener);
+    };
+  }, [load, user]);
 
   useEffect(() => {
     if (!mapsReady || !event || mapCoords || geocodedRef.current) return;
@@ -474,12 +554,6 @@ export default function DistributionDetailPage() {
     }
   }
 
-  function handlePrint() {
-    if (typeof window !== 'undefined') {
-      window.print();
-    }
-  }
-
   if (!user) return null;
 
   if (isLoading) {
@@ -520,12 +594,34 @@ export default function DistributionDetailPage() {
       ? Boolean(selectedHousehold && servedHouseholdIds.has(selectedHousehold.id))
       : Boolean(selectedResident && servedResidentIds.has(selectedResident.id));
   const hasLowPackageStock = packageStock.some((item) => item.lowStock);
+  const audienceMatchCount =
+    event.target_scope === 'household'
+      ? event.target_group === 'all'
+        ? audienceStats?.eligibleHouseholds ?? eligibleHouseholds.length
+        : audienceStats?.eligibleResidents ?? matchedResidentsForHouseholds.length
+      : audienceStats?.eligibleResidents ?? eligibleResidents.length;
+  const audienceMatchLabel =
+    event.target_scope === 'household'
+      ? event.target_group === 'all'
+        ? 'Eligible Households'
+        : `${TARGET_GROUP_LABELS[event.target_group]} Matches`
+      : event.target_group === 'all'
+        ? 'Eligible Residents'
+        : `${TARGET_GROUP_LABELS[event.target_group]} Matches`;
+  const audienceMatchSupport =
+    event.target_scope === 'household'
+      ? event.target_group === 'all'
+        ? `${audienceStats?.totalResidents ?? eligibleResidents.length} resident${(audienceStats?.totalResidents ?? eligibleResidents.length) !== 1 ? 's' : ''} covered across ${audienceScopeLabel}`
+        : `${audienceStats?.eligibleHouseholds ?? eligibleHouseholds.length} matched household${(audienceStats?.eligibleHouseholds ?? eligibleHouseholds.length) !== 1 ? 's' : ''}`
+      : `${audienceStats?.eligibleHouseholds ?? eligibleHouseholds.length} household${(audienceStats?.eligibleHouseholds ?? eligibleHouseholds.length) !== 1 ? 's' : ''} covered across ${audienceScopeLabel}`;
   const targetCountLabel =
     event.target_scope === 'household'
       ? event.target_group === 'all'
-        ? `${eligibleHouseholds.length} household${eligibleHouseholds.length !== 1 ? 's' : ''}`
+        ? `${eligibleHouseholds.length} eligible household${eligibleHouseholds.length !== 1 ? 's' : ''}`
         : `${eligibleHouseholds.length} household${eligibleHouseholds.length !== 1 ? 's' : ''} · ${matchedResidentsForHouseholds.length} ${TARGET_GROUP_LABELS[event.target_group].toLowerCase()} match${matchedResidentsForHouseholds.length !== 1 ? 'es' : ''}`
-      : `${eligibleResidents.length} resident${eligibleResidents.length !== 1 ? 's' : ''}`;
+      : event.target_group === 'all'
+        ? `${eligibleResidents.length} eligible resident${eligibleResidents.length !== 1 ? 's' : ''}`
+        : `${eligibleResidents.length} ${TARGET_GROUP_LABELS[event.target_group].toLowerCase()} resident${eligibleResidents.length !== 1 ? 's' : ''}`;
   const releaseDisabled =
     !canManage ||
     event.status === 'completed' ||
@@ -533,6 +629,36 @@ export default function DistributionDetailPage() {
     hasLowPackageStock ||
     selectedAlreadyServed ||
     (event.target_scope === 'household' ? !selectedHousehold : !selectedResident);
+
+  async function handleExportPdf() {
+    if (!event || !user) {
+      return;
+    }
+
+    setIsExportingPdf(true);
+
+    try {
+      const { exportDistributionReportPDF } = await import('@/lib/pdf/exportDistributionReport');
+      exportDistributionReportPDF({
+        event,
+        records,
+        packageStock,
+        summary: {
+          householdsServed: servedHouseholdIds.size,
+          residentsServed: servedResidentIds.size,
+          totalUnitsReleased,
+          fullPackagesLeft: remainingPackageReleases,
+          audienceMatchCount,
+          audienceMatchLabel,
+          audienceMatchSupport,
+          scopeLabel: audienceScopeLabel,
+          generatedBy: user.name,
+        },
+      });
+    } finally {
+      setIsExportingPdf(false);
+    }
+  }
 
   return (
     <div className="min-h-screen bg-slate-50">
@@ -551,15 +677,6 @@ export default function DistributionDetailPage() {
               {TARGET_GROUP_LABELS[event.target_group]}
             </p>
           </div>
-
-          <button
-            type="button"
-            onClick={handlePrint}
-            className="hidden items-center gap-1.5 rounded-xl border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 transition-all hover:bg-slate-50 sm:inline-flex"
-          >
-            <Printer className="h-3.5 w-3.5" />
-            Print Report
-          </button>
 
           {canManage && event.status !== 'completed' && records.length > 0 ? (
             <button
@@ -714,11 +831,22 @@ export default function DistributionDetailPage() {
                 </label>
                 <select
                   value={editTargetScope}
-                  onChange={(e) => setEditTargetScope(e.target.value as DistributionTargetScope)}
+                  onChange={(e) => {
+                    const nextScope = e.target.value as DistributionTargetScope;
+                    if (nextScope === 'household' && isResidentOnlyTargetGroup(editTargetGroup)) {
+                      return;
+                    }
+
+                    setEditTargetScope(nextScope);
+                  }}
                   className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-500/30"
                 >
                   {TARGET_SCOPE_OPTIONS.map((scope) => (
-                    <option key={scope.value} value={scope.value}>
+                    <option
+                      key={scope.value}
+                      value={scope.value}
+                      disabled={scope.value === 'household' && isResidentOnlyTargetGroup(editTargetGroup)}
+                    >
                       {scope.label}
                     </option>
                   ))}
@@ -734,7 +862,14 @@ export default function DistributionDetailPage() {
                 </label>
                 <select
                   value={editTargetGroup}
-                  onChange={(e) => setEditTargetGroup(e.target.value as DistributionTargetGroup)}
+                  onChange={(e) => {
+                    const nextGroup = e.target.value as DistributionTargetGroup;
+                    setEditTargetGroup(nextGroup);
+
+                    if (isResidentOnlyTargetGroup(nextGroup)) {
+                      setEditTargetScope('resident');
+                    }
+                  }}
                   className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-500/30"
                 >
                   {TARGET_GROUP_OPTIONS.map((group) => (
@@ -903,6 +1038,17 @@ export default function DistributionDetailPage() {
                 <div>
                   <p className="text-2xl font-bold text-slate-900">{remainingPackageReleases}</p>
                   <p className="text-xs font-medium text-slate-400">Full Packages Left</p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-3 rounded-2xl border border-slate-200/60 bg-white p-4 shadow-sm sm:col-span-2">
+                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-rose-50">
+                  <ShieldCheck className="h-5 w-5 text-rose-600" />
+                </div>
+                <div>
+                  <p className="text-2xl font-bold text-slate-900">{audienceMatchCount}</p>
+                  <p className="text-xs font-medium text-slate-400">{audienceMatchLabel}</p>
+                  <p className="mt-0.5 text-[11px] text-slate-400">{audienceMatchSupport}</p>
                 </div>
               </div>
             </div>
@@ -1195,9 +1341,24 @@ export default function DistributionDetailPage() {
                 Beneficiary list, released package contents, and timestamps.
               </p>
             </div>
-            <span className="text-xs text-slate-400">
-              {records.length} record{records.length !== 1 ? 's' : ''}
-            </span>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={handleExportPdf}
+                disabled={isExportingPdf}
+                className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 transition-all hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {isExportingPdf ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Download className="h-3.5 w-3.5" />
+                )}
+                Download PDF
+              </button>
+              <span className="text-xs text-slate-400">
+                {records.length} record{records.length !== 1 ? 's' : ''}
+              </span>
+            </div>
           </div>
 
           {records.length === 0 ? (

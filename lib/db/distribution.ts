@@ -1,6 +1,10 @@
 import { db, STORE_NAMES } from './indexeddb';
 import { runServerMutation } from '@/lib/mutations';
 import { bootstrapCurrentPathData } from '@/lib/supabase/route-bootstrap';
+import {
+  coerceDistributionTargetScope,
+  resolveDistributionAudienceMatches,
+} from '@/lib/distribution-audience';
 import { getHouseholds } from './households';
 import { getInventoryItem } from './inventory';
 import { getResidents } from './residents';
@@ -13,7 +17,6 @@ import type {
   DistributionTargetScope,
   Household,
   Resident,
-  VulnerabilityFlags,
 } from './schema';
 
 function generateId(prefix = 'dist'): string {
@@ -74,36 +77,13 @@ function normalizeDistributionRecord(record: DistributionRecord): DistributionRe
   };
 }
 
-function matchesTargetGroup(
-  resident: Resident,
-  flags: VulnerabilityFlags | undefined,
-  targetGroup: DistributionTargetGroup,
-): boolean {
-  switch (targetGroup) {
-    case 'all':
-      return true;
-    case 'senior':
-      return Boolean(flags?.is_senior);
-    case 'pwd':
-      return Boolean(flags?.is_pwd);
-    case 'pregnant':
-      return Boolean(flags?.is_pregnant);
-    case 'minor':
-      return Boolean(flags?.is_child);
-    case 'low_income':
-      return Boolean(flags?.is_low_income || resident.income_level === 'low');
-    default:
-      return true;
-  }
-}
-
 function countDistributedUnits(items: DistributedItem[]): number {
   return items.reduce((sum, item) => sum + item.quantity, 0);
 }
 
-async function getScopedHouseholdsAndResidents(barangayId: string) {
+async function getScopedHouseholdsAndResidents(barangayId?: string | null) {
   const households = await getHouseholds({
-    barangay_id: barangayId,
+    ...(barangayId ? { barangay_id: barangayId } : {}),
     status: 'active',
     registration_status: 'approved',
   });
@@ -114,6 +94,32 @@ async function getScopedHouseholdsAndResidents(barangayId: string) {
   return {
     households,
     residents,
+  };
+}
+
+export async function getDistributionAudienceStats(config: {
+  barangay_id?: string | null;
+  target_group: DistributionTargetGroup;
+}): Promise<{
+  totalHouseholds: number;
+  totalResidents: number;
+  eligibleHouseholds: number;
+  eligibleResidents: number;
+}> {
+  const { households, residents } = await getScopedHouseholdsAndResidents(config.barangay_id);
+  const flagsMap = await getCurrentVulnerabilityFlagsMapForResidents(residents, households);
+  const matches = resolveDistributionAudienceMatches({
+    households,
+    residents,
+    flagsByResidentId: flagsMap,
+    targetGroup: config.target_group,
+  });
+
+  return {
+    totalHouseholds: households.length,
+    totalResidents: residents.length,
+    eligibleHouseholds: matches.eligibleHouseholds.length,
+    eligibleResidents: matches.eligibleResidents.length,
   };
 }
 
@@ -169,11 +175,13 @@ export async function createDistributionEvent(
       created_by: userId,
       syncStatus: 'synced',
     });
+    const normalizedTargetScope = coerceDistributionTargetScope(event.target_scope, event.target_group);
 
     await runServerMutation({
       action: 'create_distribution_event',
       event: {
         ...event,
+        target_scope: normalizedTargetScope,
         event_name: event.event_name.trim(),
         location: event.location.trim(),
         notes: event.notes?.trim() || undefined,
@@ -202,11 +210,31 @@ export async function updateDistributionEvent(
   updates: Partial<DistributionEvent>,
 ): Promise<DistributionEvent> {
   try {
+    const currentEvent = await getDistributionEvent(id);
+    if (!currentEvent) {
+      throw new Error('Distribution event not found.');
+    }
+
+    const nextTargetGroup = updates.target_group ?? currentEvent.target_group;
+    const nextTargetScope = coerceDistributionTargetScope(
+      updates.target_scope ?? currentEvent.target_scope,
+      nextTargetGroup,
+    );
+    const shouldPersistTargetConfig = updates.target_group !== undefined
+      || updates.target_scope !== undefined
+      || nextTargetScope !== currentEvent.target_scope;
+
     await runServerMutation({
       action: 'update_distribution_event',
       eventId: id,
       updates: {
         ...updates,
+        ...(shouldPersistTargetConfig
+          ? {
+              target_group: nextTargetGroup,
+              target_scope: nextTargetScope,
+            }
+          : {}),
         event_name: typeof updates.event_name === 'string' ? updates.event_name.trim() : updates.event_name,
         location: typeof updates.location === 'string' ? updates.location.trim() : updates.location,
         notes: typeof updates.notes === 'string' ? (updates.notes.trim() || null) : updates.notes,
@@ -232,7 +260,7 @@ export async function updateDistributionEvent(
  */
 export async function getEligibleBeneficiaries(
   eventType: string,
-  barangayId: string,
+  barangayId?: string | null,
 ): Promise<Resident[]> {
   const inferred = inferTargetConfig(eventType);
   return getEligibleResidentsForEvent({
@@ -242,20 +270,18 @@ export async function getEligibleBeneficiaries(
 }
 
 export async function getEligibleResidentsForEvent(config: {
-  barangay_id: string;
+  barangay_id?: string | null;
   target_group: DistributionTargetGroup;
 }): Promise<Resident[]> {
   try {
-    if (!config.barangay_id) {
-      return [];
-    }
-
     const { households, residents } = await getScopedHouseholdsAndResidents(config.barangay_id);
     const flagsMap = await getCurrentVulnerabilityFlagsMapForResidents(residents, households);
-
-    return residents.filter((resident) =>
-      matchesTargetGroup(resident, flagsMap.get(resident.id), config.target_group),
-    );
+    return resolveDistributionAudienceMatches({
+      households,
+      residents,
+      flagsByResidentId: flagsMap,
+      targetGroup: config.target_group,
+    }).eligibleResidents;
   } catch (error) {
     console.error('Error getting eligible residents:', error);
     throw error;
@@ -263,34 +289,18 @@ export async function getEligibleResidentsForEvent(config: {
 }
 
 export async function getEligibleHouseholdsForEvent(config: {
-  barangay_id: string;
+  barangay_id?: string | null;
   target_group: DistributionTargetGroup;
 }): Promise<Household[]> {
   try {
-    if (!config.barangay_id) {
-      return [];
-    }
-
     const { households, residents } = await getScopedHouseholdsAndResidents(config.barangay_id);
     const flagsMap = await getCurrentVulnerabilityFlagsMapForResidents(residents, households);
-
-    if (config.target_group === 'all') {
-      return households;
-    }
-
-    const householdResidentMap = new Map<string, Resident[]>();
-    residents.forEach((resident) => {
-      const entry = householdResidentMap.get(resident.household_id) ?? [];
-      entry.push(resident);
-      householdResidentMap.set(resident.household_id, entry);
-    });
-
-    return households.filter((household) => {
-      const members = householdResidentMap.get(household.id) ?? [];
-      return members.some((resident) =>
-        matchesTargetGroup(resident, flagsMap.get(resident.id), config.target_group),
-      );
-    });
+    return resolveDistributionAudienceMatches({
+      households,
+      residents,
+      flagsByResidentId: flagsMap,
+      targetGroup: config.target_group,
+    }).eligibleHouseholds;
   } catch (error) {
     console.error('Error getting eligible households:', error);
     throw error;
@@ -304,9 +314,14 @@ export async function recordDistribution(
   data: Omit<DistributionRecord, 'id' | 'timestamp' | 'syncStatus'>,
 ): Promise<DistributionRecord> {
   try {
-    const event = await getDistributionEvent(data.event_id);
+    let event = await getDistributionEvent(data.event_id);
     if (!event) {
       throw new Error('Distribution event not found');
+    }
+
+    const normalizedTargetScope = coerceDistributionTargetScope(event.target_scope, event.target_group);
+    if (normalizedTargetScope !== event.target_scope) {
+      event = await updateDistributionEvent(event.id, { target_scope: normalizedTargetScope });
     }
 
     if (event.target_scope === 'household' && !data.household_id) {
@@ -360,9 +375,14 @@ export async function releaseDistributionPackage(params: {
   received_by_name?: string;
   notes?: string;
 }): Promise<DistributionRecord> {
-  const event = await getDistributionEvent(params.event_id);
+  let event = await getDistributionEvent(params.event_id);
   if (!event) {
     throw new Error('Distribution event not found');
+  }
+
+  const normalizedTargetScope = coerceDistributionTargetScope(event.target_scope, event.target_group);
+  if (normalizedTargetScope !== event.target_scope) {
+    event = await updateDistributionEvent(event.id, { target_scope: normalizedTargetScope });
   }
 
   if (event.package_items.length === 0) {
