@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import {
+  AlertTriangle,
   ArrowLeft,
   Calendar,
   CheckCircle2,
@@ -18,8 +19,12 @@ import {
 import { getAnalyticsBarangayScope, getAnalyticsScopeLabel } from '@/lib/analytics-scope';
 import { getCurrentUser, hasPermission } from '@/lib/auth';
 import MapLocationPicker from '@/components/MapLocationPicker';
-import { isResidentOnlyTargetGroup } from '@/lib/distribution-audience';
-import { createDistributionEvent, getDistributionAudienceStats } from '@/lib/db/distribution';
+import { buildDistributionInventorySummary } from '@/lib/distribution-insights';
+import {
+  createDistributionEvent,
+  getDistributionAudienceStats,
+  type DistributionAudienceStats,
+} from '@/lib/db/distribution';
 import { getInventoryItems, getPackageTemplates } from '@/lib/db/inventory';
 import type {
   DistributedItem,
@@ -103,12 +108,7 @@ export default function NewDistributionPage() {
   const [packageItemId, setPackageItemId] = useState('');
   const [selectedTemplateId, setSelectedTemplateId] = useState('');
   const [packageQuantity, setPackageQuantity] = useState('1');
-  const [audienceStats, setAudienceStats] = useState<{
-    totalHouseholds: number;
-    totalResidents: number;
-    eligibleHouseholds: number;
-    eligibleResidents: number;
-  } | null>(null);
+  const [audienceStats, setAudienceStats] = useState<DistributionAudienceStats | null>(null);
   const [isLoadingAudience, setIsLoadingAudience] = useState(false);
 
   const [form, setForm] = useState({
@@ -124,6 +124,14 @@ export default function NewDistributionPage() {
     status: 'planned' as const,
     notes: '',
   });
+  const audienceScopeLabel = useMemo(
+    () => getAnalyticsScopeLabel(user),
+    [user],
+  );
+  const packageInventorySummary = useMemo(
+    () => buildDistributionInventorySummary(form.package_items, inventoryItems),
+    [form.package_items, inventoryItems],
+  );
 
   const loadAudiencePreview = useCallback(async () => {
     if (!user) {
@@ -136,12 +144,14 @@ export default function NewDistributionPage() {
       const stats = await getDistributionAudienceStats({
         barangay_id: getAnalyticsBarangayScope(user),
         target_group: form.target_group,
+        target_scope: form.target_scope,
+        scope_label: audienceScopeLabel,
       });
       setAudienceStats(stats);
     } finally {
       setIsLoadingAudience(false);
     }
-  }, [form.target_group, user]);
+  }, [audienceScopeLabel, form.target_group, form.target_scope, user]);
 
   useEffect(() => {
     if (!user || !hasPermission('manage_inventory')) {
@@ -212,10 +222,6 @@ export default function NewDistributionPage() {
     () => TARGET_GROUPS.find((group) => group.value === form.target_group)?.label ?? 'All',
     [form.target_group],
   );
-  const audienceScopeLabel = useMemo(
-    () => getAnalyticsScopeLabel(user),
-    [user],
-  );
 
   function setField<K extends keyof typeof form>(field: K, value: (typeof form)[K]) {
     setForm((current) => ({ ...current, [field]: value }));
@@ -223,10 +229,6 @@ export default function NewDistributionPage() {
   }
 
   function handleTargetScopeSelect(nextScope: DistributionTargetScope) {
-    if (nextScope === 'household' && isResidentOnlyTargetGroup(form.target_group)) {
-      return;
-    }
-
     setField('target_scope', nextScope);
   }
 
@@ -234,7 +236,7 @@ export default function NewDistributionPage() {
     setForm((current) => ({
       ...current,
       target_group: nextGroup,
-      target_scope: isResidentOnlyTargetGroup(nextGroup) ? 'resident' : current.target_scope,
+      target_scope: current.target_scope,
     }));
     setError('');
   }
@@ -355,6 +357,15 @@ export default function NewDistributionPage() {
 
     if (form.package_items.length === 0) {
       setError('Add at least one package item before creating the event.');
+      return;
+    }
+
+    if (packageInventorySummary.blocking_items.length > 0) {
+      setError(
+        `Restock required before creating this event: ${packageInventorySummary.blocking_items
+          .map((item) => item.item_name)
+          .join(', ')}.`,
+      );
       return;
     }
 
@@ -514,21 +525,16 @@ export default function NewDistributionPage() {
                 {TARGET_SCOPES.map((scope) => {
                   const Icon = scope.icon;
                   const active = form.target_scope === scope.value;
-                  const disabled =
-                    scope.value === 'household' && isResidentOnlyTargetGroup(form.target_group);
 
                   return (
                     <button
                       key={scope.value}
                       type="button"
                       onClick={() => handleTargetScopeSelect(scope.value)}
-                      disabled={disabled}
                       className={`rounded-2xl border p-4 text-left transition-all ${
                         active
                           ? 'border-emerald-300 bg-emerald-50 text-emerald-700 shadow-sm'
-                          : disabled
-                            ? 'cursor-not-allowed border-slate-200 bg-slate-100 text-slate-300'
-                            : 'border-slate-200 bg-slate-50 text-slate-600 hover:border-slate-300'
+                          : 'border-slate-200 bg-slate-50 text-slate-600 hover:border-slate-300'
                       }`}
                     >
                       <div className="flex items-center gap-2">
@@ -542,7 +548,9 @@ export default function NewDistributionPage() {
                         <div>
                           <p className="text-sm font-bold">{scope.label}</p>
                           <p className="mt-0.5 text-[11px] leading-tight opacity-80">
-                            {disabled ? 'Senior, PWD, pregnant, and minor use resident release.' : scope.desc}
+                            {scope.value === 'household'
+                              ? 'One package per qualifying household, even when only some members match.'
+                              : scope.desc}
                           </p>
                         </div>
                       </div>
@@ -590,10 +598,10 @@ export default function NewDistributionPage() {
                       Audience Preview
                     </p>
                     <p className="mt-1 text-[11px] leading-5 text-emerald-800/80">
-                      {isResidentOnlyTargetGroup(form.target_group)
-                        ? `${selectedTargetGroupLabel} is a member-based audience, so this event will use resident release automatically across ${audienceScopeLabel}.`
-                        : form.target_group === 'all'
+                      {form.target_group === 'all'
                           ? `This event will show all ${form.target_scope === 'resident' ? 'residents' : 'eligible households'} across ${audienceScopeLabel}.`
+                        : form.target_scope === 'household'
+                          ? `This event will show households in ${audienceScopeLabel} that have at least one ${selectedTargetGroupLabel.toLowerCase()} member.`
                           : `This event will only show ${selectedTargetGroupLabel.toLowerCase()} ${form.target_scope === 'resident' ? 'residents' : 'households with matching members'} across ${audienceScopeLabel}.`}
                     </p>
                   </div>
@@ -603,13 +611,13 @@ export default function NewDistributionPage() {
                 <div className="mt-3 grid gap-2 sm:grid-cols-2">
                   <div className="rounded-xl border border-emerald-100 bg-white/80 px-3 py-3">
                     <p className="text-2xl font-bold text-slate-900">
-                      {audienceStats?.eligibleHouseholds ?? 0}
+                      {audienceStats?.eligibility_summary.eligible_households ?? 0}
                     </p>
                     <p className="text-xs font-medium text-slate-500">Matching Households</p>
                   </div>
                   <div className="rounded-xl border border-emerald-100 bg-white/80 px-3 py-3">
                     <p className="text-2xl font-bold text-slate-900">
-                      {audienceStats?.eligibleResidents ?? 0}
+                      {audienceStats?.eligibility_summary.eligible_residents ?? 0}
                     </p>
                     <p className="text-xs font-medium text-slate-500">
                       {form.target_group === 'all'
@@ -618,6 +626,12 @@ export default function NewDistributionPage() {
                     </p>
                   </div>
                 </div>
+
+                {audienceStats?.eligibility_summary.match_support ? (
+                  <p className="mt-3 text-[11px] text-emerald-900/75">
+                    {audienceStats.eligibility_summary.match_support}
+                  </p>
+                ) : null}
               </div>
             </div>
 
@@ -712,9 +726,11 @@ export default function NewDistributionPage() {
               ) : null}
 
               {form.package_items.length > 0 ? (
-                <div className="space-y-2">
+                <div className="space-y-3">
                   {form.package_items.map((item) => {
-                    const stock = inventoryItems.find((inventoryItem) => inventoryItem.id === item.item_id);
+                    const stockLine = packageInventorySummary.lines.find(
+                      (inventoryItem) => inventoryItem.item_id === item.item_id,
+                    );
 
                     return (
                       <div
@@ -727,7 +743,9 @@ export default function NewDistributionPage() {
                           </p>
                           <p className="mt-0.5 text-xs text-slate-400">
                             Package: {item.quantity} {item.unit}
-                            {stock ? ` · Stock left now: ${stock.quantity_available} ${stock.unit}` : ''}
+                            {stockLine
+                              ? ` · Stock left now: ${stockLine.available} ${stockLine.unit}`
+                              : ''}
                           </p>
                         </div>
                         <button
@@ -741,6 +759,43 @@ export default function NewDistributionPage() {
                       </div>
                     );
                   })}
+
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-4">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div>
+                        <p className="text-xs font-bold uppercase tracking-wider text-slate-500">
+                          Inventory Readiness
+                        </p>
+                        <p className="mt-1 text-sm font-semibold text-slate-900">
+                          {packageInventorySummary.available_packages} full package
+                          {packageInventorySummary.available_packages !== 1 ? 's' : ''} available
+                        </p>
+                      </div>
+                      {packageInventorySummary.low_stock_items.length > 0 ? (
+                        <span className="rounded-full bg-amber-100 px-3 py-1 text-[11px] font-semibold text-amber-700">
+                          {packageInventorySummary.low_stock_items.length} low stock
+                        </span>
+                      ) : null}
+                    </div>
+
+                    {packageInventorySummary.blocking_items.length > 0 ? (
+                      <div className="mt-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-3 text-sm text-rose-700">
+                        <div className="flex items-start gap-2">
+                          <AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0" />
+                          <p>
+                            This package cannot be fulfilled yet. Restock{' '}
+                            {packageInventorySummary.blocking_items.map((item) => item.item_name).join(', ')}.
+                          </p>
+                        </div>
+                      </div>
+                    ) : null}
+
+                    {packageInventorySummary.low_stock_items.length > 0 ? (
+                      <p className="mt-3 text-[11px] text-amber-700">
+                        Low stock after release warning: {packageInventorySummary.low_stock_items.map((item) => item.item_name).join(', ')}.
+                      </p>
+                    ) : null}
+                  </div>
                 </div>
               ) : (
                 <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-6 text-center text-sm text-slate-400">
@@ -786,7 +841,7 @@ export default function NewDistributionPage() {
             <div className="flex gap-3 pb-8">
               <button
                 type="submit"
-                disabled={isSubmitting || isLoadingInventory}
+                disabled={isSubmitting || isLoadingInventory || packageInventorySummary.blocking_items.length > 0}
                 className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-600 py-3 text-sm font-bold text-white shadow-lg shadow-emerald-500/25 transition-all hover:-translate-y-px hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60 disabled:translate-y-0"
               >
                 {isSubmitting ? (

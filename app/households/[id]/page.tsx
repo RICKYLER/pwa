@@ -4,13 +4,14 @@ import { useEffect, useState } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import Link from 'next/link';
 import { getCurrentUser, hasPermission } from '@/lib/auth';
-import { getHousehold, updateHousehold } from '@/lib/db/households';
+import { getAllPuroks, getHousehold, updateHousehold } from '@/lib/db/households';
 import {
   getResidentsInHousehold, createResident, updateResident,
   deleteResident, getResidentVulnerabilityFlags,
 } from '@/lib/db/residents';
 import { calculateAge } from '@/lib/db/vulnerability';
 import { Household, Resident, VulnerabilityFlags } from '@/lib/db/schema';
+import { mergePurokOptions, normalizePurokSitio } from '@/lib/geocoding';
 import {
   ArrowLeft, Plus, Edit2, Trash2, Save, X, User, MapPin,
   Phone, Home, CheckCircle2, AlertTriangle, ChevronDown, Navigation,
@@ -20,7 +21,6 @@ import { LocationPicker } from '@/components/LocationPicker';
 interface ResidentWithFlags { resident: Resident; flags: VulnerabilityFlags | undefined; }
 
 const CIVIL_STATUSES = ['single', 'married', 'widowed', 'separated'] as const;
-const PUROK_OPTIONS = ['Purok 1', 'Purok 2', 'Purok 3', 'Purok 4', 'Purok 5', 'Purok 6', 'Purok 7', 'Sitio A', 'Sitio B', 'Sitio C'];
 const HOUSEHOLD_STATUSES = ['active', 'moved_out', 'deceased'] as const;
 type HHStatus = typeof HOUSEHOLD_STATUSES[number];
 
@@ -51,6 +51,7 @@ export default function HouseholdDetailsPage() {
     gps_long: undefined as number | undefined,
   });
   const [isSavingHH, setIsSavingHH] = useState(false);
+  const [purokOptions, setPurokOptions] = useState<string[]>([]);
 
   // Resident add / edit state
   const [showAddResident, setShowAddResident] = useState(false);
@@ -80,11 +81,13 @@ export default function HouseholdDetailsPage() {
       setIsLoading(true);
       const hh = await getHousehold(householdId);
       if (!hh) { router.push('/households'); return; }
+      const nextPurokOptions = await getAllPuroks(hh.barangay_id);
       setHousehold(hh);
+      setPurokOptions(mergePurokOptions([...nextPurokOptions, hh.purok_sitio]));
       setHhForm({
         head_name: hh.head_name,
         street_address: hh.street_address ?? '',
-        purok_sitio: hh.purok_sitio,
+        purok_sitio: normalizePurokSitio(hh.purok_sitio),
         contact_number: hh.contact_number ?? '',
         status: hh.status as typeof HOUSEHOLD_STATUSES[number],
         gps_lat: hh.gps_lat,
@@ -98,7 +101,8 @@ export default function HouseholdDetailsPage() {
 
   // ── Household save ──────────────────────────────────────────────────────────
   async function handleSaveHousehold() {
-    if (!household || !hhForm.head_name.trim() || !hhForm.purok_sitio) {
+    const normalizedPurok = normalizePurokSitio(hhForm.purok_sitio);
+    if (!household || !hhForm.head_name.trim() || !normalizedPurok) {
       showToast('Please fill in all required fields.', 'error');
       return;
     }
@@ -107,13 +111,15 @@ export default function HouseholdDetailsPage() {
       await updateHousehold(household.id, {
         head_name: hhForm.head_name.trim(),
         street_address: hhForm.street_address.trim(),
-        purok_sitio: hhForm.purok_sitio,
+        purok_sitio: normalizedPurok,
         contact_number: hhForm.contact_number.trim(),
         status: hhForm.status,
         gps_lat: hhForm.gps_lat,
         gps_long: hhForm.gps_long,
       });
-      setHousehold(prev => prev ? { ...prev, ...hhForm } : prev);
+      setPurokOptions((current) => mergePurokOptions([...current, normalizedPurok]));
+      setHhForm((current) => ({ ...current, purok_sitio: normalizedPurok }));
+      setHousehold(prev => prev ? { ...prev, ...hhForm, purok_sitio: normalizedPurok } : prev);
       setIsEditingHH(false);
       showToast('Household updated successfully.');
     } catch { showToast('Failed to save changes.', 'error'); } finally { setIsSavingHH(false); }
@@ -302,18 +308,23 @@ export default function HouseholdDetailsPage() {
                   {/* Purok */}
                   <div>
                     <label className="block text-xs font-semibold text-slate-500 mb-1.5 uppercase tracking-wide">Purok / Sitio *</label>
-                    <div className="relative">
-                      <select value={hhForm.purok_sitio}
-                        onChange={e => setHhForm(f => ({ ...f, purok_sitio: e.target.value }))}
-                        className="w-full appearance-none px-3 pr-8 py-2.5 border border-slate-200 rounded-xl text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-400 transition-all">
-                        <option value="">Select purok…</option>
-                        {PUROK_OPTIONS.map(p => <option key={p} value={p}>{p}</option>)}
-                        {!PUROK_OPTIONS.includes(hhForm.purok_sitio) && hhForm.purok_sitio && (
-                          <option value={hhForm.purok_sitio}>{hhForm.purok_sitio}</option>
-                        )}
-                      </select>
-                      <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
-                    </div>
+                    <input
+                      type="text"
+                      list="household-detail-purok-options"
+                      value={hhForm.purok_sitio}
+                      onChange={e => setHhForm(f => ({ ...f, purok_sitio: e.target.value }))}
+                      onBlur={e => setHhForm(f => ({ ...f, purok_sitio: normalizePurokSitio(e.target.value) }))}
+                      className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-400 transition-all"
+                      placeholder="Type the purok or sitio"
+                    />
+                    <datalist id="household-detail-purok-options">
+                      {purokOptions.map((option) => (
+                        <option key={option} value={option} />
+                      ))}
+                    </datalist>
+                    <p className="mt-1 text-xs text-slate-400">
+                      You can type a new purok directly. Saved puroks will appear in suggestions.
+                    </p>
                   </div>
 
                   {/* Contact */}

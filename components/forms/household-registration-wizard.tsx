@@ -156,6 +156,33 @@ function isEmailValid(value: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
 }
 
+function safeText(value?: string): string {
+  return typeof value === 'string' ? value : '';
+}
+
+function buildRegistrationFormState(
+  initialValues?: Partial<RegistrationFormState>,
+): RegistrationFormState {
+  return {
+    ...EMPTY_FORM,
+    head_name: safeText(initialValues?.head_name),
+    contact_number: safeText(initialValues?.contact_number),
+    applicant_email: safeText(initialValues?.applicant_email),
+    municipality: safeText(initialValues?.municipality) || EMPTY_FORM.municipality,
+    barangay_name: safeText(initialValues?.barangay_name),
+    purok_sitio: safeText(initialValues?.purok_sitio),
+    street_address: safeText(initialValues?.street_address),
+    landmark_directions: safeText(initialValues?.landmark_directions),
+    supporting_document_name: safeText(initialValues?.supporting_document_name) || undefined,
+    supporting_document_type: safeText(initialValues?.supporting_document_type) || undefined,
+    supporting_document_data: safeText(initialValues?.supporting_document_data) || undefined,
+    gps_lat: initialValues?.gps_lat,
+    gps_long: initialValues?.gps_long,
+    location_source: initialValues?.location_source,
+    location_confidence: initialValues?.location_confidence,
+  };
+}
+
 function getMemberAgeCategory(birthdate: string): 'child' | 'adult' | 'senior' | null {
   if (!birthdate) return null;
   const age = calculateAge(birthdate);
@@ -197,10 +224,7 @@ export function HouseholdRegistrationWizard({
   const { isLoaded: mapsReady } = useGoogleMaps();
 
   const [step, setStep] = useState(1);
-  const [form, setForm] = useState<RegistrationFormState>({
-    ...EMPTY_FORM,
-    ...initialValues,
-  });
+  const [form, setForm] = useState<RegistrationFormState>(() => buildRegistrationFormState(initialValues));
   const [masterListLocked, setMasterListLocked] = useState(false);
   const [purokOptions, setPurokOptions] = useState<string[]>([]);
   const [locationMode, setLocationMode] = useState<'current' | 'manual'>('manual');
@@ -236,7 +260,7 @@ export function HouseholdRegistrationWizard({
           ...current,
           municipality: masterList?.municipality || current.municipality,
           barangay_name: masterList?.barangay_name || current.barangay_name,
-          purok_sitio: current.purok_sitio || masterList?.puroks?.[0] || current.purok_sitio,
+          purok_sitio: current.purok_sitio,
         }));
       } catch {
         if (!cancelled) {
@@ -255,23 +279,23 @@ export function HouseholdRegistrationWizard({
 
   const addressSummary = useMemo(() => {
     return [
-      form.street_address.trim(),
-      form.purok_sitio.trim(),
-      form.barangay_name.trim(),
-      form.municipality.trim(),
+      safeText(form.street_address).trim(),
+      safeText(form.purok_sitio).trim(),
+      safeText(form.barangay_name).trim(),
+      safeText(form.municipality).trim(),
     ].filter(Boolean).join(', ');
   }, [form]);
 
   const canContinueFromStepOne = useMemo(() => {
     return Boolean(
-      form.head_name.trim()
-      && form.contact_number.trim()
-      && form.applicant_email.trim()
-      && isEmailValid(form.applicant_email)
-      && form.street_address.trim()
-      && form.purok_sitio.trim()
-      && form.barangay_name.trim()
-      && form.municipality.trim(),
+      safeText(form.head_name).trim()
+      && safeText(form.contact_number).trim()
+      && safeText(form.applicant_email).trim()
+      && isEmailValid(safeText(form.applicant_email))
+      && safeText(form.street_address).trim()
+      && safeText(form.purok_sitio).trim()
+      && safeText(form.barangay_name).trim()
+      && safeText(form.municipality).trim(),
     );
   }, [form]);
 
@@ -685,13 +709,16 @@ export function HouseholdRegistrationWizard({
                 onChange={(event) => updateForm('purok_sitio', event.target.value)}
                 onBlur={(event) => updateForm('purok_sitio', normalizePurokSitio(event.target.value))}
                 className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
-                placeholder="e.g., Purok 3"
+                placeholder="Type the purok or sitio"
               />
               <datalist id="registration-purok-options">
                 {purokOptions.map((option) => (
                   <option key={option} value={option} />
                 ))}
               </datalist>
+              <p className="mt-2 text-xs text-slate-500">
+                Type a new purok if it is not listed. Saved puroks will appear in suggestions.
+              </p>
             </div>
 
             <div>

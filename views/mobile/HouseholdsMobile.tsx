@@ -1,7 +1,7 @@
 ﻿'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { Activity, Filter, Home, Plus, Users } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -47,6 +47,7 @@ type HouseholdSort = 'recent' | 'name' | 'members';
 
 export default function HouseholdsMobile() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const user = getCurrentUser();
   const [households, setHouseholds] = useState<Household[]>([]);
   const [puroks, setPuroks] = useState<string[]>([]);
@@ -57,6 +58,8 @@ export default function HouseholdsMobile() {
   const [filterSheetOpen, setFilterSheetOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [memberCounts, setMemberCounts] = useState<Record<string, number>>({});
+  const issueFilter = searchParams.get('issue');
+  const isMissingLocationMode = issueFilter === 'missing_location';
 
   const loadHouseholdsData = useCallback(async (background = false) => {
     if (!user || !hasPermission('view_households')) {
@@ -109,6 +112,14 @@ export default function HouseholdsMobile() {
   if (!user) return null;
 
   const filteredHouseholds = households
+    .filter((household) => (
+      !isMissingLocationMode
+      || (
+        household.status === 'active'
+        && getHouseholdRegistrationStatus(household) === 'approved'
+        && !hasHouseholdPin(household)
+      )
+    ))
     .filter((household) => filterStatus === 'all' || household.status === filterStatus)
     .filter((household) => filterPurok === 'all' || household.purok_sitio === filterPurok)
     .filter((household) => {
@@ -132,7 +143,7 @@ export default function HouseholdsMobile() {
     });
 
   const pendingCount = households.filter((household) => getHouseholdRegistrationStatus(household) === 'pending').length;
-  const hasFilters = search || filterPurok !== 'all' || filterStatus !== DEFAULT_STATUS || sortBy !== 'recent';
+  const hasFilters = Boolean(search) || filterPurok !== 'all' || filterStatus !== DEFAULT_STATUS || sortBy !== 'recent' || isMissingLocationMode;
   const statusOptions = [
     { key: 'all' as const, label: 'All', count: households.length },
     { key: 'active' as const, label: 'Active', count: households.filter((household) => household.status === 'active').length },
@@ -179,10 +190,17 @@ export default function HouseholdsMobile() {
 
       <div className="flex flex-wrap gap-2">
         <CivicBadge label={`${filteredHouseholds.length} showing`} tone="slate" />
+        {isMissingLocationMode ? <CivicBadge label="Missing coordinates" tone="amber" /> : null}
         {filterStatus !== DEFAULT_STATUS ? <CivicBadge label={STATUS_CFG[filterStatus as keyof typeof STATUS_CFG]?.label || 'All status'} tone="navy" /> : null}
         {filterPurok !== 'all' ? <CivicBadge label={filterPurok} tone="teal" /> : null}
         {sortBy !== 'recent' ? <CivicBadge label={sortBy === 'name' ? 'Sorted by name' : 'Sorted by members'} tone="slate" /> : null}
       </div>
+
+      {isMissingLocationMode ? (
+        <div className="rounded-[22px] border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          Showing approved active households that still need a map pin.
+        </div>
+      ) : null}
 
       <MobileFilterSheet
         open={filterSheetOpen}

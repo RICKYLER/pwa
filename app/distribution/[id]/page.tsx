@@ -4,6 +4,7 @@ import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } f
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import {
+  AlertTriangle,
   ArrowLeft,
   Calendar,
   CheckCircle2,
@@ -26,21 +27,24 @@ import { getAnalyticsBarangayScope, getAnalyticsScopeLabel } from '@/lib/analyti
 import { getCurrentUser, hasPermission } from '@/lib/auth';
 import MapLocationPicker from '@/components/MapLocationPicker';
 import MapView from '@/components/MapView';
+import { coerceDistributionTargetScope } from '@/lib/distribution-audience';
 import {
-  coerceDistributionTargetScope,
-  isResidentOnlyTargetGroup,
-} from '@/lib/distribution-audience';
-import {
-  getDistributionAudienceStats,
+  getDistributionAudienceContext,
   getDistributionEvent,
   getDistributionRecords,
-  getEligibleHouseholdsForEvent,
-  getEligibleResidentsForEvent,
   releaseDistributionPackage,
   updateDistributionEvent,
 } from '@/lib/db/distribution';
+import {
+  buildDistributionInventorySummary,
+  buildDistributionSelectionPreview,
+  buildDistributionServedSummary,
+  type DistributionEligibilitySummary,
+} from '@/lib/distribution-insights';
+import { getPendingSyncCount } from '@/lib/db/client-sync';
 import { getHouseholds } from '@/lib/db/households';
 import { getInventoryItems } from '@/lib/db/inventory';
+import { getLastSupabaseBootstrapCompletedAt } from '@/lib/supabase/bootstrap';
 import type {
   DistributedItem,
   DistributionEvent,
@@ -50,6 +54,7 @@ import type {
   Household,
   InventoryItem,
   Resident,
+  VulnerabilityFlags,
 } from '@/lib/db/schema';
 
 const STATUS_CFG = {
@@ -124,6 +129,15 @@ function sumDistributedUnits(items: DistributedItem[]) {
   return items.reduce((sum, item) => sum + item.quantity, 0);
 }
 
+const DISTRIBUTION_BOOTSTRAP_TABLES = [
+  'households',
+  'residents',
+  'vulnerability_flags',
+  'distribution_events',
+  'distribution_records',
+  'inventory_items',
+] as const;
+
 export default function DistributionDetailPage() {
   const router = useRouter();
   const params = useParams<{ id: string }>();
@@ -135,12 +149,8 @@ export default function DistributionDetailPage() {
   const [eligibleHouseholds, setEligibleHouseholds] = useState<Household[]>([]);
   const [eligibleResidents, setEligibleResidents] = useState<Resident[]>([]);
   const [matchedResidentsForHouseholds, setMatchedResidentsForHouseholds] = useState<Resident[]>([]);
-  const [audienceStats, setAudienceStats] = useState<{
-    totalHouseholds: number;
-    totalResidents: number;
-    eligibleHouseholds: number;
-    eligibleResidents: number;
-  } | null>(null);
+  const [flagsByResidentId, setFlagsByResidentId] = useState<Map<string, VulnerabilityFlags>>(new Map());
+  const [eligibilitySummary, setEligibilitySummary] = useState<DistributionEligibilitySummary | null>(null);
   const [allHouseholds, setAllHouseholds] = useState<Household[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isEditing, setIsEditing] = useState(false);
@@ -155,6 +165,8 @@ export default function DistributionDetailPage() {
   const [releaseNotes, setReleaseNotes] = useState('');
   const [isQuickUpdating, setIsQuickUpdating] = useState(false);
   const [isExportingPdf, setIsExportingPdf] = useState(false);
+  const [pendingSyncCount, setPendingSyncCount] = useState(0);
+  const [lastBootstrapAt, setLastBootstrapAt] = useState<number | null>(null);
 
   const [editStatus, setEditStatus] = useState<DistributionEvent['status']>('planned');
   const [editTargetScope, setEditTargetScope] = useState<DistributionTargetScope>('household');
@@ -176,6 +188,10 @@ export default function DistributionDetailPage() {
     () => getAnalyticsScopeLabel(user),
     [user],
   );
+  const refreshOperationalFreshness = useCallback(async () => {
+    setPendingSyncCount(await getPendingSyncCount());
+    setLastBootstrapAt(getLastSupabaseBootstrapCompletedAt([...DISTRIBUTION_BOOTSTRAP_TABLES]));
+  }, []);
 
   useEffect(() => {
     if (typeof window !== 'undefined' && window.google) {
@@ -229,35 +245,16 @@ export default function DistributionDetailPage() {
         ? undefined
         : audienceBarangayScope ?? distributionEvent.barangay_id;
 
-      const [distributionRecords, stockItems, households, nextAudienceStats] = await Promise.all([
+      const [distributionRecords, stockItems, households, audienceContext] = await Promise.all([
         getDistributionRecords(distributionEvent.id),
         getInventoryItems(),
         getHouseholds({ status: 'active', registration_status: 'approved' }),
-        getDistributionAudienceStats({
+        getDistributionAudienceContext({
           barangay_id: audienceBarangayId,
           target_group: distributionEvent.target_group,
+          target_scope: distributionEvent.target_scope,
+          scope_label: audienceScopeLabel,
         }),
-      ]);
-
-      const [householdTargets, residentTargets, householdMatchResidents] = await Promise.all([
-        distributionEvent.target_scope === 'household'
-          ? getEligibleHouseholdsForEvent({
-              barangay_id: audienceBarangayId,
-              target_group: distributionEvent.target_group,
-            })
-          : Promise.resolve([]),
-        distributionEvent.target_scope === 'resident'
-          ? getEligibleResidentsForEvent({
-              barangay_id: audienceBarangayId,
-              target_group: distributionEvent.target_group,
-            })
-          : Promise.resolve([]),
-        distributionEvent.target_scope === 'household' && distributionEvent.target_group !== 'all'
-          ? getEligibleResidentsForEvent({
-              barangay_id: audienceBarangayId,
-              target_group: distributionEvent.target_group,
-            })
-          : Promise.resolve([]),
       ]);
 
       if (requestId !== latestLoadRequestIdRef.current) {
@@ -268,10 +265,13 @@ export default function DistributionDetailPage() {
       setRecords(distributionRecords);
       setInventoryItems(stockItems);
       setAllHouseholds(households);
-      setAudienceStats(nextAudienceStats);
-      setEligibleHouseholds(householdTargets);
-      setEligibleResidents(residentTargets);
-      setMatchedResidentsForHouseholds(householdMatchResidents);
+      setEligibilitySummary(audienceContext.eligibility_summary);
+      setFlagsByResidentId(audienceContext.flagsByResidentId);
+      setEligibleHouseholds(audienceContext.matches.eligibleHouseholds);
+      setEligibleResidents(audienceContext.matches.eligibleResidents);
+      setMatchedResidentsForHouseholds(
+        Array.from(audienceContext.matches.matchedResidentsByHouseholdId.values()).flat(),
+      );
       setEditStatus(distributionEvent.status);
       setEditTargetScope(distributionEvent.target_scope);
       setEditTargetGroup(distributionEvent.target_group);
@@ -291,6 +291,8 @@ export default function DistributionDetailPage() {
       } else {
         setMapCoords(null);
       }
+
+      await refreshOperationalFreshness();
     } catch (loadError) {
       console.error(loadError);
     } finally {
@@ -298,7 +300,7 @@ export default function DistributionDetailPage() {
         setIsLoading(false);
       }
     }
-  }, [audienceBarangayScope, params.id, router, user]);
+  }, [audienceBarangayScope, audienceScopeLabel, params.id, refreshOperationalFreshness, router, user]);
 
   useEffect(() => {
     if (!user || !hasPermission('view_reports')) {
@@ -322,11 +324,17 @@ export default function DistributionDetailPage() {
       void load(true);
     }
 
+    function handleSyncQueueChanged() {
+      void refreshOperationalFreshness();
+    }
+
     window.addEventListener('mswdo-data-changed', handleDataChanged as EventListener);
+    window.addEventListener('mswdo-sync-queue-changed', handleSyncQueueChanged);
     return () => {
       window.removeEventListener('mswdo-data-changed', handleDataChanged as EventListener);
+      window.removeEventListener('mswdo-sync-queue-changed', handleSyncQueueChanged);
     };
-  }, [load, user]);
+  }, [load, refreshOperationalFreshness, user]);
 
   useEffect(() => {
     if (!mapsReady || !event || mapCoords || geocodedRef.current) return;
@@ -355,26 +363,14 @@ export default function DistributionDetailPage() {
     () => new Set(records.map((record) => record.resident_id).filter(Boolean) as string[]),
     [records],
   );
-
-  const packageStock = useMemo(() => {
-    if (!event) return [];
-
-    return event.package_items.map((packageItem) => {
-      const stock = inventoryItems.find((item) => item.id === packageItem.item_id);
-      const available = stock?.quantity_available ?? 0;
-
-      return {
-        ...packageItem,
-        available,
-        remainingPackages:
-          packageItem.quantity > 0 ? Math.floor(available / packageItem.quantity) : 0,
-        lowStock: available < packageItem.quantity,
-      };
-    });
-  }, [event, inventoryItems]);
-
-  const remainingPackageReleases =
-    packageStock.length > 0 ? Math.min(...packageStock.map((item) => item.remainingPackages)) : 0;
+  const inventorySummary = useMemo(
+    () => buildDistributionInventorySummary(event?.package_items ?? [], inventoryItems),
+    [event?.package_items, inventoryItems],
+  );
+  const servedSummary = useMemo(
+    () => buildDistributionServedSummary(records),
+    [records],
+  );
 
   const filteredHouseholds = useMemo(() => {
     if (!deferredSearch) return eligibleHouseholds;
@@ -445,6 +441,46 @@ export default function DistributionDetailPage() {
 
     return entries;
   }, [matchedResidentsForHouseholds]);
+  const selectionPreview = useMemo(() => {
+    if (!event) {
+      return null;
+    }
+
+    return buildDistributionSelectionPreview({
+      event,
+      selectedHousehold,
+      selectedResident,
+      matchedResidentsByHouseholdId,
+      flagsByResidentId,
+      inventorySummary,
+      servedHouseholdIds,
+      servedResidentIds,
+      eligibleHouseholds,
+      eligibleResidents,
+    });
+  }, [
+    eligibleHouseholds,
+    eligibleResidents,
+    event,
+    flagsByResidentId,
+    inventorySummary,
+    matchedResidentsByHouseholdId,
+    selectedHousehold,
+    selectedResident,
+    servedHouseholdIds,
+    servedResidentIds,
+  ]);
+  const staleDataWarning = useMemo(() => {
+    if (pendingSyncCount > 0) {
+      return `${pendingSyncCount} local change${pendingSyncCount === 1 ? ' is' : 's are'} still waiting to sync. Release totals may refresh again after sync completes.`;
+    }
+
+    if (!lastBootstrapAt) {
+      return 'Waiting for the latest Supabase refresh. Audience and stock numbers may still update.';
+    }
+
+    return null;
+  }, [lastBootstrapAt, pendingSyncCount]);
 
   useEffect(() => {
     const defaultReceiver =
@@ -542,6 +578,7 @@ export default function DistributionDetailPage() {
       setSelectedHouseholdId('');
       setSelectedResidentId('');
       setReleaseNotes('');
+      await refreshOperationalFreshness();
       setReleaseSuccess(
         `Package released to ${record.received_by_name || record.beneficiary_name || 'beneficiary'}.`,
       );
@@ -585,50 +622,37 @@ export default function DistributionDetailPage() {
   const schedDate = new Date(event.scheduled_date);
   const isPast = schedDate < new Date() && event.status !== 'completed';
   const canManage = hasPermission('manage_inventory');
-  const totalUnitsReleased = records.reduce(
-    (sum, record) => sum + sumDistributedUnits(record.items_distributed),
-    0,
-  );
   const selectedAlreadyServed =
     event.target_scope === 'household'
       ? Boolean(selectedHousehold && servedHouseholdIds.has(selectedHousehold.id))
       : Boolean(selectedResident && servedResidentIds.has(selectedResident.id));
-  const hasLowPackageStock = packageStock.some((item) => item.lowStock);
-  const audienceMatchCount =
-    event.target_scope === 'household'
-      ? event.target_group === 'all'
-        ? audienceStats?.eligibleHouseholds ?? eligibleHouseholds.length
-        : audienceStats?.eligibleResidents ?? matchedResidentsForHouseholds.length
-      : audienceStats?.eligibleResidents ?? eligibleResidents.length;
-  const audienceMatchLabel =
+  const audienceMatchCount = event.target_scope === 'household'
+    ? event.target_group === 'all'
+      ? (eligibilitySummary?.eligible_households ?? eligibleHouseholds.length)
+      : (eligibilitySummary?.eligible_residents ?? matchedResidentsForHouseholds.length)
+    : (eligibilitySummary?.eligible_residents ?? eligibleResidents.length);
+  const audienceMatchLabel = eligibilitySummary?.match_label ?? (
     event.target_scope === 'household'
       ? event.target_group === 'all'
         ? 'Eligible Households'
         : `${TARGET_GROUP_LABELS[event.target_group]} Matches`
       : event.target_group === 'all'
         ? 'Eligible Residents'
-        : `${TARGET_GROUP_LABELS[event.target_group]} Matches`;
-  const audienceMatchSupport =
+        : `${TARGET_GROUP_LABELS[event.target_group]} Matches`
+  );
+  const audienceMatchSupport = eligibilitySummary?.match_support
+    ?? `${eligibleHouseholds.length} qualifying household${eligibleHouseholds.length === 1 ? '' : 's'} across ${audienceScopeLabel}.`;
+  const targetCountLabel = eligibilitySummary?.target_count_label ?? (
     event.target_scope === 'household'
-      ? event.target_group === 'all'
-        ? `${audienceStats?.totalResidents ?? eligibleResidents.length} resident${(audienceStats?.totalResidents ?? eligibleResidents.length) !== 1 ? 's' : ''} covered across ${audienceScopeLabel}`
-        : `${audienceStats?.eligibleHouseholds ?? eligibleHouseholds.length} matched household${(audienceStats?.eligibleHouseholds ?? eligibleHouseholds.length) !== 1 ? 's' : ''}`
-      : `${audienceStats?.eligibleHouseholds ?? eligibleHouseholds.length} household${(audienceStats?.eligibleHouseholds ?? eligibleHouseholds.length) !== 1 ? 's' : ''} covered across ${audienceScopeLabel}`;
-  const targetCountLabel =
-    event.target_scope === 'household'
-      ? event.target_group === 'all'
-        ? `${eligibleHouseholds.length} eligible household${eligibleHouseholds.length !== 1 ? 's' : ''}`
-        : `${eligibleHouseholds.length} household${eligibleHouseholds.length !== 1 ? 's' : ''} · ${matchedResidentsForHouseholds.length} ${TARGET_GROUP_LABELS[event.target_group].toLowerCase()} match${matchedResidentsForHouseholds.length !== 1 ? 'es' : ''}`
-      : event.target_group === 'all'
-        ? `${eligibleResidents.length} eligible resident${eligibleResidents.length !== 1 ? 's' : ''}`
-        : `${eligibleResidents.length} ${TARGET_GROUP_LABELS[event.target_group].toLowerCase()} resident${eligibleResidents.length !== 1 ? 's' : ''}`;
+      ? `${eligibleHouseholds.length} eligible household${eligibleHouseholds.length === 1 ? '' : 's'}`
+      : `${eligibleResidents.length} eligible resident${eligibleResidents.length === 1 ? '' : 's'}`
+  );
   const releaseDisabled =
     !canManage ||
     event.status === 'completed' ||
     event.package_items.length === 0 ||
-    hasLowPackageStock ||
-    selectedAlreadyServed ||
-    (event.target_scope === 'household' ? !selectedHousehold : !selectedResident);
+    (event.target_scope === 'household' ? !selectedHousehold : !selectedResident) ||
+    Boolean(selectionPreview && selectionPreview.errors.length > 0);
 
   async function handleExportPdf() {
     if (!event || !user) {
@@ -642,12 +666,20 @@ export default function DistributionDetailPage() {
       exportDistributionReportPDF({
         event,
         records,
-        packageStock,
+        packageStock: inventorySummary.lines.map((line) => ({
+          item_id: line.item_id,
+          item_name: line.item_name,
+          unit: line.unit,
+          quantity: line.quantity,
+          available: line.available,
+          remainingPackages: line.remainingPackages,
+          lowStock: line.isBlocking || line.isLowStock,
+        })),
         summary: {
-          householdsServed: servedHouseholdIds.size,
-          residentsServed: servedResidentIds.size,
-          totalUnitsReleased,
-          fullPackagesLeft: remainingPackageReleases,
+          householdsServed: servedSummary.households_served,
+          residentsServed: servedSummary.residents_served,
+          totalUnitsReleased: servedSummary.units_released,
+          fullPackagesLeft: inventorySummary.available_packages,
           audienceMatchCount,
           audienceMatchLabel,
           audienceMatchSupport,
@@ -833,26 +865,20 @@ export default function DistributionDetailPage() {
                   value={editTargetScope}
                   onChange={(e) => {
                     const nextScope = e.target.value as DistributionTargetScope;
-                    if (nextScope === 'household' && isResidentOnlyTargetGroup(editTargetGroup)) {
-                      return;
-                    }
-
                     setEditTargetScope(nextScope);
                   }}
                   className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-500/30"
                 >
                   {TARGET_SCOPE_OPTIONS.map((scope) => (
-                    <option
-                      key={scope.value}
-                      value={scope.value}
-                      disabled={scope.value === 'household' && isResidentOnlyTargetGroup(editTargetGroup)}
-                    >
+                    <option key={scope.value} value={scope.value}>
                       {scope.label}
                     </option>
                   ))}
                 </select>
                 <p className="mt-2 text-[11px] leading-5 text-slate-500">
-                  {TARGET_SCOPE_OPTIONS.find((scope) => scope.value === editTargetScope)?.description}
+                  {editTargetScope === 'household'
+                    ? 'Release one package to each household that has at least one matching member.'
+                    : TARGET_SCOPE_OPTIONS.find((scope) => scope.value === editTargetScope)?.description}
                 </p>
               </div>
 
@@ -865,10 +891,6 @@ export default function DistributionDetailPage() {
                   onChange={(e) => {
                     const nextGroup = e.target.value as DistributionTargetGroup;
                     setEditTargetGroup(nextGroup);
-
-                    if (isResidentOnlyTargetGroup(nextGroup)) {
-                      setEditTargetScope('resident');
-                    }
                   }}
                   className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-500/30"
                 >
@@ -965,8 +987,8 @@ export default function DistributionDetailPage() {
                   items before starting distribution.
                 </div>
               ) : (
-                <div className="space-y-2">
-                  {packageStock.map((item) => (
+                <div className="space-y-3">
+                  {inventorySummary.lines.map((item) => (
                     <div
                       key={item.item_id}
                       className="flex items-start justify-between gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3"
@@ -982,7 +1004,7 @@ export default function DistributionDetailPage() {
                       <div className="text-right">
                         <p
                           className={`text-sm font-bold ${
-                            item.lowStock ? 'text-rose-600' : 'text-emerald-600'
+                            item.isBlocking ? 'text-rose-600' : item.isLowStock ? 'text-amber-600' : 'text-emerald-600'
                           }`}
                         >
                           {item.available} {item.unit}
@@ -994,6 +1016,18 @@ export default function DistributionDetailPage() {
                       </div>
                     </div>
                   ))}
+
+                  {inventorySummary.blocking_items.length > 0 ? (
+                    <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+                      Restock required before release: {inventorySummary.blocking_items.map((item) => item.item_name).join(', ')}.
+                    </div>
+                  ) : null}
+
+                  {inventorySummary.low_stock_items.length > 0 ? (
+                    <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                      Low stock warning: {inventorySummary.low_stock_items.map((item) => item.item_name).join(', ')} will be near reorder level after release.
+                    </div>
+                  ) : null}
                 </div>
               )}
             </div>
@@ -1006,7 +1040,7 @@ export default function DistributionDetailPage() {
                   <Users className="h-5 w-5 text-emerald-600" />
                 </div>
                 <div>
-                  <p className="text-2xl font-bold text-slate-900">{servedHouseholdIds.size}</p>
+                  <p className="text-2xl font-bold text-slate-900">{servedSummary.households_served}</p>
                   <p className="text-xs font-medium text-slate-400">Households Served</p>
                 </div>
               </div>
@@ -1016,7 +1050,7 @@ export default function DistributionDetailPage() {
                   <UserRound className="h-5 w-5 text-blue-600" />
                 </div>
                 <div>
-                  <p className="text-2xl font-bold text-slate-900">{servedResidentIds.size}</p>
+                  <p className="text-2xl font-bold text-slate-900">{servedSummary.residents_served}</p>
                   <p className="text-xs font-medium text-slate-400">Residents Served</p>
                 </div>
               </div>
@@ -1026,7 +1060,7 @@ export default function DistributionDetailPage() {
                   <Package className="h-5 w-5 text-amber-600" />
                 </div>
                 <div>
-                  <p className="text-2xl font-bold text-slate-900">{totalUnitsReleased}</p>
+                  <p className="text-2xl font-bold text-slate-900">{servedSummary.units_released}</p>
                   <p className="text-xs font-medium text-slate-400">Units Released</p>
                 </div>
               </div>
@@ -1036,7 +1070,7 @@ export default function DistributionDetailPage() {
                   <ShieldCheck className="h-5 w-5 text-violet-600" />
                 </div>
                 <div>
-                  <p className="text-2xl font-bold text-slate-900">{remainingPackageReleases}</p>
+                  <p className="text-2xl font-bold text-slate-900">{inventorySummary.available_packages}</p>
                   <p className="text-xs font-medium text-slate-400">Full Packages Left</p>
                 </div>
               </div>
@@ -1280,6 +1314,100 @@ export default function DistributionDetailPage() {
                 </div>
               ) : null}
 
+              {selectionPreview ? (
+                <div className="space-y-3 rounded-2xl border border-slate-200 bg-slate-50/90 p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-xs font-bold uppercase tracking-wider text-slate-500">
+                        Release Preview
+                      </p>
+                      <p className="mt-1 text-sm font-semibold text-slate-900">
+                        {selectionPreview.heading}
+                      </p>
+                      <p className="mt-0.5 text-xs text-slate-500">{selectionPreview.support}</p>
+                    </div>
+                    {selectedAlreadyServed ? (
+                      <span className="rounded-full bg-amber-100 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.16em] text-amber-700">
+                        Already served
+                      </span>
+                    ) : null}
+                  </div>
+
+                  {selectionPreview.qualification ? (
+                    <div className="rounded-xl border border-emerald-100 bg-white px-3 py-3 text-sm text-slate-700">
+                      <p className="text-[11px] font-semibold uppercase tracking-wide text-emerald-700">
+                        Why this target qualifies
+                      </p>
+                      <p className="mt-1 leading-6">{selectionPreview.qualification}</p>
+                    </div>
+                  ) : null}
+
+                  {staleDataWarning ? (
+                    <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-3 text-sm text-amber-800">
+                      <div className="flex items-start gap-2">
+                        <AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0" />
+                        <div>
+                          <p>{staleDataWarning}</p>
+                          {lastBootstrapAt ? (
+                            <p className="mt-1 text-[11px] text-amber-700/80">
+                              Last refresh: {new Date(lastBootstrapAt).toLocaleString('en-PH', {
+                                month: 'short',
+                                day: 'numeric',
+                                hour: '2-digit',
+                                minute: '2-digit',
+                              })}
+                            </p>
+                          ) : null}
+                        </div>
+                      </div>
+                    </div>
+                  ) : null}
+
+                  <div className="space-y-2">
+                    {selectionPreview.packagePreview.map((line) => (
+                      <div
+                        key={line.item_id}
+                        className="flex items-start justify-between gap-3 rounded-xl border border-slate-200 bg-white px-3 py-3"
+                      >
+                        <div>
+                          <p className="text-sm font-semibold text-slate-900">{line.item_name}</p>
+                          <p className="mt-0.5 text-xs text-slate-500">
+                            Deduct {line.per_release} {line.unit} on release
+                          </p>
+                        </div>
+                        <div className="text-right">
+                          <p className={`text-sm font-bold ${line.is_blocking ? 'text-rose-600' : 'text-emerald-600'}`}>
+                            {line.stock_after_release} {line.unit}
+                          </p>
+                          <p className="text-[11px] text-slate-400">
+                            after release · {line.packages_left_after_release} package
+                            {line.packages_left_after_release === 1 ? '' : 's'} left
+                          </p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {selectionPreview.warnings.map((warning) => (
+                    <div
+                      key={warning}
+                      className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-3 text-sm text-amber-800"
+                    >
+                      {warning}
+                    </div>
+                  ))}
+
+                  {selectionPreview.errors.map((previewError) => (
+                    <div
+                      key={previewError}
+                      className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-3 text-sm text-rose-700"
+                    >
+                      {previewError}
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+
               {releaseError ? (
                 <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
                   {releaseError}
@@ -1301,13 +1429,6 @@ export default function DistributionDetailPage() {
               {event.target_scope === 'resident' && eligibleResidents.length === 0 ? (
                 <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
                   No qualifying residents were found yet for this event. Check the audience setting or the resident vulnerability data first.
-                </div>
-              ) : null}
-
-              {hasLowPackageStock ? (
-                <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-                  Some package items are below the required per-release quantity. Restock first
-                  before releasing more packages.
                 </div>
               ) : null}
 

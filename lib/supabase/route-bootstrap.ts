@@ -14,7 +14,7 @@ const ROUTE_TABLES: Array<{
   },
   {
     prefix: '/dashboard',
-    tables: ['households', 'residents', 'vulnerability_flags', 'audit_logs'],
+    tables: ['households', 'residents', 'vulnerability_flags', 'audit_logs', 'distribution_events', 'inventory_items', 'package_templates'],
   },
   {
     prefix: '/households',
@@ -31,6 +31,10 @@ const ROUTE_TABLES: Array<{
   {
     prefix: '/inventory',
     tables: ['inventory_items', 'inventory_movements', 'package_templates'],
+  },
+  {
+    prefix: '/distribution',
+    tables: ['households', 'residents', 'vulnerability_flags', 'distribution_events', 'distribution_records', 'inventory_items'],
   },
   {
     prefix: '/resident/household',

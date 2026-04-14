@@ -2,6 +2,18 @@ import { db, STORE_NAMES } from './indexeddb';
 import { getHouseholds } from './households';
 import { getResidents } from './residents';
 import {
+  getBrokenVulnerabilityFlagIssues,
+  getBlockedPackageTemplates,
+  getHouseholdsMissingLocation,
+  getResidentsMissingBirthdate,
+  summarizeOperationalDataQuality,
+  type DataQualityIssue,
+  type BrokenVulnerabilityFlagIssue,
+  type DataQualitySummary,
+  type PackageTemplateReadiness,
+} from '@/lib/data-quality';
+import type { DistributionEligibilitySummary } from '@/lib/distribution-insights';
+import {
   buildResidentAnalyticsRecords,
   calculateDashboardStats,
   calculateHeatmapData,
@@ -10,8 +22,10 @@ import {
   calculateTopPuroksByVulnerability,
   filterResidentAnalyticsRecords,
 } from './reporting';
+import { getDistributionAudienceContext, getDistributionEvents } from './distribution';
+import { getInventoryItems, getPackageTemplates } from './inventory';
 import { getCurrentVulnerabilityFlagsMapForResidents } from './vulnerability';
-import type { Resident, VulnerabilityFlags, Household } from './schema';
+import type { DistributionEvent, Resident, VulnerabilityFlags, Household } from './schema';
 
 async function getBarangayAnalyticsContext(barangay_id?: string | null): Promise<{
   households: Household[];
@@ -41,6 +55,36 @@ async function getBarangayAnalyticsContext(barangay_id?: string | null): Promise
     households,
     residents,
     records,
+  };
+}
+
+async function getApprovedActiveHouseholdResidentContext(barangay_id?: string | null) {
+  const households = await getHouseholds({
+    ...(barangay_id ? { barangay_id } : {}),
+    status: 'active',
+    registration_status: 'approved',
+  });
+  const householdIds = new Set(households.map((household) => household.id));
+  const residents = (await getResidents({ status: 'active' }))
+    .filter((resident) => householdIds.has(resident.household_id));
+
+  return {
+    households,
+    residents,
+    householdsById: new Map(households.map((household) => [household.id, household])),
+    residentsById: new Map(residents.map((resident) => [resident.id, resident])),
+  };
+}
+
+async function getBrokenFlagLookupContext() {
+  const [households, residents] = await Promise.all([
+    getHouseholds(),
+    getResidents(),
+  ]);
+
+  return {
+    householdsById: new Map(households.map((household) => [household.id, household])),
+    residentsById: new Map(residents.map((resident) => [resident.id, resident])),
   };
 }
 
@@ -172,4 +216,103 @@ export async function getRecentActivities(limit: number = 10) {
     console.error('Error getting recent activities:', error);
     throw error;
   }
+}
+
+export async function getResidentsMissingBirthdateRecords(
+  barangay_id?: string | null,
+): Promise<Array<{ resident: Resident; household: Household }>> {
+  const context = await getApprovedActiveHouseholdResidentContext(barangay_id);
+  return getResidentsMissingBirthdate({
+    residents: context.residents,
+    householdsById: context.householdsById,
+  }).map((resident) => ({
+    resident,
+    household: context.householdsById.get(resident.household_id)!,
+  }));
+}
+
+export async function getBrokenVulnerabilityFlagRecords(
+  barangay_id?: string | null,
+): Promise<BrokenVulnerabilityFlagIssue[]> {
+  const context = await getBrokenFlagLookupContext();
+  const flags = await db.getAll<VulnerabilityFlags>(STORE_NAMES.vulnerability_flags);
+  const issues = getBrokenVulnerabilityFlagIssues({
+    flags,
+    residentsById: context.residentsById,
+    householdsById: context.householdsById,
+  });
+
+  if (!barangay_id) {
+    return issues;
+  }
+
+  return issues.filter((issue) => issue.household?.barangay_id === barangay_id);
+}
+
+export async function getBlockedPackageTemplateReadiness(): Promise<PackageTemplateReadiness[]> {
+  const [templates, inventoryItems] = await Promise.all([
+    getPackageTemplates(),
+    getInventoryItems(),
+  ]);
+
+  return getBlockedPackageTemplates(templates, inventoryItems);
+}
+
+export async function getZeroEligibilityDistributionEvents(
+  barangay_id?: string | null,
+): Promise<Array<{ event: DistributionEvent; eligibility_summary: DistributionEligibilitySummary }>> {
+  const events = await getDistributionEvents();
+  const scopedEvents = barangay_id
+    ? events.filter((event) => event.barangay_id === barangay_id)
+    : events;
+
+  const summaries = await Promise.all(
+    scopedEvents
+      .filter((event) => event.status === 'planned' || event.status === 'ongoing')
+      .map(async (event) => ({
+        event,
+        context: await getDistributionAudienceContext({
+          barangay_id: event.barangay_id || barangay_id,
+          target_group: event.target_group,
+          target_scope: event.target_scope,
+          scope_label: 'the event scope',
+        }),
+      })),
+  );
+
+  return summaries
+    .filter(({ context }) => context.eligibility_summary.eligible_residents === 0 || context.eligibility_summary.eligible_households === 0)
+    .map(({ event, context }) => ({
+      event,
+      eligibility_summary: context.eligibility_summary,
+    }));
+}
+
+export async function getDataQualitySummary(
+  barangay_id?: string | null,
+): Promise<DataQualitySummary> {
+  const context = await getApprovedActiveHouseholdResidentContext(barangay_id);
+  const [flags, brokenFlagContext, zeroMatchEvents, blockedTemplates] = await Promise.all([
+    db.getAll<VulnerabilityFlags>(STORE_NAMES.vulnerability_flags),
+    getBrokenFlagLookupContext(),
+    getZeroEligibilityDistributionEvents(barangay_id),
+    getBlockedPackageTemplateReadiness(),
+  ]);
+
+  const brokenFlags = getBrokenVulnerabilityFlagIssues({
+    flags,
+    residentsById: brokenFlagContext.residentsById,
+    householdsById: brokenFlagContext.householdsById,
+  }).filter((issue) => !barangay_id || issue.household?.barangay_id === barangay_id);
+
+  return summarizeOperationalDataQuality({
+    householdsMissingLocation: getHouseholdsMissingLocation(context.households),
+    residentsMissingBirthdate: getResidentsMissingBirthdate({
+      residents: context.residents,
+      householdsById: context.householdsById,
+    }),
+    brokenFlags,
+    zeroMatchEvents,
+    blockedTemplates,
+  });
 }

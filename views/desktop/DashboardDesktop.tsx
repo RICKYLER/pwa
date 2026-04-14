@@ -6,7 +6,8 @@ import Link from 'next/link';
 import { AlertTriangle, Baby, FileText, Home, Package, ShieldAlert, Users } from 'lucide-react';
 import { getAnalyticsBarangayScope, getAnalyticsScopeLabel } from '@/lib/analytics-scope';
 import { db } from '@/lib/db/indexeddb';
-import { getDashboardStats, getTopPuroksByPopulation, getTopPuroksByVulnerability } from '@/lib/db/queries';
+import { getDashboardStats, getDataQualitySummary, getTopPuroksByPopulation, getTopPuroksByVulnerability } from '@/lib/db/queries';
+import { getReportsVulnerableTotal } from '@/lib/reports-preview-data';
 import { getDefaultRouteForUser, hasPermission, restoreSession } from '@/lib/auth';
 import {
   CivicBadge,
@@ -39,6 +40,7 @@ export default function DashboardDesktop() {
   const router = useRouter();
   const [user, setUser] = useState<ReturnType<typeof restoreSession>>(null);
   const [stats, setStats] = useState<Stats | null>(null);
+  const [dataQuality, setDataQuality] = useState<Awaited<ReturnType<typeof getDataQualitySummary>> | null>(null);
   const [topVulnerable, setTopVulnerable] = useState<Array<{ purok: string; vulnerable_count: number }>>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
@@ -62,14 +64,18 @@ export default function DashboardDesktop() {
 
       setUser(restoredUser);
       const analyticsBarangayId = getAnalyticsBarangayScope(restoredUser);
-      const [dashboardStats, , vulnerable] = await Promise.all([
+      const [dashboardStats, , vulnerable, qualitySummary] = await Promise.all([
         getDashboardStats(analyticsBarangayId),
         getTopPuroksByPopulation(analyticsBarangayId),
         getTopPuroksByVulnerability(analyticsBarangayId),
+        restoredUser.role === 'admin'
+          ? getDataQualitySummary()
+          : Promise.resolve(null),
       ]);
 
       setStats(dashboardStats);
       setTopVulnerable(vulnerable);
+      setDataQuality(qualitySummary);
       setError('');
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : 'Failed to load');
@@ -86,7 +92,7 @@ export default function DashboardDesktop() {
 
   useEffect(() => {
     function handleDataChanged(event: WindowEventMap['mswdo-data-changed']) {
-      if (!['households', 'residents', 'vulnerability_flags'].includes(event.detail.table)) {
+      if (!['households', 'residents', 'vulnerability_flags', 'distribution_events', 'inventory_items', 'package_templates'].includes(event.detail.table)) {
         return;
       }
 
@@ -99,9 +105,7 @@ export default function DashboardDesktop() {
 
   if (!user) return null;
 
-  const totalVulnerable = stats
-    ? stats.children_count + stats.seniors_count + stats.pwd_count + stats.pregnant_count + stats.chronic_count
-    : 0;
+  const totalVulnerable = getReportsVulnerableTotal(stats);
   const scopeLabel = getAnalyticsScopeLabel(user);
   const residentsDescription = user.role === 'admin'
     ? `${(stats?.total_population ?? 0).toLocaleString()} residents currently tracked across all barangays.`
@@ -230,6 +234,47 @@ export default function DashboardDesktop() {
           </div>
         </CivicPanel>
       </div>
+
+      {user.role === 'admin' && dataQuality ? (
+        <CivicPanel>
+          <CivicSectionHeading
+            icon={AlertTriangle}
+            title="Data Quality"
+            description="Operational mismatches and incomplete records that can affect eligibility, stock, and releases."
+          />
+          <div className="mt-5 grid grid-cols-5 gap-3">
+            {dataQuality.issues.map((issue) => (
+              <Link
+                key={issue.key}
+                href={issue.href}
+                className={`rounded-[22px] border px-4 py-4 transition hover:-translate-y-px hover:shadow-md ${
+                  issue.count > 0
+                    ? 'border-amber-200 bg-amber-50/80'
+                    : 'border-slate-200 bg-slate-50'
+                }`}
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <p className="text-2xl font-black tracking-tight text-slate-950">{issue.count}</p>
+                  <CivicBadge
+                    label={issue.count > 0 ? 'Needs review' : 'Clear'}
+                    tone={issue.count > 0 ? 'amber' : 'emerald'}
+                    className="text-[10px]"
+                  />
+                </div>
+                <p className="mt-3 text-sm font-bold text-slate-950">{issue.label}</p>
+                <p className="mt-1 text-xs leading-5 text-slate-500">{issue.description}</p>
+                {issue.sample_labels.length > 0 ? (
+                  <p className="mt-3 text-[11px] text-slate-600">
+                    Sample: {issue.sample_labels.join(', ')}
+                  </p>
+                ) : (
+                  <p className="mt-3 text-[11px] text-slate-400">No issues detected right now.</p>
+                )}
+              </Link>
+            ))}
+          </div>
+        </CivicPanel>
+      ) : null}
 
       {quickLinks.length > 0 ? (
         <CivicPanel>

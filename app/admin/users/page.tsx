@@ -27,8 +27,9 @@ const ROLES: { key: UserRole; label: string; desc: string; color: string; bg: st
   { key: 'encoder', label: 'Encoder', desc: 'Add and edit census records', color: 'text-blue-700', bg: 'bg-blue-50 ring-blue-200' },
   { key: 'health_worker', label: 'Health Worker', desc: 'Manage health vulnerability flags', color: 'text-emerald-700', bg: 'bg-emerald-50 ring-emerald-200' },
   { key: 'responder', label: 'Responder', desc: 'Respond to incidents and operations', color: 'text-rose-700', bg: 'bg-rose-50 ring-rose-200' },
-  { key: 'resident', label: 'Resident', desc: 'Self-service registration and status tracking', color: 'text-cyan-700', bg: 'bg-cyan-50 ring-cyan-200' },
+  { key: 'resident', label: 'Resident', desc: 'Household leader portal access', color: 'text-cyan-700', bg: 'bg-cyan-50 ring-cyan-200' },
 ];
+const ASSIGNABLE_ROLES = ROLES.filter((role) => role.key !== 'resident');
 
 const BLANK_FORM = {
   name: '',
@@ -308,6 +309,15 @@ export default function AdminUsersPage() {
             </div>
 
             <form onSubmit={handleSubmit} className="space-y-5 p-6">
+              {editingId && form.role === 'resident' && (
+                <div className="rounded-2xl border border-cyan-200 bg-cyan-50/80 px-4 py-3">
+                  <p className="text-sm font-semibold text-cyan-900">Resident portal account</p>
+                  <p className="mt-1 text-xs leading-relaxed text-cyan-700">
+                    Resident accounts are created through the household registration flow and cannot be reassigned here.
+                  </p>
+                </div>
+              )}
+
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <div>
                   <label className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-slate-500">
@@ -369,23 +379,29 @@ export default function AdminUsersPage() {
                   <ShieldCheck className="h-3 w-3" />
                   Role
                 </label>
-                <div className="grid grid-cols-2 gap-2 lg:grid-cols-5">
-                  {ROLES.map((role) => (
-                    <button
-                      key={role.key}
-                      type="button"
-                      onClick={() => setForm((current) => ({ ...current, role: role.key }))}
-                      className={`flex flex-col items-start gap-0.5 rounded-xl border p-3 text-left transition ${
-                        form.role === role.key
-                          ? `${role.bg} border-transparent ring-2 ${role.color}`
-                          : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50'
-                      }`}
-                    >
-                      <p className="text-xs font-bold">{role.label}</p>
-                      <p className="text-[10px] leading-tight opacity-70">{role.desc}</p>
-                    </button>
-                  ))}
-                </div>
+                {editingId && form.role === 'resident' ? (
+                  <div className="rounded-xl border border-cyan-200 bg-cyan-50 px-3 py-3 text-sm font-semibold text-cyan-800">
+                    Resident
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
+                    {ASSIGNABLE_ROLES.map((role) => (
+                      <button
+                        key={role.key}
+                        type="button"
+                        onClick={() => setForm((current) => ({ ...current, role: role.key }))}
+                        className={`flex flex-col items-start gap-0.5 rounded-xl border p-3 text-left transition ${
+                          form.role === role.key
+                            ? `${role.bg} border-transparent ring-2 ${role.color}`
+                            : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50'
+                        }`}
+                      >
+                        <p className="text-xs font-bold">{role.label}</p>
+                        <p className="text-[10px] leading-tight opacity-70">{role.desc}</p>
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
 
               {!editingId && (

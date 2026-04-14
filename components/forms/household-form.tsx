@@ -319,10 +319,7 @@ export function HouseholdForm({ initialData, onSubmit, isLoading = false }: Hous
               ...prev,
               municipality: masterList.municipality || prev.municipality,
               barangay_name: masterList.barangay_name || prev.barangay_name,
-              purok_sitio:
-                prev.purok_sitio && masterList.puroks.length > 0
-                  ? prev.purok_sitio
-                  : prev.purok_sitio || masterList.puroks[0] || prev.purok_sitio,
+              purok_sitio: prev.purok_sitio,
             }));
           }
         }
@@ -777,7 +774,7 @@ export function HouseholdForm({ initialData, onSubmit, isLoading = false }: Hous
                       setFormData((prev) => ({ ...prev, purok_sitio: normalized }));
                     }}
                     className="w-full rounded-md border border-input bg-background px-3 py-2 text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
-                    placeholder="e.g., Purok 1"
+                    placeholder="Type the purok or sitio"
                     disabled={isLoading}
                   />
                   <datalist id="household-purok-options">
@@ -786,7 +783,7 @@ export function HouseholdForm({ initialData, onSubmit, isLoading = false }: Hous
                     ))}
                   </datalist>
                   <p className="mt-1 text-xs text-muted-foreground">
-                    Use the admin master list when possible to keep maps and reports consistent.
+                    Type a new purok if it is not listed. Saved puroks will appear in suggestions.
                   </p>
                 </div>
 

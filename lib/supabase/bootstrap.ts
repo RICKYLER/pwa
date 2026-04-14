@@ -13,6 +13,7 @@ const SUPABASE_BOOTSTRAP_TIMEOUT_MS = 15_000;
 const FULL_BOOTSTRAP_TABLES = SUPABASE_BOOTSTRAP_TABLES.map((entry) => entry.table);
 const FORCE_BOOTSTRAP_COOLDOWN_MS = 900;
 const lastBootstrapStartedAt = new Map<string, number>();
+const lastBootstrapCompletedAt = new Map<string, number>();
 
 function normalizeRequestedTables(tables: SupabaseBootstrapTable[]) {
   const validTables = new Set(FULL_BOOTSTRAP_TABLES);
@@ -30,6 +31,11 @@ function getRequestedTableConfigs(tables?: SupabaseBootstrapTable[]) {
 
 function getBootstrapKey(tables?: SupabaseBootstrapTable[]) {
   return tables?.length ? normalizeRequestedTables(tables).join(',') : FULL_BOOTSTRAP_TABLES.join(',');
+}
+
+export function getLastSupabaseBootstrapCompletedAt(tables?: SupabaseBootstrapTable[]) {
+  const key = getBootstrapKey(tables);
+  return lastBootstrapCompletedAt.get(key) ?? null;
 }
 
 function clearHydratedBootstrapKeys(tables?: SupabaseBootstrapTable[]) {
@@ -188,6 +194,7 @@ export async function bootstrapSupabaseTables(
     }
 
     hydratedBootstrapKeys.add(bootstrapKey);
+    lastBootstrapCompletedAt.set(bootstrapKey, Date.now());
   })()
     .catch((error) => {
       console.warn('Supabase full bootstrap failed:', error);

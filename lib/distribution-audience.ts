@@ -12,18 +12,15 @@ export type DistributionAudienceMatches = {
   matchedResidentsByHouseholdId: Map<string, Resident[]>;
 };
 
-export function isResidentOnlyTargetGroup(targetGroup: DistributionTargetGroup): boolean {
-  return targetGroup === 'senior'
-    || targetGroup === 'pwd'
-    || targetGroup === 'pregnant'
-    || targetGroup === 'minor';
+export function isResidentOnlyTargetGroup(_targetGroup: DistributionTargetGroup): boolean {
+  return false;
 }
 
 export function coerceDistributionTargetScope(
   targetScope: DistributionTargetScope,
-  targetGroup: DistributionTargetGroup,
+  _targetGroup: DistributionTargetGroup,
 ): DistributionTargetScope {
-  return isResidentOnlyTargetGroup(targetGroup) ? 'resident' : targetScope;
+  return targetScope;
 }
 
 export function matchesDistributionTargetGroup(

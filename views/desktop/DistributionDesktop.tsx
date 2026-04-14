@@ -1,10 +1,11 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { getCurrentUser, hasPermission } from '@/lib/auth';
-import { getDistributionEvents, deleteDistributionEvent } from '@/lib/db/distribution';
+import { deleteDistributionEvent, getDistributionEvents } from '@/lib/db/distribution';
+import { getZeroEligibilityDistributionEvents } from '@/lib/db/queries';
 import { DistributionEvent } from '@/lib/db/schema';
 import { Plus, Calendar, MapPin, Package, ChevronRight, Clock, CheckCircle2, Truck, Trash2, AlertTriangle, X } from 'lucide-react';
 
@@ -108,23 +109,40 @@ function DeleteDialog({ event, onConfirm, onCancel, isDeleting }: DeleteDialogPr
 // ─── Main view ────────────────────────────────────────────────────────────────
 export default function DistributionDesktop() {
     const router = useRouter();
+    const searchParams = useSearchParams();
     const user = getCurrentUser();
     const [events, setEvents] = useState<DistributionEvent[]>([]);
+    const [zeroMatchEventIds, setZeroMatchEventIds] = useState<Set<string>>(new Set());
     const [filterStatus, setFilterStatus] = useState<'all' | 'planned' | 'ongoing' | 'completed'>('all');
     const [isLoading, setIsLoading] = useState(true);
     // Which event is pending deletion (shows dialog), and whether delete is in progress
     const [pendingDelete, setPendingDelete] = useState<DistributionEvent | null>(null);
     const [isDeleting, setIsDeleting] = useState(false);
+    const issueFilter = searchParams.get('issue');
+    const isZeroMatchMode = issueFilter === 'zero_matches';
 
     useEffect(() => {
         if (!user || !hasPermission('view_reports')) { router.push('/dashboard'); return; }
-        async function load() { setIsLoading(true); setEvents(await getDistributionEvents()); setIsLoading(false); }
+        async function load() {
+            if (!user) {
+                return;
+            }
+            setIsLoading(true);
+            const [allEvents, zeroMatchEvents] = await Promise.all([
+                getDistributionEvents(),
+                getZeroEligibilityDistributionEvents(user.role === 'admin' ? undefined : user.barangay_id),
+            ]);
+            setEvents(allEvents);
+            setZeroMatchEventIds(new Set(zeroMatchEvents.map((entry) => entry.event.id)));
+            setIsLoading(false);
+        }
         load();
-    }, [user, router]);
+    }, [router, user]);
 
     if (!user) return null;
 
-    const filtered = filterStatus === 'all' ? events : events.filter(e => e.status === filterStatus);
+    const filtered = (filterStatus === 'all' ? events : events.filter(e => e.status === filterStatus))
+        .filter((event) => !isZeroMatchMode || zeroMatchEventIds.has(event.id));
     const counts = { all: events.length, planned: events.filter(e => e.status === 'planned').length, ongoing: events.filter(e => e.status === 'ongoing').length, completed: events.filter(e => e.status === 'completed').length };
 
     async function handleConfirmDelete() {
@@ -169,6 +187,12 @@ export default function DistributionDesktop() {
                     )}
                 </div>
 
+                {isZeroMatchMode && (
+                    <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                        Showing planned and ongoing events that currently have zero eligible matches.
+                    </div>
+                )}
+
                 {/* Summary Strip */}
                 <div className="grid grid-cols-3 gap-4">
                     {([
@@ -210,6 +234,7 @@ export default function DistributionDesktop() {
                             const cfg = STATUS_CFG[event.status as keyof typeof STATUS_CFG] || STATUS_CFG.planned;
                             const schedDate = new Date(event.scheduled_date);
                             const isPast = schedDate < new Date() && event.status !== 'completed';
+                            const hasZeroMatches = zeroMatchEventIds.has(event.id);
                             return (
                                 <div key={event.id} className={`group relative bg-white border border-slate-200/60 rounded-2xl ${cfg.border} hover:shadow-lg transition-all hover:-translate-y-0.5`}>
                                     <Link href={`/distribution/${event.id}`} className="block p-5">
@@ -218,6 +243,9 @@ export default function DistributionDesktop() {
                                             <div className="flex-1 min-w-0">
                                                 <p className="font-bold text-slate-900 text-sm truncate">{event.event_name}</p>
                                                 <p className="text-xs text-slate-400 flex items-center gap-1 mt-0.5 truncate"><MapPin className="w-3 h-3 flex-shrink-0" />{event.location}</p>
+                                                {hasZeroMatches ? (
+                                                    <p className="mt-1 text-[11px] font-semibold text-amber-700">0 eligible matches right now</p>
+                                                ) : null}
                                             </div>
                                             <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold flex-shrink-0 ${cfg.badge}`}>
                                                 <span className={`w-1.5 h-1.5 rounded-full ${cfg.dot}`} />{cfg.label}

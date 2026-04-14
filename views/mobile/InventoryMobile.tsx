@@ -1,7 +1,7 @@
 ﻿'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { AlertTriangle, Filter, Package, Plus, Search, X } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
@@ -21,6 +21,7 @@ import {
   getInventoryItems,
   getLowStockItems,
 } from '@/lib/db/inventory';
+import { getBlockedPackageTemplateReadiness } from '@/lib/db/queries';
 import type { InventoryItem } from '@/lib/db/schema';
 import { CivicBadge, CivicChipButton, CivicEmptyState, CivicPage } from '@/components/ui/civic-primitives';
 import { MobileFilterSheet, MobileListCard, MobilePageHeader } from '@/components/mobile/mobile-primitives';
@@ -37,9 +38,11 @@ const LOW_STOCK = 10;
 
 export default function InventoryMobile() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const user = getCurrentUser();
   const [items, setItems] = useState<InventoryItem[]>([]);
   const [lowStock, setLowStock] = useState<InventoryItem[]>([]);
+  const [blockedTemplateCount, setBlockedTemplateCount] = useState(0);
   const [filterCat, setFilterCat] = useState('all');
   const [search, setSearch] = useState('');
   const [showForm, setShowForm] = useState(false);
@@ -47,6 +50,8 @@ export default function InventoryMobile() {
   const [isLoading, setIsLoading] = useState(true);
   const [isAddingItem, setIsAddingItem] = useState(false);
   const [addItemError, setAddItemError] = useState('');
+  const issueFilter = searchParams.get('issue');
+  const isPackageBlockerMode = issueFilter === 'package_blockers';
   const [form, setForm] = useState({
     item_name: '',
     category: 'food' as const,
@@ -62,9 +67,14 @@ export default function InventoryMobile() {
     }
 
     await bootstrapInventoryFromSupabase();
-    const [inventoryItems, lowStockItems] = await Promise.all([getInventoryItems(), getLowStockItems()]);
+    const [inventoryItems, lowStockItems, blockedTemplates] = await Promise.all([
+      getInventoryItems(),
+      getLowStockItems(),
+      getBlockedPackageTemplateReadiness(),
+    ]);
     setItems(inventoryItems);
     setLowStock(lowStockItems);
+    setBlockedTemplateCount(blockedTemplates.length);
 
     if (!background) {
       setIsLoading(false);
@@ -243,6 +253,16 @@ export default function InventoryMobile() {
             <AlertTitle>{lowStock.length} low-stock item{lowStock.length !== 1 ? 's' : ''}</AlertTitle>
             <AlertDescription>
               {lowStock.slice(0, 3).map((item) => item.item_name).join(', ')}{lowStock.length > 3 ? ` +${lowStock.length - 3} more` : ''}
+            </AlertDescription>
+          </Alert>
+        ) : null}
+
+        {isPackageBlockerMode ? (
+          <Alert className="rounded-[22px] border-rose-200 bg-rose-50 text-rose-700">
+            <AlertTriangle className="h-4 w-4" />
+            <AlertTitle>Package template blockers</AlertTitle>
+            <AlertDescription>
+              {blockedTemplateCount} package template{blockedTemplateCount === 1 ? '' : 's'} currently cannot be fulfilled with available stock.
             </AlertDescription>
           </Alert>
         ) : null}

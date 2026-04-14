@@ -7,7 +7,8 @@ import { AlertTriangle, Baby, FileText, Home, Package, ShieldAlert, Users } from
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { getAnalyticsBarangayScope, getAnalyticsScopeLabel } from '@/lib/analytics-scope';
 import { db } from '@/lib/db/indexeddb';
-import { getDashboardStats } from '@/lib/db/queries';
+import { getDashboardStats, getDataQualitySummary } from '@/lib/db/queries';
+import { getReportsVulnerableTotal } from '@/lib/reports-preview-data';
 import { getDefaultRouteForUser, hasPermission, restoreSession } from '@/lib/auth';
 import {
   CivicBadge,
@@ -40,6 +41,7 @@ export default function DashboardMobile() {
   const router = useRouter();
   const [user, setUser] = useState<ReturnType<typeof restoreSession>>(null);
   const [stats, setStats] = useState<Stats | null>(null);
+  const [dataQuality, setDataQuality] = useState<Awaited<ReturnType<typeof getDataQualitySummary>> | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -61,8 +63,14 @@ export default function DashboardMobile() {
       }
 
       setUser(restoredUser);
-      const dashboardStats = await getDashboardStats(getAnalyticsBarangayScope(restoredUser));
+      const [dashboardStats, qualitySummary] = await Promise.all([
+        getDashboardStats(getAnalyticsBarangayScope(restoredUser)),
+        restoredUser.role === 'admin'
+          ? getDataQualitySummary()
+          : Promise.resolve(null),
+      ]);
       setStats(dashboardStats);
+      setDataQuality(qualitySummary);
       setError('');
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : 'Failed to load dashboard metrics.');
@@ -79,7 +87,7 @@ export default function DashboardMobile() {
 
   useEffect(() => {
     function handleDataChanged(event: WindowEventMap['mswdo-data-changed']) {
-      if (!['households', 'residents', 'vulnerability_flags'].includes(event.detail.table)) {
+      if (!['households', 'residents', 'vulnerability_flags', 'distribution_events', 'inventory_items', 'package_templates'].includes(event.detail.table)) {
         return;
       }
 
@@ -92,9 +100,7 @@ export default function DashboardMobile() {
 
   if (!user) return null;
 
-  const totalVulnerable = stats
-    ? stats.children_count + stats.seniors_count + stats.pwd_count + stats.pregnant_count + stats.chronic_count
-    : 0;
+  const totalVulnerable = getReportsVulnerableTotal(stats);
   const scopeLabel = getAnalyticsScopeLabel(user);
   const heroDescription = user.role === 'admin'
     ? `${(stats?.total_population ?? 0).toLocaleString()} residents are represented across all barangays.`
@@ -183,6 +189,43 @@ export default function DashboardMobile() {
           ))}
         </div>
       </CivicPanel>
+
+      {user.role === 'admin' && dataQuality ? (
+        <CivicPanel className="space-y-4 rounded-[24px] p-4">
+          <CivicSectionHeading
+            icon={AlertTriangle}
+            title="Data Quality"
+            description="Quick links for records and templates that need cleanup."
+          />
+          <div className="space-y-2">
+            {dataQuality.issues.map((issue) => (
+              <Link
+                key={issue.key}
+                href={issue.href}
+                className={`block rounded-[22px] border px-4 py-4 ${
+                  issue.count > 0
+                    ? 'border-amber-200 bg-amber-50/80'
+                    : 'border-slate-200 bg-slate-50'
+                }`}
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-bold text-slate-950">{issue.label}</p>
+                    <p className="mt-1 text-xs leading-5 text-slate-500">{issue.description}</p>
+                  </div>
+                  <CivicBadge
+                    label={`${issue.count}`}
+                    tone={issue.count > 0 ? 'amber' : 'emerald'}
+                  />
+                </div>
+                <p className="mt-2 text-[11px] text-slate-500">
+                  {issue.sample_labels.length > 0 ? `Sample: ${issue.sample_labels.join(', ')}` : 'No issues detected right now.'}
+                </p>
+              </Link>
+            ))}
+          </div>
+        </CivicPanel>
+      ) : null}
     </CivicPage>
   );
 }

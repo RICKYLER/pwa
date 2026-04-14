@@ -51,14 +51,23 @@ export async function POST(request: NextRequest) {
   }
 
   let payload: z.infer<typeof createUserSchema>;
+  let rawPayload: unknown;
 
   try {
-    payload = createUserSchema.parse(await request.json());
+    rawPayload = await request.json();
+    payload = createUserSchema.parse(rawPayload);
   } catch (error) {
     if (error instanceof z.ZodError) {
       return NextResponse.json({ error: error.issues[0]?.message || 'Invalid request.' }, { status: 400 });
     }
     return NextResponse.json({ error: 'Invalid request.' }, { status: 400 });
+  }
+
+  if ((rawPayload as { role?: string } | null)?.role === 'resident') {
+    return NextResponse.json(
+      { error: 'Resident accounts are created through the household registration flow.' },
+      { status: 400 },
+    );
   }
 
   try {

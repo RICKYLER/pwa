@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import {
   AlertTriangle,
   Archive,
@@ -49,6 +49,7 @@ import {
   restoreInventoryItem,
   updateInventoryItem,
 } from '@/lib/db/inventory';
+import { getBlockedPackageTemplateReadiness } from '@/lib/db/queries';
 import type { DistributedItem, InventoryItem, InventoryMovement, PackageTemplate } from '@/lib/db/schema';
 
 const CAT_CFG: Record<
@@ -129,6 +130,7 @@ type ItemActionDialogState = {
 
 export default function InventoryDesktop() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const user = getCurrentUser();
 
   const [items, setItems] = useState<InventoryItem[]>([]);
@@ -138,6 +140,7 @@ export default function InventoryDesktop() {
   const [expiringSoon, setExpiringSoon] = useState<InventoryItem[]>([]);
   const [movements, setMovements] = useState<InventoryMovement[]>([]);
   const [templates, setTemplates] = useState<PackageTemplate[]>([]);
+  const [blockedTemplates, setBlockedTemplates] = useState<Awaited<ReturnType<typeof getBlockedPackageTemplateReadiness>>>([]);
   const [summary, setSummary] = useState({
     totalItemTypes: 0,
     totalUnits: 0,
@@ -169,6 +172,8 @@ export default function InventoryDesktop() {
   const [itemActionError, setItemActionError] = useState('');
   const [itemActionDialog, setItemActionDialog] = useState<ItemActionDialogState | null>(null);
   const [isSavingTemplate, setIsSavingTemplate] = useState(false);
+  const issueFilter = searchParams.get('issue');
+  const isPackageBlockerMode = issueFilter === 'package_blockers';
 
   const [form, setForm] = useState({
     item_name: '',
@@ -212,7 +217,7 @@ export default function InventoryDesktop() {
     try {
       await bootstrapInventoryFromSupabase();
 
-      const [inv, trashList, ls, out, exp, stats, templateList] = await Promise.all([
+      const [inv, trashList, ls, out, exp, stats, templateList, blockedTemplateReadiness] = await Promise.all([
         getInventoryItems(),
         getInventoryTrashItems(),
         getLowStockItems(),
@@ -220,6 +225,7 @@ export default function InventoryDesktop() {
         getExpiringSoonItems(),
         getInventoryStatusSummary(),
         getPackageTemplates(),
+        getBlockedPackageTemplateReadiness(),
       ]);
 
       setItems(inv);
@@ -229,6 +235,7 @@ export default function InventoryDesktop() {
       setExpiringSoon(exp);
       setSummary(stats);
       setTemplates(templateList);
+      setBlockedTemplates(blockedTemplateReadiness);
 
       if (!templateForm.selectedItemId && inv[0]) {
         setTemplateForm((current) => ({ ...current, selectedItemId: inv[0].id }));
@@ -722,6 +729,10 @@ export default function InventoryDesktop() {
 
   const maxQty = Math.max(...currentItems.map((item) => item.quantity_available), 1);
   const hasFilters = search || filterCat !== 'all' || (inventoryView === 'active' && filterStock !== 'all');
+  const blockedTemplateIds = new Set(blockedTemplates.map((entry) => entry.template.id));
+  const displayedTemplates = isPackageBlockerMode
+    ? templates.filter((template) => blockedTemplateIds.has(template.id))
+    : templates;
 
   return (
     <div className="mx-auto max-w-[1500px] space-y-5 p-8">
@@ -781,6 +792,12 @@ export default function InventoryDesktop() {
           ) : null}
         </div>
       </div>
+
+      {isPackageBlockerMode ? (
+        <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          Showing package templates that cannot be fulfilled with the current stock.
+        </div>
+      ) : null}
 
       {inventoryView === 'active' ? (
       <div className="grid gap-4 xl:grid-cols-5">
@@ -1537,7 +1554,7 @@ export default function InventoryDesktop() {
                 </p>
               </div>
               <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-500">
-                {templates.length} template{templates.length !== 1 ? 's' : ''}
+                {displayedTemplates.length} template{displayedTemplates.length !== 1 ? 's' : ''}
               </span>
             </div>
 
@@ -1624,18 +1641,27 @@ export default function InventoryDesktop() {
               </button>
             </form>
 
-            {templates.length > 0 ? (
+            {displayedTemplates.length > 0 ? (
               <div className="mt-4 space-y-3">
-                {templates.map((template) => (
+                {displayedTemplates.map((template) => {
+                  const readiness = blockedTemplates.find((entry) => entry.template.id === template.id);
+                  return (
                   <div
                     key={template.id}
-                    className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3"
+                    className={`rounded-2xl border px-4 py-3 ${
+                      readiness ? 'border-amber-200 bg-amber-50/70' : 'border-slate-200 bg-slate-50'
+                    }`}
                   >
                     <div className="flex items-start justify-between gap-3">
                       <div>
                         <p className="text-sm font-semibold text-slate-900">{template.name}</p>
                         {template.description ? (
                           <p className="mt-0.5 text-xs text-slate-500">{template.description}</p>
+                        ) : null}
+                        {readiness ? (
+                          <p className="mt-1 text-[11px] font-semibold text-amber-700">
+                            Blocking items: {readiness.inventory_summary.blocking_items.map((item) => item.item_name).join(', ')}
+                          </p>
                         ) : null}
                         <div className="mt-2 flex flex-wrap gap-2">
                           {template.items.map((item) => (
@@ -1658,7 +1684,7 @@ export default function InventoryDesktop() {
                       </button>
                     </div>
                   </div>
-                ))}
+                )})}
               </div>
             ) : null}
           </div>

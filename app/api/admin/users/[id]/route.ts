@@ -47,6 +47,20 @@ export async function PATCH(
 
   const nextRole = payload.role ?? existingUser.role;
 
+  if (existingUser.role === 'resident' && payload.role && payload.role !== 'resident') {
+    return NextResponse.json(
+      { error: 'Resident accounts cannot be reassigned here.' },
+      { status: 400 },
+    );
+  }
+
+  if (existingUser.role !== 'resident' && payload.role === 'resident') {
+    return NextResponse.json(
+      { error: 'Resident accounts are created through the household registration flow.' },
+      { status: 400 },
+    );
+  }
+
   if (payload.status && nextRole === 'resident') {
     return NextResponse.json(
       { error: 'Resident accounts use hard delete and cannot be deactivated.' },

@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { Activity, Home, MapPin, Plus, Users, X } from 'lucide-react';
 import { getCurrentUser, hasPermission } from '@/lib/auth';
@@ -37,6 +37,7 @@ const REGISTRATION_TONE = {
 
 export default function HouseholdsDesktop() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const user = getCurrentUser();
   const [households, setHouseholds] = useState<Household[]>([]);
   const [filtered, setFiltered] = useState<Household[]>([]);
@@ -46,6 +47,8 @@ export default function HouseholdsDesktop() {
   const [filterStatus, setFilterStatus] = useState<'all' | 'active' | 'moved_out' | 'deceased'>('active');
   const [isLoading, setIsLoading] = useState(true);
   const [memberCounts, setMemberCounts] = useState<Record<string, number>>({});
+  const issueFilter = searchParams.get('issue');
+  const isMissingLocationMode = issueFilter === 'missing_location';
 
   const loadHouseholdsData = useCallback(async (background = false) => {
     if (!user || !hasPermission('view_households')) {
@@ -96,6 +99,13 @@ export default function HouseholdsDesktop() {
 
   useEffect(() => {
     let result = households;
+    if (isMissingLocationMode) {
+      result = result.filter((household) => (
+        household.status === 'active'
+        && getHouseholdRegistrationStatus(household) === 'approved'
+        && !hasHouseholdPin(household)
+      ));
+    }
     if (filterStatus !== 'all') result = result.filter((household) => household.status === filterStatus);
     if (filterPurok !== 'all') result = result.filter((household) => household.purok_sitio === filterPurok);
     if (search) {
@@ -107,7 +117,7 @@ export default function HouseholdsDesktop() {
       );
     }
     setFiltered(result);
-  }, [households, search, filterPurok, filterStatus]);
+  }, [filterPurok, filterStatus, households, isMissingLocationMode, search]);
 
   if (!user) return null;
 
@@ -115,7 +125,7 @@ export default function HouseholdsDesktop() {
   const movedCount = households.filter((household) => household.status === 'moved_out').length;
   const pendingCount = households.filter((household) => getHouseholdRegistrationStatus(household) === 'pending').length;
   const deceasedCount = households.filter((household) => household.status === 'deceased').length;
-  const hasFilters = search || filterPurok !== 'all' || filterStatus !== 'all';
+  const hasFilters = Boolean(search) || filterPurok !== 'all' || filterStatus !== 'all' || isMissingLocationMode;
 
   return (
     <CivicPage className="space-y-6">
@@ -129,6 +139,22 @@ export default function HouseholdsDesktop() {
             : `${households.length} records tracked in ${user.barangay_id}.`}
         aside={pendingCount > 0 ? <CivicBadge label={`${pendingCount} pending review`} tone="amber" /> : null}
       />
+
+      {isMissingLocationMode ? (
+        <CivicPanel className="border-amber-200 bg-amber-50/90">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="text-sm font-bold text-amber-900">Data Quality Filter: Missing Coordinates</p>
+              <p className="mt-1 text-xs text-amber-800">
+                Showing approved active households that still need a usable map pin.
+              </p>
+            </div>
+            <Link href="/households" className="text-xs font-semibold text-amber-900 underline underline-offset-4">
+              Show all households
+            </Link>
+          </div>
+        </CivicPanel>
+      ) : null}
 
       <div className="grid grid-cols-4 gap-4">
         <CivicKpiCard icon={Home} label="Total households" value={isLoading ? '—' : households.length} tone="navy" />

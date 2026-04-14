@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { ArrowLeft, ShieldCheck } from 'lucide-react';
 import AppShell from '@/components/AppShell';
 import { HouseholdRegistrationWizard } from '@/components/forms/household-registration-wizard';
@@ -10,12 +10,14 @@ import type { MemberDraft } from '@/components/forms/household-form';
 import ResidentShell from '@/components/resident/ResidentShell';
 import { getCurrentUser, hasPermission } from '@/lib/auth';
 import { createHouseholdBundle, getHouseholds } from '@/lib/db/households';
+import { normalizeBarangaySelection } from '@/lib/barangays';
 import type { Household } from '@/lib/db/schema';
 import { CivicBadge, CivicPanel, CivicSectionHeading } from '@/components/ui/civic-primitives';
 import { resolveResidentActiveApprovedHousehold } from '@/lib/resident-households';
 
 export default function HouseholdRegistrationPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const user = getCurrentUser();
   const [ready, setReady] = useState(false);
 
@@ -74,6 +76,12 @@ export default function HouseholdRegistrationPage() {
     return null;
   }
 
+  const prefilledHeadName = searchParams.get('head_name')?.trim() || '';
+  const prefilledApplicantEmail = searchParams.get('applicant_email')?.trim() || '';
+  const selectedBarangayId = normalizeBarangaySelection(
+    searchParams.get('barangay_id') || user.barangay_id,
+  );
+
   const content = (
       <div className="mx-auto max-w-[1180px] space-y-6 p-4 sm:p-6 lg:p-8">
         <CivicPanel>
@@ -99,10 +107,10 @@ export default function HouseholdRegistrationPage() {
         </CivicPanel>
 
         <HouseholdRegistrationWizard
-          barangayId={user.barangay_id}
+          barangayId={selectedBarangayId}
           initialValues={{
-            head_name: user.role === 'resident' ? user.name : undefined,
-            applicant_email: user.email,
+            head_name: user.role === 'resident' ? user.name : prefilledHeadName,
+            applicant_email: user.role === 'resident' ? user.email : prefilledApplicantEmail,
           }}
           lockApplicantEmail={user.role === 'resident'}
           onSubmit={handleSubmit}

@@ -1,12 +1,13 @@
 ﻿'use client';
 
 import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { AlertTriangle, Calendar, Filter, MapPin, Package, Plus, Trash2, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { getCurrentUser, hasPermission } from '@/lib/auth';
 import { deleteDistributionEvent, getDistributionEvents } from '@/lib/db/distribution';
+import { getZeroEligibilityDistributionEvents } from '@/lib/db/queries';
 import type { DistributionEvent } from '@/lib/db/schema';
 import { CivicBadge, CivicChipButton, CivicEmptyState, CivicPage } from '@/components/ui/civic-primitives';
 import { MobileFilterSheet, MobileListCard, MobilePageHeader } from '@/components/mobile/mobile-primitives';
@@ -64,13 +65,17 @@ function DeleteSheet({ event, onConfirm, onCancel, isDeleting }: DeleteSheetProp
 
 export default function DistributionMobile() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const user = getCurrentUser();
   const [events, setEvents] = useState<DistributionEvent[]>([]);
+  const [zeroMatchEventIds, setZeroMatchEventIds] = useState<Set<string>>(new Set());
   const [filterStatus, setFilterStatus] = useState<DistributionStatus>('all');
   const [filterSheetOpen, setFilterSheetOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [pendingDelete, setPendingDelete] = useState<DistributionEvent | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+  const issueFilter = searchParams.get('issue');
+  const isZeroMatchMode = issueFilter === 'zero_matches';
 
   useEffect(() => {
     if (!user || !hasPermission('view_reports')) {
@@ -79,8 +84,16 @@ export default function DistributionMobile() {
     }
 
     async function load() {
+      if (!user) {
+        return;
+      }
       setIsLoading(true);
-      setEvents(await getDistributionEvents());
+      const [allEvents, zeroMatchEvents] = await Promise.all([
+        getDistributionEvents(),
+        getZeroEligibilityDistributionEvents(user.role === 'admin' ? undefined : user.barangay_id),
+      ]);
+      setEvents(allEvents);
+      setZeroMatchEventIds(new Set(zeroMatchEvents.map((entry) => entry.event.id)));
       setIsLoading(false);
     }
 
@@ -89,7 +102,8 @@ export default function DistributionMobile() {
 
   if (!user) return null;
 
-  const filteredEvents = filterStatus === 'all' ? events : events.filter((event) => event.status === filterStatus);
+  const filteredEvents = (filterStatus === 'all' ? events : events.filter((event) => event.status === filterStatus))
+    .filter((event) => !isZeroMatchMode || zeroMatchEventIds.has(event.id));
   const counts = {
     all: events.length,
     planned: events.filter((event) => event.status === 'planned').length,
@@ -143,6 +157,7 @@ export default function DistributionMobile() {
 
         <div className="flex flex-wrap gap-2">
           <CivicBadge label={`${filteredEvents.length} showing`} tone="slate" />
+          {isZeroMatchMode ? <CivicBadge label="0 eligible" tone="amber" /> : null}
           {filterStatus !== 'all' ? <CivicBadge label={STATUS[filterStatus]?.label || 'Filtered'} tone="navy" /> : null}
           <Button
             type="button"
@@ -178,6 +193,12 @@ export default function DistributionMobile() {
           )}
         />
 
+        {isZeroMatchMode ? (
+          <div className="rounded-[22px] border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+            Showing events that currently have zero eligible matches.
+          </div>
+        ) : null}
+
         {isLoading ? (
           <div className="space-y-2">
             {[...Array(4)].map((_, index) => (
@@ -190,6 +211,7 @@ export default function DistributionMobile() {
               const schedDate = new Date(event.scheduled_date);
               const isPast = schedDate < new Date() && event.status !== 'completed';
               const tone = STATUS[event.status as keyof typeof STATUS] ?? STATUS.planned;
+              const hasZeroMatches = zeroMatchEventIds.has(event.id);
 
               return (
                 <MobileListCard
@@ -205,6 +227,12 @@ export default function DistributionMobile() {
                   )}
                   meta={(
                     <div className="space-y-2 text-xs text-slate-500">
+                      {hasZeroMatches ? (
+                        <div className="inline-flex items-center gap-1.5 font-semibold text-amber-700">
+                          <AlertTriangle className="h-3.5 w-3.5" />
+                          <span>0 eligible matches right now</span>
+                        </div>
+                      ) : null}
                       <div className="inline-flex items-center gap-1.5">
                         <Calendar className="h-3.5 w-3.5" />
                         <span>{schedDate.toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' })}</span>

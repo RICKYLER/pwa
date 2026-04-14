@@ -1,0 +1,9 @@
+npm test
+
+node --import tsx --test tests/user-account-status.test.ts
+node --import tsx --test tests/vulnerability.test.ts
+node --import tsx --test tests/distribution-audience.test.ts
+
+node --test tests/geocoding-unit.test.js
+
+npx tsc --noEmit

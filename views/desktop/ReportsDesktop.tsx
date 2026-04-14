@@ -8,6 +8,7 @@ import { CivicBadge, CivicPanel } from '@/components/ui/civic-primitives';
 import { getAnalyticsBarangayScope } from '@/lib/analytics-scope';
 import { getCurrentUser, hasPermission } from '@/lib/auth';
 import { getDashboardStats, getTopPuroksByHouseholds } from '@/lib/db/queries';
+import { getReportsVulnerableTotal } from '@/lib/reports-preview-data';
 
 type Stats = Awaited<ReturnType<typeof getDashboardStats>>;
 
@@ -69,9 +70,7 @@ export default function ReportsDesktop() {
 
   if (!user) return null;
 
-  const totalVulnerable = stats
-    ? stats.children_count + stats.seniors_count + stats.pwd_count + stats.pregnant_count + stats.chronic_count
-    : 0;
+  const totalVulnerable = getReportsVulnerableTotal(stats);
   const lastUpdatedLabel = lastUpdatedAt
     ? lastUpdatedAt.toLocaleTimeString('en-PH', { hour: 'numeric', minute: '2-digit' })
     : (isLoading ? 'Syncing...' : 'Waiting');

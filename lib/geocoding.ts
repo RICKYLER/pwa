@@ -24,19 +24,6 @@ export interface LocationSearchContext {
 
 const PLUS_CODE_PATTERN = /\b[23456789CFGHJMPQRVWX]{4,8}\+[23456789CFGHJMPQRVWX]{2,3}\b/gi;
 
-export const DEFAULT_PUROK_OPTIONS = [
-  'Purok 1',
-  'Purok 2',
-  'Purok 3',
-  'Purok 4',
-  'Purok 5',
-  'Purok 6',
-  'Purok 7',
-  'Sitio A',
-  'Sitio B',
-  'Sitio C',
-];
-
 const DEFAULT_MUNICIPALITY = process.env.NEXT_PUBLIC_DEFAULT_MUNICIPALITY?.trim() || '';
 
 function humanizeBarangayId(barangayId?: string): string | undefined {
@@ -255,7 +242,7 @@ function buildResolvedLocation(
 export function mergePurokOptions(values: string[]): string[] {
   const merged = new Set<string>();
 
-  [...DEFAULT_PUROK_OPTIONS, ...values]
+  values
     .map((value) => normalizePurokSitio(value))
     .filter(Boolean)
     .forEach((value) => merged.add(value));

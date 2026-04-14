@@ -123,20 +123,20 @@ test('all audience keeps every resident and household in scope', () => {
   assert.equal(matches.matchedResidentsByHouseholdId.get('hh-2')?.length, 1);
 });
 
-test('resident-only target groups stay on member-based release flows', () => {
-  assert.equal(isResidentOnlyTargetGroup('senior'), true);
-  assert.equal(isResidentOnlyTargetGroup('pwd'), true);
-  assert.equal(isResidentOnlyTargetGroup('pregnant'), true);
-  assert.equal(isResidentOnlyTargetGroup('minor'), true);
+test('target groups remain selectable for either household or resident release flows', () => {
+  assert.equal(isResidentOnlyTargetGroup('senior'), false);
+  assert.equal(isResidentOnlyTargetGroup('pwd'), false);
+  assert.equal(isResidentOnlyTargetGroup('pregnant'), false);
+  assert.equal(isResidentOnlyTargetGroup('minor'), false);
   assert.equal(isResidentOnlyTargetGroup('all'), false);
   assert.equal(isResidentOnlyTargetGroup('low_income'), false);
 });
 
-test('member-based target groups coerce household events into resident release', () => {
-  assert.equal(coerceDistributionTargetScope('household', 'senior'), 'resident');
-  assert.equal(coerceDistributionTargetScope('household', 'pwd'), 'resident');
-  assert.equal(coerceDistributionTargetScope('household', 'pregnant'), 'resident');
-  assert.equal(coerceDistributionTargetScope('household', 'minor'), 'resident');
+test('target scope stays exactly as selected by the user', () => {
+  assert.equal(coerceDistributionTargetScope('household', 'senior'), 'household');
+  assert.equal(coerceDistributionTargetScope('household', 'pwd'), 'household');
+  assert.equal(coerceDistributionTargetScope('household', 'pregnant'), 'household');
+  assert.equal(coerceDistributionTargetScope('household', 'minor'), 'household');
   assert.equal(coerceDistributionTargetScope('household', 'all'), 'household');
   assert.equal(coerceDistributionTargetScope('resident', 'all'), 'resident');
   assert.equal(coerceDistributionTargetScope('household', 'low_income'), 'household');
