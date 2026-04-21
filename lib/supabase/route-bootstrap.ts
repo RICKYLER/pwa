@@ -10,15 +10,19 @@ const ROUTE_TABLES: Array<{
 }> = [
   {
     prefix: '/admin/location-review',
-    tables: ['households', 'residents', 'location_master_lists'],
+    tables: ['households', 'residents', 'location_master_lists', 'purok_risk_profiles'],
   },
   {
     prefix: '/dashboard',
     tables: ['households', 'residents', 'vulnerability_flags', 'audit_logs', 'distribution_events', 'inventory_items', 'package_templates'],
   },
   {
+    prefix: '/alerts',
+    tables: ['disaster_alerts', 'user_notifications', 'location_master_lists', 'purok_risk_profiles', 'disaster_alert_rules'],
+  },
+  {
     prefix: '/households',
-    tables: ['households', 'residents', 'location_master_lists'],
+    tables: ['households', 'residents', 'location_master_lists', 'purok_risk_profiles'],
   },
   {
     prefix: '/vulnerability',
@@ -26,7 +30,7 @@ const ROUTE_TABLES: Array<{
   },
   {
     prefix: '/responder',
-    tables: ['households', 'residents', 'vulnerability_flags', 'incidents', 'distribution_events'],
+    tables: ['households', 'residents', 'vulnerability_flags', 'incidents', 'distribution_events', 'purok_risk_profiles', 'disaster_alert_rules'],
   },
   {
     prefix: '/inventory',
@@ -38,11 +42,11 @@ const ROUTE_TABLES: Array<{
   },
   {
     prefix: '/resident/household',
-    tables: ['households', 'residents', 'vulnerability_flags', 'user_notifications'],
+    tables: ['households', 'residents', 'vulnerability_flags', 'user_notifications', 'purok_risk_profiles'],
   },
   {
     prefix: '/resident',
-    tables: ['households', 'user_notifications'],
+    tables: ['households', 'user_notifications', 'purok_risk_profiles'],
   },
 ];
 

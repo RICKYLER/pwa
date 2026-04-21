@@ -1,8 +1,8 @@
 {
-  "name": "E-Mabini: A Dynamic Household Census and Disaster Management System",
+  "name": "MABINI DISASTER RISK HOUSEHOLD PROFILING SYSTEM",
   "short_name": "E-Mabini",
   "id": "/",
-  "description": "E-Mabini: A Dynamic Household Census and Disaster Management System",
+  "description": "MABINI DISASTER RISK HOUSEHOLD PROFILING SYSTEM",
   "start_url": "/",
   "display_override": ["window-controls-overlay", "standalone"],
   "display": "standalone",

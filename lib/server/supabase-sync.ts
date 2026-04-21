@@ -22,6 +22,7 @@ const SUPPORTED_ENTITY_TYPES = [
   'distribution_records',
   'incidents',
   'location_master_lists',
+  'purok_risk_profiles',
   'audit_logs',
 ] as const;
 
@@ -38,6 +39,7 @@ const CONFLICT_GUARDED_ENTITY_TYPES = new Set<SupportedEntityType>([
   'distribution_events',
   'incidents',
   'location_master_lists',
+  'purok_risk_profiles',
 ]);
 
 type SyncFailure = {
@@ -68,6 +70,7 @@ const UPSERT_ORDER: SupportedEntityType[] = [
   'beneficiaries',
   'inventory_movements',
   'incidents',
+  'purok_risk_profiles',
   'distribution_events',
   'distribution_records',
   'audit_logs',
@@ -413,6 +416,20 @@ async function mapQueueItemToSupabaseRow(item: SyncQueueItem, syncActorId: strin
         puroks: toTextArray(data.puroks),
         updated_at: toTimestamp(data.updatedAt),
         updated_by: toOptionalUuid(data.updatedBy),
+      };
+    case 'purok_risk_profiles':
+      return {
+        id: toRequiredString(data.id, 'purok_risk_profile.id'),
+        barangay_id: toRequiredString(data.barangay_id, 'purok_risk_profile.barangay_id'),
+        purok_sitio: toRequiredString(data.purok_sitio, 'purok_risk_profile.purok_sitio'),
+        flood_prone: toBooleanValue(data.flood_prone),
+        flood_control_status: toRequiredString(data.flood_control_status, 'purok_risk_profile.flood_control_status'),
+        flood_control_notes: toOptionalString(data.flood_control_notes),
+        default_evacuation_site: toOptionalString(data.default_evacuation_site),
+        warning_notes: toOptionalString(data.warning_notes),
+        updated_at: toTimestamp(data.updatedAt),
+        updated_by: toOptionalUuid(data.updatedBy),
+        sync_status: syncStatus,
       };
     case 'audit_logs':
       return {

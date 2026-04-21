@@ -14,6 +14,7 @@ import {
   Users,
 } from 'lucide-react';
 import ResidentShell from '@/components/resident/ResidentShell';
+import { PurokFloodProfileCard } from '@/components/PurokFloodProfileCard';
 import {
   CivicBadge,
   CivicKpiCard,
@@ -22,6 +23,7 @@ import {
 } from '@/components/ui/civic-primitives';
 import { getCurrentUser, getDefaultRouteForUser, isResidentUser } from '@/lib/auth';
 import { getHouseholds } from '@/lib/db/households';
+import { getPurokRiskProfile } from '@/lib/db/purok-risk-profiles';
 import {
   createResident,
   getResidentsInHousehold,
@@ -34,6 +36,7 @@ import type {
   IncomeLevel,
   PWDType,
   Resident,
+  PurokRiskProfile,
   VulnerabilityFlags,
 } from '@/lib/db/schema';
 import { formatRegistrationStatusLabel, getHouseholdRegistrationStatus } from '@/lib/household-registration';
@@ -170,6 +173,7 @@ export default function ResidentHouseholdPage() {
   const [household, setHousehold] = useState<Household | null>(null);
   const [members, setMembers] = useState<Resident[]>([]);
   const [memberFlagsByResidentId, setMemberFlagsByResidentId] = useState<Map<string, VulnerabilityFlags>>(new Map());
+  const [purokRiskProfile, setPurokRiskProfile] = useState<PurokRiskProfile | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [showAddMember, setShowAddMember] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -184,6 +188,7 @@ export default function ResidentHouseholdPage() {
       setHousehold(null);
       setMembers([]);
       setMemberFlagsByResidentId(new Map());
+      setPurokRiskProfile(null);
       router.replace('/households/register');
       return;
     }
@@ -191,9 +196,11 @@ export default function ResidentHouseholdPage() {
     const residentList = await getResidentsInHousehold(activeHousehold.id);
     const activeResidents = residentList.filter((resident) => resident.status === 'active');
     const flagsMap = await getCurrentVulnerabilityFlagsMapForResidents(activeResidents, [activeHousehold]);
+    const profile = await getPurokRiskProfile(activeHousehold.barangay_id, activeHousehold.purok_sitio);
     setHousehold(activeHousehold);
     setMembers(activeResidents);
     setMemberFlagsByResidentId(flagsMap);
+    setPurokRiskProfile(profile ?? null);
   }
 
   useEffect(() => {
@@ -230,6 +237,7 @@ export default function ResidentHouseholdPage() {
         event.detail.table !== 'households'
         && event.detail.table !== 'residents'
         && event.detail.table !== 'vulnerability_flags'
+        && event.detail.table !== 'purok_risk_profiles'
       ) {
         return;
       }
@@ -425,6 +433,10 @@ export default function ResidentHouseholdPage() {
 
             <div className="mt-5 rounded-[24px] border border-emerald-200 bg-emerald-50 px-4 py-4 text-sm text-emerald-900">
               Your registration is already approved, so this page replaces the new registration flow. Add members here whenever your household list changes.
+            </div>
+
+            <div className="mt-5">
+              <PurokFloodProfileCard household={household} profile={purokRiskProfile} />
             </div>
           </CivicPanel>
 

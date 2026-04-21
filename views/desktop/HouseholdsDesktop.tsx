@@ -1,15 +1,27 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { Activity, Home, MapPin, Plus, Users, X } from 'lucide-react';
+import { Activity, Home, Plus, Users, X } from 'lucide-react';
 import { getCurrentUser, hasPermission } from '@/lib/auth';
 import { getAllPuroks, getHouseholds } from '@/lib/db/households';
+import { getPurokRiskProfiles } from '@/lib/db/purok-risk-profiles';
 import { getResidentsInHousehold } from '@/lib/db/residents';
-import type { Household } from '@/lib/db/schema';
+import type { DisasterRiskLevel, HazardType, Household, PurokFloodControlStatus, PurokRiskProfile } from '@/lib/db/schema';
 import { formatRegistrationStatusLabel, getHouseholdRegistrationStatus } from '@/lib/household-registration';
 import { hasHouseholdPin } from '@/lib/map-pins';
+import {
+  DISASTER_RISK_LEVEL_LABELS,
+  HAZARD_LABELS,
+  parseHazardTags,
+} from '@/lib/disaster-alerts';
+import {
+  buildPurokRiskProfileMap,
+  getPurokRiskProfileForHousehold,
+  matchesPurokRiskFilters,
+  PUROK_FLOOD_CONTROL_STATUS_LABELS,
+} from '@/lib/purok-risk-profiles';
 import {
   CivicBadge,
   CivicChipButton,
@@ -34,21 +46,40 @@ const REGISTRATION_TONE = {
   needs_correction: 'amber' as const,
   rejected: 'rose' as const,
 };
+const HAZARD_FILTER_OPTIONS: HazardType[] = [
+  'flood',
+  'typhoon',
+  'landslide',
+  'storm_surge',
+  'fire',
+  'earthquake',
+];
+const DISASTER_RISK_OPTIONS: DisasterRiskLevel[] = ['low', 'medium', 'high'];
+const PUROK_FLOOD_CONTROL_OPTIONS: PurokFloodControlStatus[] = ['protected', 'partial', 'none', 'unknown'];
+type PurokFloodProneFilter = 'all' | 'flood_prone' | 'not_flood_prone';
 
 export default function HouseholdsDesktop() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const user = getCurrentUser();
   const [households, setHouseholds] = useState<Household[]>([]);
-  const [filtered, setFiltered] = useState<Household[]>([]);
   const [puroks, setPuroks] = useState<string[]>([]);
+  const [purokRiskProfiles, setPurokRiskProfiles] = useState<PurokRiskProfile[]>([]);
   const [search, setSearch] = useState('');
   const [filterPurok, setFilterPurok] = useState('all');
   const [filterStatus, setFilterStatus] = useState<'all' | 'active' | 'moved_out' | 'deceased'>('active');
+  const [filterHazard, setFilterHazard] = useState<HazardType | 'all'>('all');
+  const [filterRiskLevel, setFilterRiskLevel] = useState<DisasterRiskLevel | 'all'>('all');
+  const [filterFloodProne, setFilterFloodProne] = useState<PurokFloodProneFilter>('all');
+  const [filterFloodControlStatus, setFilterFloodControlStatus] = useState<PurokFloodControlStatus | 'all'>('all');
   const [isLoading, setIsLoading] = useState(true);
   const [memberCounts, setMemberCounts] = useState<Record<string, number>>({});
   const issueFilter = searchParams.get('issue');
   const isMissingLocationMode = issueFilter === 'missing_location';
+  const purokRiskProfileMap = useMemo(
+    () => buildPurokRiskProfileMap(purokRiskProfiles),
+    [purokRiskProfiles],
+  );
 
   const loadHouseholdsData = useCallback(async (background = false) => {
     if (!user || !hasPermission('view_households')) {
@@ -60,10 +91,14 @@ export default function HouseholdsDesktop() {
       setIsLoading(true);
     }
 
-    const allHouseholds = user.role === 'admin'
-      ? await getHouseholds()
-      : await getHouseholds({ barangay_id: user.barangay_id });
+    const [allHouseholds, profiles] = await Promise.all([
+      user.role === 'admin'
+        ? getHouseholds()
+        : getHouseholds({ barangay_id: user.barangay_id }),
+      getPurokRiskProfiles(user.role === 'admin' ? undefined : user.barangay_id),
+    ]);
     setHouseholds(allHouseholds);
+    setPurokRiskProfiles(profiles);
     const counts: Record<string, number> = {};
     for (const household of allHouseholds) {
       counts[household.id] = (await getResidentsInHousehold(household.id)).length;
@@ -81,12 +116,16 @@ export default function HouseholdsDesktop() {
   }, [router, user]);
 
   useEffect(() => {
-    void loadHouseholdsData();
+    const timeoutId = window.setTimeout(() => {
+      void loadHouseholdsData();
+    }, 0);
+
+    return () => window.clearTimeout(timeoutId);
   }, [loadHouseholdsData]);
 
   useEffect(() => {
     function handleDataChanged(event: WindowEventMap['mswdo-data-changed']) {
-      if (!['households', 'residents'].includes(event.detail.table)) {
+      if (!['households', 'residents', 'purok_risk_profiles'].includes(event.detail.table)) {
         return;
       }
 
@@ -97,7 +136,7 @@ export default function HouseholdsDesktop() {
     return () => window.removeEventListener('mswdo-data-changed', handleDataChanged);
   }, [loadHouseholdsData]);
 
-  useEffect(() => {
+  const filtered = useMemo(() => {
     let result = households;
     if (isMissingLocationMode) {
       result = result.filter((household) => (
@@ -108,6 +147,16 @@ export default function HouseholdsDesktop() {
     }
     if (filterStatus !== 'all') result = result.filter((household) => household.status === filterStatus);
     if (filterPurok !== 'all') result = result.filter((household) => household.purok_sitio === filterPurok);
+    if (filterHazard !== 'all') {
+      result = result.filter((household) => parseHazardTags(household.hazard_tags).includes(filterHazard));
+    }
+    if (filterRiskLevel !== 'all') {
+      result = result.filter((household) => household.disaster_risk_level === filterRiskLevel);
+    }
+    result = result.filter((household) => matchesPurokRiskFilters(household, purokRiskProfileMap, {
+      floodProne: filterFloodProne,
+      floodControlStatus: filterFloodControlStatus,
+    }));
     if (search) {
       const query = search.toLowerCase();
       result = result.filter((household) =>
@@ -116,8 +165,9 @@ export default function HouseholdsDesktop() {
         || household.id.toLowerCase().includes(query),
       );
     }
-    setFiltered(result);
-  }, [filterPurok, filterStatus, households, isMissingLocationMode, search]);
+
+    return result;
+  }, [filterFloodControlStatus, filterFloodProne, filterHazard, filterPurok, filterRiskLevel, filterStatus, households, isMissingLocationMode, purokRiskProfileMap, search]);
 
   if (!user) return null;
 
@@ -125,7 +175,14 @@ export default function HouseholdsDesktop() {
   const movedCount = households.filter((household) => household.status === 'moved_out').length;
   const pendingCount = households.filter((household) => getHouseholdRegistrationStatus(household) === 'pending').length;
   const deceasedCount = households.filter((household) => household.status === 'deceased').length;
-  const hasFilters = Boolean(search) || filterPurok !== 'all' || filterStatus !== 'all' || isMissingLocationMode;
+  const hasFilters = Boolean(search)
+    || filterPurok !== 'all'
+    || filterStatus !== 'all'
+    || filterHazard !== 'all'
+    || filterRiskLevel !== 'all'
+    || filterFloodProne !== 'all'
+    || filterFloodControlStatus !== 'all'
+    || isMissingLocationMode;
 
   return (
     <CivicPage className="space-y-6">
@@ -167,7 +224,7 @@ export default function HouseholdsDesktop() {
         <CivicSectionHeading
           icon={Home}
           title="Filters"
-          description="Search household heads, narrow to a purok, and focus by status."
+          description="Search household heads, narrow to a purok, and focus by status, hazard, or disaster risk level."
           action={hasPermission('create_household') ? (
             <Link
               href="/households/register"
@@ -197,6 +254,45 @@ export default function HouseholdsDesktop() {
               ))}
             </select>
           ) : null}
+          <select
+            value={filterHazard}
+            onChange={(event) => setFilterHazard(event.target.value as HazardType | 'all')}
+            className="h-11 rounded-2xl border border-slate-200 bg-white px-4 text-sm text-slate-700 outline-none focus:border-cyan-900"
+          >
+            <option value="all">All hazards</option>
+            {HAZARD_FILTER_OPTIONS.map((hazard) => (
+              <option key={hazard} value={hazard}>{HAZARD_LABELS[hazard]}</option>
+            ))}
+          </select>
+          <select
+            value={filterRiskLevel}
+            onChange={(event) => setFilterRiskLevel(event.target.value as DisasterRiskLevel | 'all')}
+            className="h-11 rounded-2xl border border-slate-200 bg-white px-4 text-sm text-slate-700 outline-none focus:border-cyan-900"
+          >
+            <option value="all">All risk levels</option>
+            {DISASTER_RISK_OPTIONS.map((riskLevel) => (
+              <option key={riskLevel} value={riskLevel}>{DISASTER_RISK_LEVEL_LABELS[riskLevel]}</option>
+            ))}
+          </select>
+          <select
+            value={filterFloodProne}
+            onChange={(event) => setFilterFloodProne(event.target.value as PurokFloodProneFilter)}
+            className="h-11 rounded-2xl border border-slate-200 bg-white px-4 text-sm text-slate-700 outline-none focus:border-cyan-900"
+          >
+            <option value="all">All purok flood flags</option>
+            <option value="flood_prone">Flood-prone puroks</option>
+            <option value="not_flood_prone">Not flood-prone</option>
+          </select>
+          <select
+            value={filterFloodControlStatus}
+            onChange={(event) => setFilterFloodControlStatus(event.target.value as PurokFloodControlStatus | 'all')}
+            className="h-11 rounded-2xl border border-slate-200 bg-white px-4 text-sm text-slate-700 outline-none focus:border-cyan-900"
+          >
+            <option value="all">All flood control</option>
+            {PUROK_FLOOD_CONTROL_OPTIONS.map((status) => (
+              <option key={status} value={status}>{PUROK_FLOOD_CONTROL_STATUS_LABELS[status]}</option>
+            ))}
+          </select>
         </div>
         <div className="mt-4 flex flex-wrap gap-2">
           {[
@@ -219,6 +315,10 @@ export default function HouseholdsDesktop() {
                 setSearch('');
                 setFilterPurok('all');
                 setFilterStatus('all');
+                setFilterHazard('all');
+                setFilterRiskLevel('all');
+                setFilterFloodProne('all');
+                setFilterFloodControlStatus('all');
               }}
               className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-600"
             >
@@ -240,6 +340,8 @@ export default function HouseholdsDesktop() {
           {filtered.map((household) => {
             const status = STATUS_CFG[household.status as keyof typeof STATUS_CFG] ?? STATUS_CFG.active;
             const registrationStatus = getHouseholdRegistrationStatus(household);
+            const householdHazards = parseHazardTags(household.hazard_tags);
+            const purokRiskProfile = getPurokRiskProfileForHousehold(household, purokRiskProfileMap);
             const locationSummary = user.role === 'admin'
               ? [
                 household.barangay_name || household.barangay_id,
@@ -268,7 +370,46 @@ export default function HouseholdsDesktop() {
                           tone={REGISTRATION_TONE[registrationStatus] ?? 'slate'}
                           className="text-[10px]"
                         />
+                        <CivicBadge
+                          label={DISASTER_RISK_LEVEL_LABELS[household.disaster_risk_level ?? 'medium']}
+                          tone={
+                            household.disaster_risk_level === 'high'
+                              ? 'rose'
+                              : household.disaster_risk_level === 'medium'
+                                ? 'amber'
+                                : 'emerald'
+                          }
+                          className="text-[10px]"
+                        />
                         {hasHouseholdPin(household) ? <CivicBadge label="Pinned" tone="navy" className="text-[10px]" /> : null}
+                      </div>
+                      <div className="mt-2 flex flex-wrap gap-1">
+                        <CivicBadge
+                          label={purokRiskProfile?.flood_prone ? 'Flood-prone purok' : 'Not flood-prone'}
+                          tone={purokRiskProfile?.flood_prone ? 'rose' : 'emerald'}
+                          className="text-[10px]"
+                        />
+                        <CivicBadge
+                          label={PUROK_FLOOD_CONTROL_STATUS_LABELS[purokRiskProfile?.flood_control_status ?? 'unknown']}
+                          tone={
+                            purokRiskProfile?.flood_control_status === 'protected'
+                              ? 'emerald'
+                              : purokRiskProfile?.flood_control_status === 'partial'
+                                ? 'amber'
+                                : purokRiskProfile?.flood_control_status === 'none'
+                                  ? 'rose'
+                                  : 'slate'
+                          }
+                          className="text-[10px]"
+                        />
+                        {householdHazards.length > 0 ? householdHazards.slice(0, 3).map((hazard) => (
+                          <CivicBadge key={hazard} label={HAZARD_LABELS[hazard]} tone="teal" className="text-[10px]" />
+                        )) : (
+                          <CivicBadge label="No hazard tags" tone="slate" className="text-[10px]" />
+                        )}
+                        {householdHazards.length > 3 ? (
+                          <CivicBadge label={`+${householdHazards.length - 3} more`} tone="slate" className="text-[10px]" />
+                        ) : null}
                       </div>
                     </div>
                   </div>

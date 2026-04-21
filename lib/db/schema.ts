@@ -13,7 +13,7 @@ export type DistributionType = 'regular' | 'emergency' | 'disaster_relief';
 export type DistributionStatus = 'planned' | 'ongoing' | 'completed';
 export type DistributionTargetScope = 'household' | 'resident';
 export type DistributionTargetGroup = 'all' | 'senior' | 'pwd' | 'pregnant' | 'minor' | 'low_income';
-export type UserNotificationType = 'distribution_event';
+export type UserNotificationType = 'distribution_event' | 'disaster_alert';
 export type InventoryItemStatus = 'active' | 'trashed';
 export type InventoryMovementType =
   | 'stock_in'
@@ -28,6 +28,11 @@ export type LocationSource = 'address_search' | 'manual_pin' | 'current_gps' | '
 export type LocationConfidence = 'low' | 'medium' | 'high';
 export type HouseholdRegistrationStatus = 'pending' | 'approved' | 'rejected' | 'needs_correction';
 export type PinQaStatus = 'valid' | 'duplicate' | 'needs_verification';
+export type DisasterRiskLevel = 'low' | 'medium' | 'high';
+export type HazardType = 'flood' | 'typhoon' | 'landslide' | 'storm_surge' | 'fire' | 'earthquake';
+export type DisasterAlertSeverity = 'watch' | 'warning';
+export type DisasterAlertTriggerSource = 'official' | 'threshold' | 'hybrid';
+export type PurokFloodControlStatus = 'protected' | 'partial' | 'none' | 'unknown';
 
 export interface User {
   id: string;
@@ -75,6 +80,11 @@ export interface Household {
   registration_review_notes?: string;
   pin_qa_status?: PinQaStatus;
   pin_qa_notes?: string;
+  hazard_tags?: HazardType[];
+  disaster_risk_level?: DisasterRiskLevel;
+  evacuation_site?: string;
+  special_assistance_notes?: string;
+  disaster_profile_updated_at?: Date;
   createdAt: Date;
   updatedAt: Date;
   syncStatus: SyncStatus;
@@ -88,6 +98,20 @@ export interface LocationMasterList {
   puroks: string[];
   updatedAt: Date;
   updatedBy?: string;
+}
+
+export interface PurokRiskProfile {
+  id: string;
+  barangay_id: string;
+  purok_sitio: string;
+  flood_prone: boolean;
+  flood_control_status: PurokFloodControlStatus;
+  flood_control_notes?: string;
+  default_evacuation_site?: string;
+  warning_notes?: string;
+  updatedAt: Date;
+  updatedBy?: string;
+  syncStatus: SyncStatus;
 }
 
 export interface Resident {
@@ -215,6 +239,84 @@ export interface DistributionEventNotificationPayload {
   notes?: string;
 }
 
+export interface DisasterAlertRule {
+  id: string;
+  municipality: string;
+  barangay_id: string;
+  purok_sitio?: string;
+  hazard: HazardType;
+  trigger_lat: number;
+  trigger_lng: number;
+  enabled: boolean;
+  notify_responders: boolean;
+  official_keywords: string[];
+  min_rain_chance?: number;
+  min_rain_intensity_mm_per_hr?: number;
+  min_next_hour_precip_mm?: number;
+  min_wind_gust_kph?: number;
+  cooldown_minutes: number;
+  last_triggered_at?: Date;
+  last_trigger_signature?: string;
+  createdAt: Date;
+  updatedAt: Date;
+  syncStatus: SyncStatus;
+}
+
+export interface DisasterAlertWeatherSnapshot {
+  summary: string;
+  official_alert_titles: string[];
+  rain_chance: number | null;
+  rain_intensity_mm_per_hr: number | null;
+  next_hour_precip_mm: number | null;
+  wind_gust_kph: number | null;
+}
+
+export interface DisasterAlert {
+  id: string;
+  rule_id: string;
+  municipality: string;
+  barangay_id: string;
+  purok_sitio?: string;
+  hazard: HazardType;
+  severity: DisasterAlertSeverity;
+  title: string;
+  message: string;
+  trigger_source: DisasterAlertTriggerSource;
+  trigger_reason: string;
+  weather_snapshot: DisasterAlertWeatherSnapshot;
+  evacuation_site?: string;
+  special_assistance_notes?: string;
+  notify_responders: boolean;
+  reachable_household_count: number;
+  unreachable_household_count: number;
+  issued_at: Date;
+  createdAt: Date;
+  updatedAt: Date;
+  syncStatus: SyncStatus;
+}
+
+export interface DisasterAlertNotificationPayload {
+  alert_id: string;
+  rule_id: string;
+  municipality: string;
+  barangay_id: string;
+  purok_sitio?: string;
+  hazard: HazardType;
+  severity: DisasterAlertSeverity;
+  title: string;
+  message: string;
+  trigger_source: DisasterAlertTriggerSource;
+  trigger_reason: string;
+  weather_summary?: string;
+  evacuation_site?: string;
+  special_assistance_notes?: string;
+  flood_control_status?: PurokFloodControlStatus;
+  flood_control_notes?: string;
+  default_evacuation_site?: string;
+  warning_notes?: string;
+  issued_at: string;
+}
+
 export interface DistributedItem {
   item_id: string;
   quantity: number;
@@ -240,10 +342,11 @@ export interface UserNotification {
   id: string;
   user_id: string;
   event_id?: string;
+  alert_id?: string;
   type: UserNotificationType;
   title: string;
   body: string;
-  payload: DistributionEventNotificationPayload | Record<string, unknown>;
+  payload: DistributionEventNotificationPayload | DisasterAlertNotificationPayload | Record<string, unknown>;
   read_at?: Date;
   createdAt: Date;
   updatedAt: Date;
@@ -268,7 +371,17 @@ export interface AuditLog {
   id: string;
   user_id?: string | null;
   action: string;
-  entity_type: 'household' | 'resident' | 'distribution' | 'incident' | 'inventory' | 'user' | 'location_master';
+  entity_type:
+    | 'household'
+    | 'resident'
+    | 'distribution'
+    | 'incident'
+    | 'inventory'
+    | 'user'
+    | 'location_master'
+    | 'purok_risk_profile'
+    | 'disaster_alert'
+    | 'disaster_alert_rule';
   entity_id: string;
   changes?: Record<string, any>;
   timestamp: Date;

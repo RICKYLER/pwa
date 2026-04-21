@@ -83,6 +83,17 @@ export const STAFF_NAV_ITEMS: AppNavItem[] = [
     mobilePriority: 4,
   },
   {
+    href: '/alerts',
+    label: 'Alerts',
+    mobileLabel: 'Alerts',
+    description: 'Automatic disaster rules and alert history',
+    pageTitle: 'Alerts',
+    pageEyebrow: 'Response Operations',
+    icon: Bell,
+    perm: 'view_incidents',
+    group: 'Operations',
+  },
+  {
     href: '/distribution',
     label: 'Distribution',
     mobileLabel: 'Relief',

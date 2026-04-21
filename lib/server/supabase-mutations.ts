@@ -1,5 +1,6 @@
 import 'server-only';
 
+import { MABINI_MUNICIPALITY } from '@/lib/barangays';
 import type {
   DistributionEvent,
   Household,
@@ -8,9 +9,16 @@ import type {
   InventoryMovementType,
   LocationMasterList,
   PackageTemplate,
+  PurokFloodControlStatus,
+  PurokRiskProfile,
   Resident,
   User,
 } from '@/lib/db/schema';
+import {
+  buildPurokRiskProfileId,
+  createDefaultPurokRiskProfile,
+  isPurokFloodControlStatus,
+} from '@/lib/purok-risk-profiles';
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
 import { requireSupabaseUserId, resolveSupabaseUserId } from '@/lib/server/supabase-user-ids';
 
@@ -106,6 +114,10 @@ function toTextArray(value: unknown) {
   return value
     .map((entry) => (typeof entry === 'string' ? entry.trim() : String(entry ?? '').trim()))
     .filter(Boolean);
+}
+
+function toBooleanValue(value: unknown, defaultValue = false) {
+  return typeof value === 'boolean' ? value : defaultValue;
 }
 
 function getAgeFromBirthdate(birthdate: string) {
@@ -331,7 +343,17 @@ async function updateDistributionEventViaLegacyUpdate(
 async function createAuditLogEntry(params: {
   user: User;
   action: string;
-  entityType: 'household' | 'resident' | 'distribution' | 'incident' | 'inventory' | 'user' | 'location_master';
+  entityType:
+    | 'household'
+    | 'resident'
+    | 'distribution'
+    | 'incident'
+    | 'inventory'
+    | 'user'
+    | 'location_master'
+    | 'purok_risk_profile'
+    | 'disaster_alert'
+    | 'disaster_alert_rule';
   entityId: string;
   changes?: Record<string, unknown>;
 }) {
@@ -624,7 +646,7 @@ async function createHouseholdBundleWithoutRpc(
     applicant_user_id: toOptionalString(household.applicant_user_id),
     applicant_email: toOptionalString(household.applicant_email),
     barangay_name: toOptionalString(household.barangay_name),
-    municipality: toOptionalString(household.municipality),
+    municipality: MABINI_MUNICIPALITY,
     purok_sitio: toOptionalString(household.purok_sitio) ?? '',
     street_address: toOptionalString(household.street_address) ?? '',
     landmark_directions: toOptionalString(household.landmark_directions),
@@ -647,6 +669,11 @@ async function createHouseholdBundleWithoutRpc(
     registration_review_notes: toOptionalString(household.registration_review_notes),
     pin_qa_status: household.pin_qa_status ?? 'needs_verification',
     pin_qa_notes: toOptionalString(household.pin_qa_notes),
+    hazard_tags: Array.isArray(household.hazard_tags) ? household.hazard_tags : [],
+    disaster_risk_level: toOptionalString(household.disaster_risk_level),
+    evacuation_site: toOptionalString(household.evacuation_site),
+    special_assistance_notes: toOptionalString(household.special_assistance_notes),
+    disaster_profile_updated_at: toIsoString(household.disaster_profile_updated_at) ?? new Date().toISOString(),
     sync_status: 'synced',
   });
 
@@ -902,7 +929,17 @@ async function createResidentWithoutRpc(
 export async function createAuditLogOnServer(params: {
   user: User;
   action: string;
-  entityType: 'household' | 'resident' | 'distribution' | 'incident' | 'inventory' | 'user' | 'location_master';
+  entityType:
+    | 'household'
+    | 'resident'
+    | 'distribution'
+    | 'incident'
+    | 'inventory'
+    | 'user'
+    | 'location_master'
+    | 'purok_risk_profile'
+    | 'disaster_alert'
+    | 'disaster_alert_rule';
   entityId: string;
   changes?: Record<string, unknown>;
 }) {
@@ -914,7 +951,6 @@ export async function createHouseholdBundleOnServer(
   household: Omit<Household, 'createdAt' | 'updatedAt' | 'syncStatus'> & { id: string },
   members: HouseholdMemberDraft[],
 ) {
-  const supabase = getSupabaseAdminClient();
   const remoteActorId = await getRemoteActorId(user);
   const remoteHousehold = {
     ...household,
@@ -925,24 +961,7 @@ export async function createHouseholdBundleOnServer(
     location_verified_by: await resolveRemoteUserId(household.location_verified_by),
     registration_reviewed_by: await resolveRemoteUserId(household.registration_reviewed_by),
   };
-  let data: unknown = null;
-  const { data: rpcData, error } = await supabase.rpc('create_household_bundle', {
-    p_household: remoteHousehold,
-    p_members: members,
-    p_actor_role: user.role,
-    p_actor_user_id: remoteActorId,
-    p_actor_barangay_id: user.barangay_id,
-  });
-
-  if (error) {
-    if (isMissingRpcFunctionError(error, 'create_household_bundle')) {
-      data = await createHouseholdBundleWithoutRpc(user, remoteHousehold, members, remoteActorId);
-    } else {
-      throw new Error(error.message);
-    }
-  } else {
-    data = rpcData;
-  }
+  const data = await createHouseholdBundleWithoutRpc(user, remoteHousehold, members, remoteActorId);
 
   await createAuditLogEntry({
     user,
@@ -1340,7 +1359,15 @@ export async function updateHouseholdOnServer(
       : await resolveRemoteUserId(updates.applicant_user_id, null),
     applicant_email: typeof updates.applicant_email === 'string' ? updates.applicant_email.trim() || null : undefined,
     barangay_name: typeof updates.barangay_name === 'string' ? updates.barangay_name.trim() || null : undefined,
-    municipality: typeof updates.municipality === 'string' ? updates.municipality.trim() || null : undefined,
+    municipality:
+      updates.municipality !== undefined
+      || updates.hazard_tags !== undefined
+      || updates.disaster_risk_level !== undefined
+      || updates.evacuation_site !== undefined
+      || updates.special_assistance_notes !== undefined
+      || updates.disaster_profile_updated_at !== undefined
+        ? MABINI_MUNICIPALITY
+        : undefined,
     purok_sitio: typeof updates.purok_sitio === 'string' ? updates.purok_sitio.trim() : undefined,
     street_address: typeof updates.street_address === 'string' ? updates.street_address.trim() : undefined,
     landmark_directions: typeof updates.landmark_directions === 'string' ? updates.landmark_directions.trim() || null : undefined,
@@ -1366,6 +1393,24 @@ export async function updateHouseholdOnServer(
       : undefined,
     pin_qa_status: updates.pin_qa_status,
     pin_qa_notes: typeof updates.pin_qa_notes === 'string' ? updates.pin_qa_notes.trim() || null : undefined,
+    hazard_tags: Array.isArray(updates.hazard_tags) ? updates.hazard_tags : undefined,
+    disaster_risk_level: typeof updates.disaster_risk_level === 'string' ? updates.disaster_risk_level : undefined,
+    evacuation_site: typeof updates.evacuation_site === 'string' ? updates.evacuation_site.trim() || null : undefined,
+    special_assistance_notes:
+      typeof updates.special_assistance_notes === 'string'
+        ? updates.special_assistance_notes.trim() || null
+        : undefined,
+    disaster_profile_updated_at:
+      updates.disaster_profile_updated_at === undefined
+        ? (
+          updates.hazard_tags !== undefined
+          || updates.disaster_risk_level !== undefined
+          || updates.evacuation_site !== undefined
+          || updates.special_assistance_notes !== undefined
+            ? new Date().toISOString()
+            : undefined
+        )
+        : toIsoString(updates.disaster_profile_updated_at),
     sync_status: 'synced',
   });
 
@@ -1423,6 +1468,62 @@ export async function saveLocationMasterListOnServer(
     throw new Error(error.message);
   }
 
+  const normalizedPuroks = input.puroks
+    .map((purok) => createDefaultPurokRiskProfile({
+      barangay_id: input.barangay_id,
+      purok_sitio: purok,
+      updatedBy: remoteActorId,
+    }))
+    .map((profile) => profile.purok_sitio);
+
+  const { data: existingProfiles, error: existingProfilesError } = await supabase
+    .from('purok_risk_profiles')
+    .select('id')
+    .eq('barangay_id', input.barangay_id);
+
+  if (existingProfilesError && !existingProfilesError.message.toLowerCase().includes('purok_risk_profiles')) {
+    throw new Error(existingProfilesError.message);
+  }
+
+  const existingProfileIds = new Set(
+    (existingProfiles ?? [])
+      .map((profile) => (typeof profile.id === 'string' ? profile.id : ''))
+      .filter(Boolean),
+  );
+  const missingProfiles = normalizedPuroks
+    .map((purok) => createDefaultPurokRiskProfile({
+      barangay_id: input.barangay_id,
+      purok_sitio: purok,
+      updatedBy: remoteActorId,
+    }))
+    .filter((profile) => !existingProfileIds.has(profile.id))
+    .map((profile) => ({
+      id: profile.id,
+      barangay_id: profile.barangay_id,
+      purok_sitio: profile.purok_sitio,
+      flood_prone: profile.flood_prone,
+      flood_control_status: profile.flood_control_status,
+      flood_control_notes: null,
+      default_evacuation_site: null,
+      warning_notes: null,
+      updated_at: profile.updatedAt.toISOString(),
+      updated_by: remoteActorId,
+      sync_status: 'synced',
+    }));
+
+  if (missingProfiles.length > 0) {
+    const { error: insertProfilesError } = await supabase
+      .from('purok_risk_profiles')
+      .upsert(missingProfiles, {
+        onConflict: 'id',
+        ignoreDuplicates: true,
+      });
+
+    if (insertProfilesError && !insertProfilesError.message.toLowerCase().includes('purok_risk_profiles')) {
+      throw new Error(insertProfilesError.message);
+    }
+  }
+
   await createAuditLogEntry({
     user,
     action: 'UPSERT',
@@ -1436,6 +1537,101 @@ export async function saveLocationMasterListOnServer(
   });
 
   return data;
+}
+
+function normalizePurokRiskProfileInput(
+  barangayId: string,
+  profile: Pick<
+    PurokRiskProfile,
+    | 'purok_sitio'
+    | 'flood_prone'
+    | 'flood_control_status'
+    | 'flood_control_notes'
+    | 'default_evacuation_site'
+    | 'warning_notes'
+  >,
+  updatedBy: string,
+) {
+  const baseProfile = createDefaultPurokRiskProfile({
+    barangay_id: barangayId,
+    purok_sitio: profile.purok_sitio,
+    updatedBy,
+  });
+
+  return {
+    id: baseProfile.id,
+    barangay_id: barangayId,
+    purok_sitio: baseProfile.purok_sitio,
+    flood_prone: toBooleanValue(profile.flood_prone),
+    flood_control_status: isPurokFloodControlStatus(profile.flood_control_status)
+      ? profile.flood_control_status
+      : 'unknown' as PurokFloodControlStatus,
+    flood_control_notes: toOptionalString(profile.flood_control_notes),
+    default_evacuation_site: toOptionalString(profile.default_evacuation_site),
+    warning_notes: toOptionalString(profile.warning_notes),
+    updated_at: new Date().toISOString(),
+    updated_by: updatedBy,
+    sync_status: 'synced' as const,
+  };
+}
+
+export async function savePurokRiskProfilesOnServer(
+  user: User,
+  input: {
+    barangay_id: string;
+    profiles: Array<Pick<
+      PurokRiskProfile,
+      | 'purok_sitio'
+      | 'flood_prone'
+      | 'flood_control_status'
+      | 'flood_control_notes'
+      | 'default_evacuation_site'
+      | 'warning_notes'
+    >>;
+  },
+) {
+  if (user.role !== 'admin') {
+    throw new Error('Admin access is required to update purok flood profiles.');
+  }
+
+  const supabase = getSupabaseAdminClient();
+  const remoteActorId = await getRemoteActorId(user);
+  const normalizedProfiles = input.profiles
+    .filter((profile) => typeof profile.purok_sitio === 'string' && profile.purok_sitio.trim())
+    .map((profile) => normalizePurokRiskProfileInput(input.barangay_id, profile, remoteActorId));
+
+  if (normalizedProfiles.length === 0) {
+    return [];
+  }
+
+  const { data, error } = await supabase
+    .from('purok_risk_profiles')
+    .upsert(normalizedProfiles, {
+      onConflict: 'id',
+    })
+    .select('*');
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  await Promise.all(normalizedProfiles.map((profile) => createAuditLogEntry({
+    user,
+    action: 'UPSERT',
+    entityType: 'purok_risk_profile',
+    entityId: profile.id,
+    changes: {
+      barangay_id: profile.barangay_id,
+      purok_sitio: profile.purok_sitio,
+      flood_prone: profile.flood_prone,
+      flood_control_status: profile.flood_control_status,
+      flood_control_notes: profile.flood_control_notes,
+      default_evacuation_site: profile.default_evacuation_site,
+      warning_notes: profile.warning_notes,
+    },
+  })));
+
+  return data ?? [];
 }
 
 export async function createDistributionEventOnServer(
@@ -1530,10 +1726,6 @@ export async function markUserNotificationReadOnServer(
   user: User,
   notificationId: string,
 ) {
-  if (user.role !== 'resident') {
-    throw new Error('Only resident accounts can update resident notifications.');
-  }
-
   const supabase = getSupabaseAdminClient();
   const remoteActorId = await getRemoteActorId(user);
   const { data: existingNotification, error: existingError } = await supabase

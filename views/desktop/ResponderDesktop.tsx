@@ -1,25 +1,48 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { getCurrentUser, hasRole } from '@/lib/auth';
 import { getIncidents, updateIncidentStatus, seedDemoIncidents } from '@/lib/db/incidents';
 import { getDistributionEvents } from '@/lib/db/distribution';
+import { getDisasterAlertRules } from '@/lib/db/disaster-alerts';
 import { db, STORE_NAMES } from '@/lib/db/indexeddb';
 import { getHouseholds } from '@/lib/db/households';
-import type { DistributionEvent, Household, Incident, IncidentStatus, Resident, VulnerabilityFlags } from '@/lib/db/schema';
-import { CheckCircle2, Package, Radio, RefreshCw, ShieldAlert, Users, Zap } from 'lucide-react';
+import { getSupabaseBrowserClient } from '@/lib/supabase/client';
+import { bootstrapSupabaseTables } from '@/lib/supabase/bootstrap';
+import { getPurokRiskProfiles, savePurokRiskProfiles } from '@/lib/db/purok-risk-profiles';
+import type {
+  DisasterAlertRule,
+  DistributionEvent,
+  Household,
+  Incident,
+  IncidentStatus,
+  PurokFloodControlStatus,
+  PurokRiskProfile,
+  Resident,
+  VulnerabilityFlags,
+} from '@/lib/db/schema';
+import { AlertCircle, BellRing, CheckCircle2, CloudRain, Edit2, MapPin, Package, Radio, RefreshCw, ShieldAlert, Users, Wind, Zap } from 'lucide-react';
 import WeatherWidget from '@/components/WeatherWidget';
 import ResponderLeafletMap from '@/components/ResponderLeafletMap';
 import ResponderMapControlPanel from '@/components/ResponderMapControlPanel';
 import ResponderSelectionSummary from '@/components/ResponderSelectionSummary';
 import { CivicBadge, CivicChipButton, CivicPanel } from '@/components/ui/civic-primitives';
+import {
+  buildFieldResponseZoneMarkers,
+  buildPurokRiskProfileMap,
+  getPurokRiskProfileForHousehold,
+  matchesPurokRiskFilters,
+  PUROK_FLOOD_CONTROL_STATUS_LABELS,
+} from '@/lib/purok-risk-profiles';
 import { openResponderMapLocation } from '@/lib/responder-map-links';
 import { useResponderMapControls } from '@/hooks/useResponderMapControls';
 import {
   getResponderCoverageLabel,
   getResponderMappedHouseholds,
 } from '@/lib/responder-households';
+import { fetchJsonWithCache } from '@/lib/client-fetch-cache';
+import type { FieldResponseWeatherPayload } from '@/lib/weather';
 
 declare global {
   interface WindowEventMap {
@@ -53,6 +76,9 @@ const INCIDENT_TYPE_ICONS: Record<string, string> = {
   typhoon: '🌀',
   other: '⚡',
 };
+
+const PUROK_FLOOD_CONTROL_OPTIONS: PurokFloodControlStatus[] = ['protected', 'partial', 'none', 'unknown'];
+type PurokFloodProneFilter = 'all' | 'flood_prone' | 'not_flood_prone';
 
 interface PriorityHousehold {
   household: Household;
@@ -113,13 +139,42 @@ export default function ResponderDesktop() {
   const [priorities, setPriorities] = useState<PriorityHousehold[]>([]);
   const [events, setEvents] = useState<DistributionEvent[]>([]);
   const [mapHouseholds, setMapHouseholds] = useState<Household[]>([]);
+  const [purokRiskProfiles, setPurokRiskProfiles] = useState<PurokRiskProfile[]>([]);
+  const [alertRules, setAlertRules] = useState<DisasterAlertRule[]>([]);
+  const [liveWeather, setLiveWeather] = useState<FieldResponseWeatherPayload | null>(null);
+  const [filterFloodProne, setFilterFloodProne] = useState<PurokFloodProneFilter>('all');
+  const [filterFloodControlStatus, setFilterFloodControlStatus] = useState<PurokFloodControlStatus | 'all'>('all');
   const [loading, setLoading] = useState(true);
   const [selectedHousehold, setSelectedHousehold] = useState<Household | null>(null);
   const [selectedIncident, setSelectedIncident] = useState<Incident | null>(null);
-  const [activeTab, setActiveTab] = useState<'incidents' | 'priorities' | 'events'>('incidents');
+  const [activeTab, setActiveTab] = useState<'incidents' | 'priorities' | 'events' | 'zones'>('incidents');
   const [updatingId, setUpdatingId] = useState<string | null>(null);
   const [visitedIds, setVisitedIds] = useState<Set<string>>(new Set());
+  const [pingZones, setPingZones] = useState<Set<string>>(new Set());
+  const [pingModal, setPingModal] = useState<{ purok: PurokRiskProfile; householdCount: number } | null>(null);
+  const [updatingPurokStatus, setUpdatingPurokStatus] = useState<string | null>(null);
+  const [isSendingPing, setIsSendingPing] = useState(false);
+  const [editingPurokId, setEditingPurokId] = useState<string | null>(null);
+  const [purokEditForm, setPurokEditForm] = useState<{
+    default_evacuation_site: string;
+    warning_notes: string;
+    flood_control_notes: string;
+  } | null>(null);
   const reloadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const purokRiskProfileMap = useMemo(
+    () => buildPurokRiskProfileMap(purokRiskProfiles),
+    [purokRiskProfiles],
+  );
+
+  // Derive the primary trigger location from the first enabled rule for this user's barangay
+  const activeRule = useMemo(() => {
+    return alertRules
+      .filter((rule) => rule.enabled && (!user || rule.barangay_id === user.barangay_id))
+      .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())[0] ?? null;
+  }, [alertRules, user]);
+  const activeRuleId = activeRule?.id ?? null;
+  const activeRuleLat = activeRule?.trigger_lat ?? null;
+  const activeRuleLng = activeRule?.trigger_lng ?? null;
 
   const load = useCallback(async () => {
     if (!user) return;
@@ -127,7 +182,7 @@ export default function ResponderDesktop() {
 
     try {
       await seedDemoIncidents(user.id);
-      const [allIncidents, allHouseholds, residents, flags, ongoingEvents] = await Promise.all([
+      const [allIncidents, allHouseholds, residents, flags, ongoingEvents, profiles, rules] = await Promise.all([
         getIncidents(),
         getHouseholds({
           registration_status: 'approved',
@@ -135,12 +190,16 @@ export default function ResponderDesktop() {
         db.getAll<Resident>(STORE_NAMES.residents),
         db.getAll<VulnerabilityFlags>(STORE_NAMES.vulnerability_flags),
         getDistributionEvents({ status: 'ongoing' }),
+        getPurokRiskProfiles(user.role === 'admin' ? undefined : user.barangay_id),
+        getDisasterAlertRules(),
       ]);
       const households = getResponderMappedHouseholds(allHouseholds, user);
 
       setIncidents(allIncidents);
       setEvents(ongoingEvents);
       setMapHouseholds(households);
+      setPurokRiskProfiles(profiles);
+      setAlertRules(rules);
 
       const scored: PriorityHousehold[] = households
         .map((household) => {
@@ -200,7 +259,7 @@ export default function ResponderDesktop() {
     }
 
     function handleDataChanged(event: WindowEventMap['mswdo-data-changed']) {
-      if (!['households', 'residents', 'vulnerability_flags', 'incidents', 'distribution_events'].includes(event.detail.table)) {
+      if (!['households', 'residents', 'vulnerability_flags', 'incidents', 'distribution_events', 'purok_risk_profiles', 'disaster_alert_rules'].includes(event.detail.table)) {
         return;
       }
 
@@ -217,6 +276,63 @@ export default function ResponderDesktop() {
     };
   }, [scheduleLoad, user]);
 
+  // ── Supabase Realtime: sync purok_risk_profiles across tabs/devices ──────
+  useEffect(() => {
+    if (!user) return;
+
+    const supabase = getSupabaseBrowserClient();
+    if (!supabase) return;
+
+    const channel = supabase
+      .channel('responder-purok-profiles')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'purok_risk_profiles' },
+        async () => {
+          try {
+            await bootstrapSupabaseTables(['purok_risk_profiles'], { force: true });
+            window.dispatchEvent(new CustomEvent('mswdo-data-changed', {
+              detail: { source: 'supabase', table: 'purok_risk_profiles', mode: 'change' },
+            }));
+          } catch (err) {
+            console.warn('Realtime purok_risk_profiles refresh failed:', err);
+          }
+        },
+      )
+      .subscribe();
+
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [user]);
+
+
+  // When the activeRule changes, fetch live weather for the same trigger point
+  useEffect(() => {
+    if (activeRuleLat === null || activeRuleLng === null) return;
+
+    let cancelled = false;
+
+    async function fetchLiveWeather() {
+      try {
+        const params = new URLSearchParams({
+          lat: String(activeRuleLat),
+          lng: String(activeRuleLng),
+        });
+        const payload = await fetchJsonWithCache<FieldResponseWeatherPayload>(
+          `/api/weather?${params.toString()}`,
+          { ttlMs: 15 * 60 * 1000 },
+        );
+        if (!cancelled) setLiveWeather(payload);
+      } catch {
+        // WeatherWidget will handle its own error state
+      }
+    }
+
+    void fetchLiveWeather();
+    return () => { cancelled = true; };
+  }, [activeRuleId, activeRuleLat, activeRuleLng]);
+
   async function handleStatusUpdate(id: string, status: IncidentStatus) {
     setUpdatingId(id);
     try {
@@ -230,10 +346,98 @@ export default function ResponderDesktop() {
     }
   }
 
+  const handlePurokStatusUpdate = async (profile: PurokRiskProfile, newStatus: PurokFloodControlStatus) => {
+    try {
+      setUpdatingPurokStatus(profile.purok_sitio);
+      await savePurokRiskProfiles({
+        barangay_id: profile.barangay_id,
+        profiles: [{ ...profile, flood_control_status: newStatus }],
+      });
+      setPurokRiskProfiles((current) =>
+        current.map((p) => (p.purok_sitio === profile.purok_sitio ? { ...p, flood_control_status: newStatus } : p))
+      );
+    } catch (err) {
+      console.error('Failed to update purok flood control status:', err);
+    } finally {
+      setUpdatingPurokStatus(null);
+    }
+  };
+
+  const handlePurokFloodProneToggle = async (profile: PurokRiskProfile) => {
+    try {
+      setUpdatingPurokStatus(profile.purok_sitio + '-toggle');
+      const newStatus = !profile.flood_prone;
+      await savePurokRiskProfiles({
+        barangay_id: profile.barangay_id,
+        profiles: [{ ...profile, flood_prone: newStatus }],
+      });
+      setPurokRiskProfiles((current) =>
+        current.map((p) => (p.purok_sitio === profile.purok_sitio ? { ...p, flood_prone: newStatus } : p))
+      );
+    } catch (err) {
+      console.error('Failed to toggle purok flood prone status:', err);
+    } finally {
+      setUpdatingPurokStatus(null);
+    }
+  };
+
+  const startEditingPurok = (profile: PurokRiskProfile) => {
+    setEditingPurokId(profile.purok_sitio);
+    setPurokEditForm({
+      default_evacuation_site: profile.default_evacuation_site ?? '',
+      warning_notes: profile.warning_notes ?? '',
+      flood_control_notes: profile.flood_control_notes ?? '',
+    });
+  };
+
+  const handleSavePurokEdits = async (profile: PurokRiskProfile) => {
+    if (!purokEditForm) {
+      return;
+    }
+
+    try {
+      setUpdatingPurokStatus(profile.purok_sitio + '-edit');
+      const updatedProfile: PurokRiskProfile = {
+        ...profile,
+        default_evacuation_site: purokEditForm.default_evacuation_site.trim() || undefined,
+        warning_notes: purokEditForm.warning_notes.trim() || undefined,
+        flood_control_notes: purokEditForm.flood_control_notes.trim() || undefined,
+      };
+
+      await savePurokRiskProfiles({
+        barangay_id: profile.barangay_id,
+        profiles: [updatedProfile],
+      });
+
+      setPurokRiskProfiles((current) =>
+        current.map((entry) => (
+          entry.purok_sitio === profile.purok_sitio ? updatedProfile : entry
+        )),
+      );
+      setEditingPurokId(null);
+      setPurokEditForm(null);
+    } catch (err) {
+      console.error('Failed to save purok notes:', err);
+    } finally {
+      setUpdatingPurokStatus(null);
+    }
+  };
+
+
   if (!user) return null;
 
   const activeIncidents = incidents.filter((incident) => incident.status !== 'resolved');
   const resolvedCount = incidents.filter((incident) => incident.status === 'resolved').length;
+  const filteredMapHouseholds = mapHouseholds.filter((household) => matchesPurokRiskFilters(household, purokRiskProfileMap, {
+    floodProne: filterFloodProne,
+    floodControlStatus: filterFloodControlStatus,
+  }));
+  const visibleFloodZoneCount = buildFieldResponseZoneMarkers(filteredMapHouseholds, purokRiskProfiles, alertRules).length;
+  const filteredPriorities = priorities.filter((priority) => matchesPurokRiskFilters(priority.household, purokRiskProfileMap, {
+    floodProne: filterFloodProne,
+    floodControlStatus: filterFloodControlStatus,
+  }));
+  const hasPurokFilters = filterFloodProne !== 'all' || filterFloodControlStatus !== 'all';
 
   return (
     <div className="flex h-full min-h-0 gap-5 p-5">
@@ -257,7 +461,7 @@ export default function ResponderDesktop() {
             <div className="mt-5 grid grid-cols-3 gap-2">
               {[
                 { label: 'Active', value: activeIncidents.length },
-                { label: 'Priority', value: priorities.length },
+                { label: 'Priority', value: filteredPriorities.length },
                 { label: 'Resolved', value: resolvedCount },
               ].map((metric) => (
                 <div key={metric.label} className="rounded-[20px] border border-white/10 bg-white/10 px-3 py-3">
@@ -268,7 +472,113 @@ export default function ResponderDesktop() {
             </div>
           </CivicPanel>
 
-          <WeatherWidget mode="compact" className="civic-card-shadow" />
+          <WeatherWidget
+            mode="compact"
+            className="civic-card-shadow"
+            lat={activeRule?.trigger_lat}
+            lng={activeRule?.trigger_lng}
+          />
+
+          {/* Auto-Alert Trigger Status — mirrors the Alerts page weather preview */}
+          {activeRule && (
+            <CivicPanel className="space-y-3">
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Auto-Alert Monitor</p>
+                <h3 className="mt-1 text-base font-black tracking-tight text-slate-950">Live trigger status</h3>
+                <p className="mt-1 text-xs text-slate-500">
+                  Matches the <span className="font-semibold">{activeRule.hazard.replaceAll('_', ' ')}</span> rule at
+                  {' '}<span className="font-medium text-slate-700">{activeRule.trigger_lat.toFixed(4)}, {activeRule.trigger_lng.toFixed(4)}</span>.
+                </p>
+              </div>
+
+              {/* Threshold vs Current grid */}
+              <div className="grid grid-cols-2 gap-2">
+                {[
+                  {
+                    icon: CloudRain,
+                    label: 'Rain Chance',
+                    current: liveWeather?.current.rainChance ?? null,
+                    threshold: activeRule.min_rain_chance ?? null,
+                    unit: '%',
+                    format: (v: number) => `${Math.round(v)}%`,
+                  },
+                  {
+                    icon: CloudRain,
+                    label: 'Rain Intensity',
+                    current: liveWeather?.current.rainIntensity ?? null,
+                    threshold: activeRule.min_rain_intensity_mm_per_hr ?? null,
+                    unit: 'mm/hr',
+                    format: (v: number) => `${v.toFixed(1)} mm/hr`,
+                  },
+                  {
+                    icon: CloudRain,
+                    label: 'Next-Hour Rain',
+                    current: liveWeather?.current.nextHourPrecipitationPeak ?? null,
+                    threshold: activeRule.min_next_hour_precip_mm ?? null,
+                    unit: 'mm',
+                    format: (v: number) => `${v.toFixed(1)} mm`,
+                  },
+                  {
+                    icon: Wind,
+                    label: 'Wind Gust',
+                    current: liveWeather?.current.windGust ?? null,
+                    threshold: activeRule.min_wind_gust_kph ?? null,
+                    unit: 'kph',
+                    format: (v: number) => `${Math.round(v)} kph`,
+                  },
+                ].map((metric) => {
+                  const Icon = metric.icon;
+                  const willTrigger = metric.threshold !== null && metric.current !== null && metric.current >= metric.threshold;
+                  const hasData = metric.current !== null;
+                  const tone = willTrigger
+                    ? 'border-rose-200 bg-rose-50 text-rose-800'
+                    : hasData
+                      ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
+                      : 'border-slate-200 bg-slate-50 text-slate-500';
+                  return (
+                    <div key={metric.label} className={`rounded-[20px] border px-3 py-3 ${tone}`}>
+                      <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.14em] opacity-70">
+                        <Icon className="h-3 w-3" />
+                        {metric.label}
+                      </div>
+                      <p className="mt-1.5 text-base font-black">
+                        {hasData ? metric.format(metric.current!) : 'No data'}
+                      </p>
+                      {metric.threshold !== null && (
+                        <p className="mt-0.5 text-[10px] opacity-60">
+                          Triggers at ≥ {metric.format(metric.threshold)}
+                        </p>
+                      )}
+                      {willTrigger && (
+                        <p className="mt-1 flex items-center gap-1 text-[10px] font-bold text-rose-700">
+                          <AlertCircle className="h-3 w-3" /> Threshold met
+                        </p>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Lead weather alert from same data source */}
+              {liveWeather && liveWeather.alerts.length > 0 && (() => {
+                const lead = liveWeather.alerts[0];
+                const isWarning = lead.severity === 'warning';
+                return (
+                  <div className={`rounded-[18px] border px-3 py-3 ${
+                    isWarning ? 'border-rose-200 bg-rose-50' : 'border-amber-200 bg-amber-50'
+                  }`}>
+                    <div className="flex items-start gap-2">
+                      <ShieldAlert className={`mt-0.5 h-4 w-4 shrink-0 ${isWarning ? 'text-rose-600' : 'text-amber-600'}`} />
+                      <div>
+                        <p className={`text-xs font-semibold ${isWarning ? 'text-rose-800' : 'text-amber-800'}`}>{lead.title}</p>
+                        <p className="mt-0.5 text-[11px] leading-5 text-slate-600">{lead.detail}</p>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
+            </CivicPanel>
+          )}
 
           <ResponderMapControlPanel
             activeBaseLayerId={mapControls.activeBaseLayerId}
@@ -301,11 +611,75 @@ export default function ResponderDesktop() {
           />
 
           <CivicPanel className="space-y-4">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Purok Filters</p>
+                <h3 className="mt-1 text-base font-black tracking-tight text-slate-950">Flood profile filters</h3>
+                <p className="mt-1 text-sm text-slate-500">Map pins and priority check-ins update using the official purok flood profile.</p>
+              </div>
+              {hasPurokFilters ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFilterFloodProne('all');
+                    setFilterFloodControlStatus('all');
+                  }}
+                  className="rounded-full border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50"
+                >
+                  Clear
+                </button>
+              ) : null}
+            </div>
+            <div className="grid gap-3 md:grid-cols-2">
+              <label className="space-y-2">
+                <span className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">Flood-prone purok</span>
+                <select
+                  value={filterFloodProne}
+                  onChange={(event) => setFilterFloodProne(event.target.value as PurokFloodProneFilter)}
+                  className="h-11 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm text-slate-700 outline-none focus:border-cyan-900"
+                >
+                  <option value="all">All puroks</option>
+                  <option value="flood_prone">Flood-prone only</option>
+                  <option value="not_flood_prone">Not flood-prone</option>
+                </select>
+              </label>
+              <label className="space-y-2">
+                <span className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">Flood control</span>
+                <select
+                  value={filterFloodControlStatus}
+                  onChange={(event) => setFilterFloodControlStatus(event.target.value as PurokFloodControlStatus | 'all')}
+                  className="h-11 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm text-slate-700 outline-none focus:border-cyan-900"
+                >
+                  <option value="all">All flood control statuses</option>
+                  {PUROK_FLOOD_CONTROL_OPTIONS.map((status) => (
+                    <option key={status} value={status}>{PUROK_FLOOD_CONTROL_STATUS_LABELS[status]}</option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <CivicBadge label={`${filteredMapHouseholds.length} mapped households`} tone="emerald" />
+              <CivicBadge label={`${filteredPriorities.length} priority check-ins`} tone="amber" />
+              {filterFloodProne !== 'all' ? (
+                <CivicBadge label={filterFloodProne === 'flood_prone' ? 'Flood-prone puroks' : 'Not flood-prone'} tone="rose" />
+              ) : null}
+              {filterFloodControlStatus !== 'all' ? (
+                <CivicBadge label={PUROK_FLOOD_CONTROL_STATUS_LABELS[filterFloodControlStatus]} tone="slate" />
+              ) : null}
+            </div>
+          </CivicPanel>
+
+          <CivicPanel className="space-y-4">
             <div className="flex flex-wrap gap-2">
               {([
                 { key: 'incidents', label: 'Incidents', count: activeIncidents.length },
-                { key: 'priorities', label: 'Check-ins', count: priorities.length },
+                { key: 'priorities', label: 'Check-ins', count: filteredPriorities.length },
                 { key: 'events', label: 'Events', count: events.length },
+                {
+                  key: 'zones',
+                  label: 'Flood Zones',
+                  count: purokRiskProfiles.filter((p) => p.flood_prone).length,
+                },
               ] as const).map((tab) => (
                 <CivicChipButton
                   key={tab.key}
@@ -313,7 +687,15 @@ export default function ResponderDesktop() {
                   onClick={() => setActiveTab(tab.key)}
                 >
                   {tab.label}
-                  <span className={`rounded-full px-2 py-0.5 text-[10px] ${activeTab === tab.key ? 'bg-white/12 text-white' : 'bg-slate-100 text-slate-500'}`}>
+                  <span className={`rounded-full px-2 py-0.5 text-[10px] ${
+                    tab.key === 'zones' && tab.count > 0
+                      ? activeTab === tab.key
+                        ? 'bg-rose-500/20 text-rose-200'
+                        : 'bg-rose-100 text-rose-600'
+                      : activeTab === tab.key
+                        ? 'bg-white/12 text-white'
+                        : 'bg-slate-100 text-slate-500'
+                  }`}>
                     {loading ? '—' : tab.count}
                   </span>
                 </CivicChipButton>
@@ -399,15 +781,16 @@ export default function ResponderDesktop() {
                   [...Array(4)].map((_, index) => (
                     <div key={index} className="h-24 animate-pulse rounded-[24px] bg-slate-100" />
                   ))
-                ) : priorities.length === 0 ? (
+                ) : filteredPriorities.length === 0 ? (
                   <div className="rounded-[24px] border border-dashed border-slate-300 bg-slate-50 px-5 py-10 text-center">
                     <Users className="mx-auto h-8 w-8 text-slate-400" />
                     <p className="mt-3 text-sm font-semibold text-slate-900">No priority households</p>
                   </div>
                 ) : (
-                  priorities.map((priority, index) => {
+                  filteredPriorities.map((priority, index) => {
                     const tags = vulnTags(priority.flags);
                     const isVisited = visitedIds.has(priority.household.id);
+                    const purokRiskProfile = getPurokRiskProfileForHousehold(priority.household, purokRiskProfileMap);
                     const selectHousehold = () => {
                       setSelectedHousehold(priority.household);
                       setSelectedIncident(null);
@@ -431,6 +814,16 @@ export default function ResponderDesktop() {
                             <p className="truncate text-sm font-bold text-slate-950">{priority.household.head_name}</p>
                             <p className="mt-1 truncate text-xs text-slate-500">{priority.household.purok_sitio} · {priority.household.street_address}</p>
                             <div className="mt-2 flex flex-wrap gap-1">
+                              <CivicBadge
+                                label={purokRiskProfile?.flood_prone ? 'Flood-prone purok' : 'Not flood-prone'}
+                                tone={purokRiskProfile?.flood_prone ? 'rose' : 'emerald'}
+                                className="text-[10px]"
+                              />
+                              <CivicBadge
+                                label={PUROK_FLOOD_CONTROL_STATUS_LABELS[purokRiskProfile?.flood_control_status ?? 'unknown']}
+                                tone="slate"
+                                className="text-[10px]"
+                              />
                               {tags.map((tag) => (
                                 <CivicBadge key={tag} label={tag} tone="rose" className="text-[10px]" />
                               ))}
@@ -513,9 +906,300 @@ export default function ResponderDesktop() {
                 )}
               </div>
             ) : null}
+
+            {activeTab === 'zones' ? (
+              <div className="space-y-3">
+                {loading ? (
+                  [...Array(3)].map((_, index) => (
+                    <div key={index} className="h-28 animate-pulse rounded-[24px] bg-slate-100" />
+                  ))
+                ) : purokRiskProfiles.length === 0 ? (
+                  <div className="rounded-[24px] border border-dashed border-slate-300 bg-slate-50 px-5 py-10 text-center">
+                    <ShieldAlert className="mx-auto h-8 w-8 text-slate-400" />
+                    <p className="mt-3 text-sm font-semibold text-slate-900">No puroks configured</p>
+                    <p className="mt-1 text-xs text-slate-500">Wait for puroks to be seeded or load households first.</p>
+                  </div>
+                ) : (
+                  purokRiskProfiles
+                    .sort((a, b) => {
+                      if (a.flood_prone !== b.flood_prone) return a.flood_prone ? -1 : 1;
+                      return a.purok_sitio.localeCompare(b.purok_sitio, undefined, { numeric: true });
+                    })
+                    .map((profile) => {
+                      const houseCount = mapHouseholds.filter(
+                        (h) => h.purok_sitio === profile.purok_sitio && h.status === 'active'
+                      ).length;
+                      const hasPinged = pingZones.has(profile.purok_sitio);
+                      const isAtRisk = profile.flood_prone && liveWeather && (
+                        (activeRule?.min_rain_chance !== undefined && (liveWeather.current.rainChance ?? 0) >= activeRule.min_rain_chance) ||
+                        (activeRule?.min_wind_gust_kph !== undefined && (liveWeather.current.windGust ?? 0) >= activeRule.min_wind_gust_kph)
+                      );
+
+                      return (
+                        <div
+                          key={profile.purok_sitio}
+                          className={`rounded-[24px] border p-4 transition ${
+                            isAtRisk
+                              ? 'border-rose-300 bg-rose-50/80 shadow-sm shadow-rose-100'
+                              : profile.flood_prone
+                                ? 'border-amber-200/60 bg-amber-50/30'
+                                : 'border-slate-200/80 bg-white'
+                          }`}
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="min-w-0 flex-1">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <p className="text-sm font-black text-slate-950">{profile.purok_sitio}</p>
+                                {isAtRisk && (
+                                  <span className="inline-flex items-center gap-1 rounded-full border border-rose-300 bg-rose-100 px-2 py-0.5 text-[10px] font-bold text-rose-700">
+                                    <AlertCircle className="h-2.5 w-2.5" /> At risk
+                                  </span>
+                                )}
+                                {hasPinged && (
+                                  <span className="inline-flex items-center gap-1 rounded-full border border-emerald-300 bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-700">
+                                    <BellRing className="h-2.5 w-2.5" /> Pinged
+                                  </span>
+                                )}
+                              </div>
+                              <p className="mt-1 text-xs text-slate-500">
+                                {PUROK_FLOOD_CONTROL_STATUS_LABELS[profile.flood_control_status]} ·{' '}
+                                <span className="font-semibold text-slate-700">{houseCount} households</span>
+                              </p>
+                              {profile.warning_notes && (
+                                <p className="mt-2 rounded-xl border border-amber-200 bg-amber-50 px-2.5 py-2 text-[11px] leading-5 text-amber-800">
+                                  {profile.warning_notes}
+                                </p>
+                              )}
+                            </div>
+                          </div>
+
+                          <div className="mt-3 flex items-center gap-2">
+                            <button
+                              type="button"
+                              disabled={houseCount === 0 || !profile.flood_prone}
+                              onClick={() => setPingModal({ purok: profile, householdCount: houseCount })}
+                              className={`inline-flex items-center gap-1.5 rounded-full px-3.5 py-2 text-[11px] font-bold transition ${
+                                hasPinged
+                                  ? 'border border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
+                                  : isAtRisk
+                                    ? 'bg-rose-600 text-white shadow-sm shadow-rose-200 hover:bg-rose-700'
+                                    : 'bg-cyan-950 text-white hover:bg-cyan-900'
+                              } disabled:opacity-40 disabled:cursor-not-allowed`}
+                              title={!profile.flood_prone ? "Purok must be marked as flood-prone to ping" : undefined}
+                            >
+                              <BellRing className="h-3.5 w-3.5" />
+                              {hasPinged ? 'Ping again' : 'Send Ping'}
+                            </button>
+                            
+                            <button
+                              type="button"
+                              disabled={updatingPurokStatus === profile.purok_sitio + '-toggle'}
+                              onClick={() => handlePurokFloodProneToggle(profile)}
+                              className={`inline-flex items-center gap-1.5 rounded-full px-3.5 py-2 text-[11px] font-bold transition ${
+                                profile.flood_prone
+                                  ? 'border-amber-200 bg-amber-100 text-amber-800 hover:bg-amber-200'
+                                  : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                              }`}
+                            >
+                              <ShieldAlert className="h-3.5 w-3.5" />
+                              {updatingPurokStatus === profile.purok_sitio + '-toggle' 
+                                ? '...' 
+                                : profile.flood_prone ? 'Marked Prone' : 'Mark as Prone'}
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => startEditingPurok(profile)}
+                              className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3.5 py-2 text-[11px] font-bold text-slate-600 transition hover:bg-slate-50"
+                            >
+                              <Edit2 className="h-3.5 w-3.5" />
+                              Edit Notes
+                            </button>
+
+                            {profile.default_evacuation_site && (
+                              <span className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-2.5 py-1.5 text-[10px] font-medium text-slate-600">
+                                <MapPin className="h-3 w-3" />
+                                {profile.default_evacuation_site}
+                              </span>
+                            )}
+                          </div>
+
+                          {editingPurokId === profile.purok_sitio && purokEditForm ? (
+                            <div className="mt-4 rounded-2xl bg-slate-50 p-4 border border-slate-100">
+                              <div className="space-y-3">
+                                <div>
+                                  <label className="mb-1 block text-[11px] font-bold text-slate-700">Default Evacuation Site</label>
+                                  <input
+                                    type="text"
+                                    value={purokEditForm.default_evacuation_site}
+                                    onChange={(e) => setPurokEditForm({ ...purokEditForm, default_evacuation_site: e.target.value })}
+                                    className="w-full rounded-xl border-slate-200 px-3 py-2 text-sm focus:border-cyan-900 focus:ring-cyan-900"
+                                    placeholder="e.g. Barangay Hall"
+                                  />
+                                </div>
+                                <div>
+                                  <label className="mb-1 block text-[11px] font-bold text-slate-700">Warning Notes</label>
+                                  <textarea
+                                    value={purokEditForm.warning_notes}
+                                    onChange={(e) => setPurokEditForm({ ...purokEditForm, warning_notes: e.target.value })}
+                                    className="w-full rounded-xl border-slate-200 px-3 py-2 text-sm focus:border-cyan-900 focus:ring-cyan-900"
+                                    rows={2}
+                                    placeholder="e.g. Bridge overflow, avoid low crossing"
+                                  />
+                                </div>
+                                <div>
+                                  <label className="mb-1 block text-[11px] font-bold text-slate-700">Flood Control Notes</label>
+                                  <textarea
+                                    value={purokEditForm.flood_control_notes}
+                                    onChange={(e) => setPurokEditForm({ ...purokEditForm, flood_control_notes: e.target.value })}
+                                    className="w-full rounded-xl border-slate-200 px-3 py-2 text-sm focus:border-cyan-900 focus:ring-cyan-900"
+                                    rows={2}
+                                    placeholder="e.g. Drainage cleared on May 1st"
+                                  />
+                                </div>
+                                <div className="flex gap-2 pt-1">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleSavePurokEdits(profile)}
+                                    disabled={updatingPurokStatus === profile.purok_sitio + '-edit'}
+                                    className="rounded-lg bg-cyan-950 px-4 py-2 text-[11px] font-bold text-white hover:bg-cyan-900 disabled:opacity-50"
+                                  >
+                                    {updatingPurokStatus === profile.purok_sitio + '-edit' ? 'Saving...' : 'Save Notes'}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setEditingPurokId(null);
+                                      setPurokEditForm(null);
+                                    }}
+                                    className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-[11px] font-bold text-slate-600 hover:bg-slate-50"
+                                  >
+                                    Cancel
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
+                          ) : null}
+
+                          <div className="mt-4 grid grid-cols-2 sm:grid-cols-4 gap-1">
+                            {(['protected', 'partial', 'none', 'unknown'] as PurokFloodControlStatus[]).map((status) => (
+                              <button
+                                key={status}
+                                type="button"
+                                disabled={updatingPurokStatus === profile.purok_sitio}
+                                onClick={() => handlePurokStatusUpdate(profile, status)}
+                                className={`rounded-xl py-2 text-[10px] font-bold transition ${
+                                  profile.flood_control_status === status
+                                    ? 'bg-cyan-900 text-white ring-1 ring-inset ring-cyan-900'
+                                    : 'bg-slate-50 text-slate-400 hover:bg-slate-100 hover:text-slate-600'
+                                }`}
+                              >
+                                {updatingPurokStatus === profile.purok_sitio && profile.flood_control_status !== status ? '…' : PUROK_FLOOD_CONTROL_STATUS_LABELS[status]}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })
+                )}
+              </div>
+            ) : null}
           </CivicPanel>
         </div>
       </aside>
+
+      {/* ── Ping Confirmation Modal ─────────────────────────────── */}
+      {pingModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 backdrop-blur-sm sm:items-center"
+          onClick={() => setPingModal(null)}
+        >
+          <div
+            className="w-full max-w-sm rounded-t-[32px] bg-white p-6 shadow-2xl sm:rounded-[32px]"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div className="flex items-start gap-3">
+              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-[18px] bg-rose-100">
+                <BellRing className="h-6 w-6 text-rose-600" />
+              </div>
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-rose-600">Emergency Ping</p>
+                <h3 className="mt-0.5 text-xl font-black text-slate-950">{pingModal.purok.purok_sitio}</h3>
+                <p className="mt-1 text-xs text-slate-500">
+                  Sending location ping to{' '}
+                  <span className="font-bold text-slate-900">{pingModal.householdCount} households</span> in this zone.
+                </p>
+              </div>
+            </div>
+
+            {/* Message preview */}
+            <div className="mt-5 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+              <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-400">Alert preview</p>
+              <p className="mt-2 text-sm leading-6 text-slate-800">
+                <span className="font-bold">[MSWDO FIELD PING]</span> Responders are monitoring{' '}
+                <span className="font-semibold">{pingModal.purok.purok_sitio}</span> due to flood risk.
+                {pingModal.purok.warning_notes
+                  ? ` ${pingModal.purok.warning_notes}`
+                  : ' Please stay alert and avoid low-lying areas.'}
+                {pingModal.purok.default_evacuation_site
+                  ? ` Evacuation: ${pingModal.purok.default_evacuation_site}.`
+                  : ''}
+              </p>
+            </div>
+
+            {/* Live weather context if available */}
+            {liveWeather && (
+              <div className="mt-3 flex flex-wrap gap-2">
+                <span className="inline-flex items-center gap-1 rounded-full border border-sky-200 bg-sky-50 px-2.5 py-1 text-[11px] font-semibold text-sky-700">
+                  <CloudRain className="h-3 w-3" />
+                  Rain {Math.round(liveWeather.current.rainChance ?? 0)}%
+                </span>
+                <span className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold text-slate-700">
+                  <Wind className="h-3 w-3" />
+                  Gusts {Math.round(liveWeather.current.windGust ?? 0)} kph
+                </span>
+              </div>
+            )}
+
+            {/* Actions */}
+            <div className="mt-6 flex gap-3">
+              <button
+                type="button"
+                onClick={() => setPingModal(null)}
+                className="flex-1 rounded-2xl border border-slate-200 bg-white py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={isSendingPing}
+                onClick={async () => {
+                  setIsSendingPing(true);
+                  // Simulate send delay (replace with real SMS/push API call)
+                  await new Promise((resolve) => setTimeout(resolve, 1400));
+                  setPingZones((current) => new Set([...current, pingModal.purok.purok_sitio]));
+                  setPingModal(null);
+                  setIsSendingPing(false);
+                }}
+                className="flex-1 inline-flex items-center justify-center gap-2 rounded-2xl bg-rose-600 py-3 text-sm font-bold text-white shadow-sm shadow-rose-200 hover:bg-rose-700 disabled:opacity-60 transition"
+              >
+                {isSendingPing ? (
+                  <>
+                    <span className="h-4 w-4 rounded-full border-2 border-white/30 border-t-white animate-spin" />
+                    Sending…
+                  </>
+                ) : (
+                  <>
+                    <BellRing className="h-4 w-4" />
+                    Send Ping Now
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <section className="min-w-0 flex-1">
         <div className="flex h-full min-h-[720px] flex-col gap-4">
@@ -526,7 +1210,8 @@ export default function ResponderDesktop() {
               <p className="mt-1 text-sm text-slate-500">Weather, basemap, and selected-item detail now stay in the operations rail.</p>
             </div>
             <div className="flex flex-wrap gap-2">
-              <CivicBadge label={`${mapHouseholds.length} verified household pins`} tone="emerald" />
+              <CivicBadge label={`${filteredMapHouseholds.length} verified household pins`} tone="emerald" />
+              <CivicBadge label={`${visibleFloodZoneCount} response zones`} tone="amber" />
               <CivicBadge label={`${mapControls.activeBaseLayer.label} base`} tone="navy" />
               <CivicBadge
                 label={mapControls.weatherOverlayVisible ? mapControls.activeLayerSummary : 'Weather hidden'}
@@ -537,8 +1222,10 @@ export default function ResponderDesktop() {
 
           <div className="min-h-0 flex-1">
             <ResponderLeafletMap
-              households={mapHouseholds}
+              households={filteredMapHouseholds}
               incidents={incidents}
+              purokRiskProfiles={purokRiskProfiles}
+              alertRules={alertRules}
               selectedHousehold={selectedHousehold}
               onSelectHousehold={(household) => {
                 setSelectedHousehold(household);

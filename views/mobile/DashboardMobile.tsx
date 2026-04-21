@@ -1,15 +1,19 @@
-﻿'use client';
+'use client';
 
 import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { AlertTriangle, Baby, FileText, Home, Package, ShieldAlert, Users } from 'lucide-react';
+import { AlertTriangle, Activity, Baby, FileText, Home, Package, Radio, ShieldAlert, Users, CheckCircle2 } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { getAnalyticsBarangayScope, getAnalyticsScopeLabel } from '@/lib/analytics-scope';
 import { db } from '@/lib/db/indexeddb';
 import { getDashboardStats, getDataQualitySummary } from '@/lib/db/queries';
+import { getDistributionEvents } from '@/lib/db/distribution';
+import { getIncidents } from '@/lib/db/incidents';
 import { getReportsVulnerableTotal } from '@/lib/reports-preview-data';
 import { getDefaultRouteForUser, hasPermission, restoreSession } from '@/lib/auth';
+import type { DistributionEvent, Incident } from '@/lib/db/schema';
+import WeatherWidget from '@/components/WeatherWidget';
 import {
   CivicBadge,
   CivicHero,
@@ -42,6 +46,8 @@ export default function DashboardMobile() {
   const [user, setUser] = useState<ReturnType<typeof restoreSession>>(null);
   const [stats, setStats] = useState<Stats | null>(null);
   const [dataQuality, setDataQuality] = useState<Awaited<ReturnType<typeof getDataQualitySummary>> | null>(null);
+  const [activeEvents, setActiveEvents] = useState<DistributionEvent[]>([]);
+  const [activeIncidents, setActiveIncidents] = useState<Incident[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -63,14 +69,18 @@ export default function DashboardMobile() {
       }
 
       setUser(restoredUser);
-      const [dashboardStats, qualitySummary] = await Promise.all([
+      const [dashboardStats, qualitySummary, events, incidents] = await Promise.all([
         getDashboardStats(getAnalyticsBarangayScope(restoredUser)),
         restoredUser.role === 'admin'
           ? getDataQualitySummary()
           : Promise.resolve(null),
+        getDistributionEvents({ status: 'ongoing' }),
+        getIncidents({ status: 'reported' }),
       ]);
       setStats(dashboardStats);
       setDataQuality(qualitySummary);
+      setActiveEvents(events);
+      setActiveIncidents(incidents);
       setError('');
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : 'Failed to load dashboard metrics.');
@@ -87,7 +97,7 @@ export default function DashboardMobile() {
 
   useEffect(() => {
     function handleDataChanged(event: WindowEventMap['mswdo-data-changed']) {
-      if (!['households', 'residents', 'vulnerability_flags', 'distribution_events', 'inventory_items', 'package_templates'].includes(event.detail.table)) {
+      if (!['households', 'residents', 'vulnerability_flags', 'distribution_events', 'inventory_items', 'package_templates', 'incidents'].includes(event.detail.table)) {
         return;
       }
 
@@ -125,16 +135,23 @@ export default function DashboardMobile() {
   return (
     <CivicPage className="space-y-4 px-4 py-4">
       <CivicHero
-        eyebrow="Municipal Operations"
-        title={`${greeting()}, ${user.name?.split(' ')[0] ?? 'there'}`}
-        description={isLoading ? 'Loading the latest civic overview...' : heroDescription}
+        eyebrow="Municipal Operations Hub"
+        title={`${greeting()}, ${user.name?.split(' ')[0] ?? 'Official'}`}
+        description={isLoading ? 'Loading executive briefing...' : heroDescription}
         className="px-4 py-4 sm:px-5 sm:py-5"
       >
         <div className="mt-4 flex flex-wrap gap-2">
           <CivicBadge label={`${stats?.total_households ?? 0} households`} tone="teal" />
-          <CivicBadge label={`${totalVulnerable} monitored residents`} tone="amber" />
+          <CivicBadge label={`${totalVulnerable} vulnerable`} tone="amber" />
+          {activeIncidents.length > 0 && <CivicBadge label={`${activeIncidents.length} active incidents`} tone="rose" />}
+          {activeEvents.length > 0 && <CivicBadge label={`${activeEvents.length} distributions`} tone="navy" />}
         </div>
-        <div className="mt-4 grid grid-cols-2 gap-2">
+        
+        <div className="mt-5">
+          <WeatherWidget mode="compact" className="border-none shadow-none bg-slate-50/50" defaultMinimized autoMinimizeInTightPanel />
+        </div>
+
+        <div className="mt-5 grid grid-cols-2 gap-2">
           {quickActions.map((link) => {
             const Icon = link.icon;
             return (
@@ -168,6 +185,49 @@ export default function DashboardMobile() {
         <CivicKpiCard className="rounded-[22px] p-4" icon={ShieldAlert} label="Vulnerable" value={isLoading ? '--' : totalVulnerable} tone="rose" />
       </div>
 
+      <CivicPanel className="space-y-4 rounded-[24px] p-4 bg-slate-50/50">
+        <CivicSectionHeading
+          icon={Activity}
+          title="Live Operations"
+          description="Current field operations."
+        />
+        <div className="space-y-3">
+          {isLoading ? (
+            <p className="text-sm text-slate-500">Loading operations...</p>
+          ) : activeIncidents.length === 0 && activeEvents.length === 0 ? (
+            <div className="rounded-[20px] border border-dashed border-slate-300 bg-white px-4 py-6 text-center text-slate-500">
+              <CheckCircle2 className="mx-auto h-6 w-6 text-emerald-400" />
+              <p className="mt-2 text-sm font-medium text-slate-900">All clear</p>
+            </div>
+          ) : (
+            <>
+              {activeIncidents.slice(0, 3).map((incident) => (
+                <div key={incident.id} className="rounded-[20px] border border-rose-100 bg-white p-3 shadow-sm flex items-start gap-3">
+                  <div className="rounded-full bg-rose-100 p-2 text-rose-600">
+                    <Radio className="h-4 w-4" />
+                  </div>
+                  <div>
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-rose-700">{incident.type.replace('_', ' ')}</p>
+                    <p className="mt-0.5 text-sm font-semibold text-slate-900">{incident.location}</p>
+                  </div>
+                </div>
+              ))}
+              {activeEvents.slice(0, 3).map((event) => (
+                <div key={event.id} className="rounded-[20px] border border-sky-100 bg-white p-3 shadow-sm flex items-start gap-3">
+                  <div className="rounded-full bg-sky-100 p-2 text-sky-600">
+                    <Package className="h-4 w-4" />
+                  </div>
+                  <div>
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-sky-700">Relief Ongoing</p>
+                    <p className="mt-0.5 text-sm font-semibold text-slate-900">{event.event_name}</p>
+                  </div>
+                </div>
+              ))}
+            </>
+          )}
+        </div>
+      </CivicPanel>
+
       <CivicPanel className="space-y-5 rounded-[24px] p-4">
         <CivicSectionHeading
           icon={ShieldAlert}
@@ -194,8 +254,8 @@ export default function DashboardMobile() {
         <CivicPanel className="space-y-4 rounded-[24px] p-4">
           <CivicSectionHeading
             icon={AlertTriangle}
-            title="Data Quality"
-            description="Quick links for records and templates that need cleanup."
+            title="Action Center"
+            description="Tasks and records requiring executive attention."
           />
           <div className="space-y-2">
             {dataQuality.issues.map((issue) => (

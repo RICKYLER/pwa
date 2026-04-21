@@ -112,21 +112,19 @@ export default function ResidentVerifyEmailPage() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-950">
+    <div className="min-h-screen bg-slate-900">
       <div className="mx-auto flex min-h-screen max-w-6xl flex-col lg:flex-row">
         <section className="relative hidden overflow-hidden px-12 py-16 text-white lg:flex lg:w-1/2 lg:flex-col lg:justify-center">
-          <div className="absolute inset-0 bg-gradient-to-br from-teal-900 via-cyan-900 to-slate-950" />
-          <div className="absolute top-1/4 left-1/4 h-72 w-72 rounded-full bg-teal-500/20 blur-3xl" />
-          <div className="absolute bottom-1/4 right-1/4 h-96 w-96 rounded-full bg-cyan-500/15 blur-3xl" />
+          <div className="absolute inset-0 bg-slate-900" />
           <div className="relative z-10 max-w-md">
-            <div className="mb-8 flex h-20 w-20 items-center justify-center rounded-3xl bg-white/10 shadow-2xl shadow-teal-500/25 backdrop-blur">
+            <div className="mb-8 flex h-16 w-16 items-center justify-center rounded-lg bg-white/10 shadow-sm backdrop-blur border border-white/20">
               <ShieldCheck className="h-10 w-10" />
             </div>
-            <p className="text-sm font-semibold uppercase tracking-[0.3em] text-teal-200">Resident Email Verification</p>
+            <p className="text-sm font-bold uppercase tracking-wider text-slate-300">Resident Email Verification</p>
             <h1 className="mt-4 text-4xl font-bold leading-tight">
               Verify your email before signing in.
             </h1>
-            <p className="mt-5 text-base leading-7 text-teal-100">
+            <p className="mt-5 text-base leading-7 text-slate-300">
               This helps make sure the resident account belongs to the real email owner before any registration data is submitted.
             </p>
           </div>
@@ -135,7 +133,7 @@ export default function ResidentVerifyEmailPage() {
         <section className="flex w-full items-center justify-center bg-white px-6 py-10 lg:w-1/2">
           <div className="w-full max-w-md">
             <div className="mb-8 text-center lg:text-left">
-              <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-teal-600 to-cyan-600 text-white shadow-lg shadow-teal-500/25 lg:mx-0">
+              <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-lg bg-blue-900 text-white shadow-sm lg:mx-0">
                 {state === 'verified' ? <CheckCircle2 className="h-7 w-7" /> : <Mail className="h-7 w-7" />}
               </div>
               <h1 className="text-3xl font-bold text-slate-900">
@@ -147,7 +145,7 @@ export default function ResidentVerifyEmailPage() {
             </div>
 
             {email && (
-              <div className="mb-5 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+              <div className="mb-5 rounded-md border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 shadow-sm">
                 Verification email for:
                 {' '}
                 <span className="font-semibold text-slate-900">{email}</span>
@@ -155,14 +153,14 @@ export default function ResidentVerifyEmailPage() {
             )}
 
             {state === 'verifying' && (
-              <div className="flex items-start gap-3 rounded-2xl border border-teal-200 bg-teal-50 px-4 py-4 text-sm text-teal-800">
+              <div className="flex items-start gap-3 rounded-md border border-blue-200 bg-blue-50 px-4 py-4 text-sm text-blue-800 shadow-sm">
                 <Loader2 className="mt-0.5 h-4 w-4 flex-shrink-0 animate-spin" />
                 <span>Verifying your email address. Please wait a moment.</span>
               </div>
             )}
 
             {error && (
-              <div className="flex items-start gap-3 rounded-2xl border border-red-200 bg-red-50 px-4 py-4 text-sm text-red-700">
+              <div className="flex items-start gap-3 rounded-md border border-red-200 bg-red-50 px-4 py-4 text-sm text-red-700 shadow-sm">
                 <AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0" />
                 <span>{error}</span>
               </div>
@@ -171,7 +169,7 @@ export default function ResidentVerifyEmailPage() {
             {state !== 'verifying' && (
               <div className="mt-5 space-y-4">
                 {state !== 'verified' && (
-                  <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-700">
+                  <div className="rounded-md border border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-700 shadow-sm">
                     Open the verification email and click the link. After that, sign in using the password you created during registration.
                   </div>
                 )}
@@ -180,7 +178,7 @@ export default function ResidentVerifyEmailPage() {
                   {state === 'verified' ? (
                     <Link
                       href="/login"
-                      className="flex w-full items-center justify-center rounded-xl bg-gradient-to-r from-teal-600 to-cyan-600 px-4 py-3 text-sm font-semibold text-white shadow-lg shadow-teal-500/25 transition hover:opacity-95"
+                      className="flex w-full items-center justify-center rounded-md bg-blue-900 px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-800"
                     >
                       Continue to login
                     </Link>
@@ -189,7 +187,7 @@ export default function ResidentVerifyEmailPage() {
                       type="button"
                       onClick={() => { void handleResend(); }}
                       disabled={!canResend || isResending}
-                      className="flex w-full items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+                      className="flex w-full items-center justify-center gap-2 rounded-md border border-slate-300 bg-white px-4 py-3 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
                     >
                       {isResending ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
                       {isResending ? 'Sending...' : 'Resend verification email'}
@@ -198,7 +196,7 @@ export default function ResidentVerifyEmailPage() {
 
                   <Link
                     href="/resident/register"
-                    className="flex w-full items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+                    className="flex w-full items-center justify-center rounded-md border border-slate-300 bg-white px-4 py-3 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50"
                   >
                     Back to registration
                   </Link>

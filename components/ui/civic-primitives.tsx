@@ -17,12 +17,12 @@ const toneStyles: Record<Tone, string> = {
 };
 
 const toneIconStyles: Record<Tone, string> = {
-  navy: 'bg-cyan-950 text-white shadow-[0_14px_36px_-20px_rgba(8,47,73,0.6)]',
-  teal: 'bg-teal-700 text-white shadow-[0_14px_36px_-20px_rgba(15,118,110,0.55)]',
-  amber: 'bg-amber-500 text-white shadow-[0_14px_36px_-20px_rgba(217,119,6,0.55)]',
-  rose: 'bg-rose-600 text-white shadow-[0_14px_36px_-20px_rgba(225,29,72,0.55)]',
-  emerald: 'bg-emerald-600 text-white shadow-[0_14px_36px_-20px_rgba(5,150,105,0.55)]',
-  slate: 'bg-slate-900 text-white shadow-[0_14px_36px_-20px_rgba(15,23,42,0.55)]',
+  navy: 'bg-cyan-950 text-white shadow-sm',
+  teal: 'bg-teal-700 text-white shadow-sm',
+  amber: 'bg-amber-500 text-white shadow-sm',
+  rose: 'bg-rose-600 text-white shadow-sm',
+  emerald: 'bg-emerald-600 text-white shadow-sm',
+  slate: 'bg-slate-900 text-white shadow-sm',
 };
 
 export function CivicPage({
@@ -57,11 +57,10 @@ export function CivicHero({
   return (
     <section
       className={cn(
-        'relative overflow-hidden rounded-[28px] border border-white/60 bg-[linear-gradient(135deg,rgba(255,255,255,0.98),rgba(244,249,255,0.92))] px-5 py-5 shadow-[0_26px_70px_-38px_rgba(15,23,42,0.35)] sm:px-6 sm:py-6',
+        'relative overflow-hidden rounded-xl border border-slate-200 bg-white px-5 py-5 shadow-sm sm:px-6 sm:py-6',
         className,
       )}
     >
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(8,47,73,0.08),transparent_32%),radial-gradient(circle_at_bottom_left,rgba(13,148,136,0.08),transparent_28%)]" />
       <div className="relative flex flex-wrap items-start justify-between gap-4">
         <div className="max-w-3xl">
           <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500">{eyebrow}</p>
@@ -85,7 +84,7 @@ export function CivicPanel({
   return (
     <section
       className={cn(
-        'rounded-[26px] border border-slate-200/80 bg-white/95 p-4 shadow-[0_18px_54px_-34px_rgba(15,23,42,0.24)] backdrop-blur sm:p-5',
+        'rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5',
         className,
       )}
     >
@@ -111,7 +110,7 @@ export function CivicSectionHeading({
     <div className={cn('flex flex-wrap items-start justify-between gap-3', className)}>
       <div className="flex items-start gap-3">
         {Icon ? (
-          <div className="flex h-10 w-10 items-center justify-center rounded-2xl border border-slate-200 bg-slate-50 text-slate-700">
+          <div className="flex h-10 w-10 items-center justify-center rounded-lg border border-slate-200 bg-slate-50 text-slate-700">
             <Icon className="h-4 w-4" />
           </div>
         ) : null}
@@ -141,8 +140,8 @@ export function CivicKpiCard({
   className?: string;
 }) {
   return (
-    <div className={cn('rounded-[24px] border p-4 shadow-[0_18px_46px_-36px_rgba(15,23,42,0.45)]', toneStyles[tone], className)}>
-      <div className={cn('flex h-11 w-11 items-center justify-center rounded-2xl', toneIconStyles[tone])}>
+    <div className={cn('rounded-xl border p-4 shadow-sm', toneStyles[tone], className)}>
+      <div className={cn('flex h-11 w-11 items-center justify-center rounded-lg', toneIconStyles[tone])}>
         <Icon className="h-5 w-5" />
       </div>
       <p className="mt-5 text-3xl font-black tracking-tight">{value}</p>
@@ -164,7 +163,7 @@ export function CivicBadge({
   return (
     <span
       className={cn(
-        'inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-semibold tracking-[0.02em]',
+        'inline-flex items-center rounded-md border px-2.5 py-1 text-[11px] font-semibold tracking-[0.02em]',
         toneStyles[tone],
         className,
       )}
@@ -185,9 +184,9 @@ export function CivicChipButton({
   return (
     <button
       className={cn(
-        'inline-flex items-center gap-2 rounded-full border px-3 py-2 text-xs font-semibold transition',
+        'inline-flex items-center gap-2 rounded-md border px-3 py-2 text-xs font-semibold transition',
         active
-          ? 'border-cyan-900 bg-cyan-950 text-white shadow-[0_14px_28px_-20px_rgba(8,47,73,0.75)]'
+          ? 'border-cyan-900 bg-cyan-950 text-white shadow-sm'
           : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50',
         className,
       )}
@@ -206,7 +205,7 @@ export function CivicSearchInput({
     <div className={cn('relative', className)}>
       <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
       <input
-        className="h-11 w-full rounded-2xl border border-slate-200 bg-slate-50 pl-10 pr-4 text-sm text-slate-800 shadow-[inset_0_1px_0_rgba(255,255,255,0.7)] outline-none transition placeholder:text-slate-400 focus:border-cyan-800 focus:bg-white focus:ring-4 focus:ring-cyan-900/10"
+        className="h-11 w-full rounded-lg border border-slate-300 bg-slate-50 pl-10 pr-4 text-sm text-slate-800 outline-none transition placeholder:text-slate-500 focus:border-cyan-800 focus:bg-white focus:ring-2 focus:ring-cyan-900/20"
         {...props}
       />
     </div>
@@ -229,11 +228,11 @@ export function CivicEmptyState({
   return (
     <div
       className={cn(
-        'rounded-[26px] border border-dashed border-slate-300 bg-white/85 px-6 py-14 text-center shadow-[0_18px_46px_-36px_rgba(15,23,42,0.3)]',
+        'rounded-xl border border-dashed border-slate-300 bg-white px-6 py-14 text-center shadow-sm',
         className,
       )}
     >
-      <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-3xl border border-slate-200 bg-slate-50 text-slate-400">
+      <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-xl border border-slate-200 bg-slate-50 text-slate-400">
         <Icon className="h-6 w-6" />
       </div>
       <h3 className="mt-4 text-base font-bold text-slate-900">{title}</h3>

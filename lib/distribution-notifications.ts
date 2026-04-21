@@ -99,15 +99,17 @@ export function parseDistributionEventNotification(
     return null;
   }
 
-  const eventId = typeof payload.event_id === 'string' ? payload.event_id : '';
-  const eventName = typeof payload.event_name === 'string' ? payload.event_name : '';
-  const type = payload.type;
-  const status = payload.status;
-  const targetScope = payload.target_scope;
-  const targetGroup = payload.target_group;
-  const scheduledDate = typeof payload.scheduled_date === 'string' ? payload.scheduled_date : '';
-  const location = typeof payload.location === 'string' ? payload.location : '';
-  const notes = typeof payload.notes === 'string' ? payload.notes : undefined;
+  const payloadRecord = payload as Record<string, unknown>;
+
+  const eventId = typeof payloadRecord.event_id === 'string' ? payloadRecord.event_id : '';
+  const eventName = typeof payloadRecord.event_name === 'string' ? payloadRecord.event_name : '';
+  const type = payloadRecord.type;
+  const status = payloadRecord.status;
+  const targetScope = payloadRecord.target_scope;
+  const targetGroup = payloadRecord.target_group;
+  const scheduledDate = typeof payloadRecord.scheduled_date === 'string' ? payloadRecord.scheduled_date : '';
+  const location = typeof payloadRecord.location === 'string' ? payloadRecord.location : '';
+  const notes = typeof payloadRecord.notes === 'string' ? payloadRecord.notes : undefined;
 
   if (
     !eventId

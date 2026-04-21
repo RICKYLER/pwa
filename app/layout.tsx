@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from 'next'
+import { Inter } from 'next/font/google'
 import { Analytics } from '@vercel/analytics/next'
 import AuthBootstrap from '@/components/AuthBootstrap'
 import GoogleMapsProvider from '@/components/GoogleMapsProvider'
@@ -6,15 +7,17 @@ import PwaBootstrap from '@/components/PwaBootstrap'
 import { PwaInstallProvider } from '@/hooks/usePwaInstall'
 import './globals.css'
 
+const inter = Inter({ subsets: ['latin'], variable: '--font-sans' })
+
 export const metadata: Metadata = {
-  title: 'E-Mabini',
-  description: 'E-Mabini: A Dynamic Household Census and Disaster Management System',
+  title: 'MABINI DISASTER RISK HOUSEHOLD PROFILING SYSTEM',
+  description: 'MABINI DISASTER RISK HOUSEHOLD PROFILING SYSTEM',
   generator: 'v0.app',
-  applicationName: 'E-Mabini',
+  applicationName: 'MABINI DISASTER RISK HOUSEHOLD PROFILING SYSTEM',
   appleWebApp: {
     capable: true,
     statusBarStyle: 'black-translucent',
-    title: 'E-Mabini',
+    title: 'MABINI DISASTER RISK HOUSEHOLD PROFILING SYSTEM',
   },
   formatDetection: {
     telephone: true,
@@ -64,7 +67,7 @@ export default function RootLayout({
   children: React.ReactNode
 }>) {
   return (
-    <html lang="en">
+    <html lang="en" className={inter.variable}>
       <head>
         <meta name="mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-capable" content="yes" />

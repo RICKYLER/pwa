@@ -6,6 +6,7 @@ where table_schema = 'public'
   and table_name in (
     'users',
     'location_master_lists',
+    'purok_risk_profiles',
     'households',
     'residents',
     'vulnerability_flags',
@@ -32,6 +33,7 @@ from pg_tables
 where schemaname = 'public'
   and tablename in (
     'users',
+    'purok_risk_profiles',
     'households',
     'residents',
     'vulnerability_flags',

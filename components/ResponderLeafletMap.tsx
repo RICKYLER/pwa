@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Loader2 } from 'lucide-react';
-import type { Household, Incident } from '@/lib/db/schema';
+import type { DisasterAlertRule, Household, Incident, PurokRiskProfile } from '@/lib/db/schema';
 import {
   DEFAULT_BARANGAY_CENTER,
   HOUSEHOLD_PIN_COLOR,
@@ -20,6 +20,10 @@ import {
   type ResponderBaseMapLayerId,
 } from '@/lib/responder-map-config';
 import { fetchJsonWithCache } from '@/lib/client-fetch-cache';
+import {
+  buildFieldResponseZoneMarkers,
+  type FieldResponseZoneMarker,
+} from '@/lib/purok-risk-profiles';
 
 declare global {
   interface Window {
@@ -133,6 +137,8 @@ interface WindSurfaceGrid {
 interface ResponderLeafletMapProps {
   households: Household[];
   incidents: Incident[];
+  purokRiskProfiles?: PurokRiskProfile[];
+  alertRules?: DisasterAlertRule[];
   selectedHousehold?: Household | null;
   onSelectHousehold?: (household: Household | null) => void;
   selectedIncident?: Incident | null;
@@ -540,6 +546,59 @@ function buildIncidentMarkerHtml(severity: string, selected: boolean) {
   `;
 }
 
+function escapeMarkerText(value: string) {
+  return value
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
+}
+
+const ALERT_RULE_ZONE_MARKER_COLORS = {
+  halo: 'rgba(14,116,144,0.16)',
+  border: 'rgba(14,116,144,0.48)',
+  pin: '#0E7490',
+  labelBackground: 'rgba(21,94,117,0.94)',
+  labelBorder: 'rgba(224,242,254,0.18)',
+  labelText: '#FFFFFF',
+  subtitleText: 'rgba(224,242,254,0.92)',
+} as const;
+
+function buildZoneMarkerHtml(marker: FieldResponseZoneMarker) {
+  const accent = marker.source === 'alert_rule'
+    ? ALERT_RULE_ZONE_MARKER_COLORS
+    : {
+      halo: 'rgba(249,115,22,0.12)',
+      border: 'rgba(249,115,22,0.45)',
+      pin: '#f97316',
+    };
+  const labelColors = marker.source === 'alert_rule'
+    ? {
+      background: ALERT_RULE_ZONE_MARKER_COLORS.labelBackground,
+      border: ALERT_RULE_ZONE_MARKER_COLORS.labelBorder,
+      text: ALERT_RULE_ZONE_MARKER_COLORS.labelText,
+      subtitle: ALERT_RULE_ZONE_MARKER_COLORS.subtitleText,
+    }
+    : {
+      background: 'rgba(15,23,42,0.9)',
+      border: 'rgba(255,255,255,0.16)',
+      text: '#ffffff',
+      subtitle: 'rgba(226,232,240,0.92)',
+    };
+
+  return `
+    <div style="position:relative;width:92px;height:92px;display:flex;align-items:center;justify-content:center;">
+      <div style="position:absolute;width:56px;height:56px;border-radius:999px;background:${accent.halo};border:2px dashed ${accent.border};"></div>
+      <div style="position:absolute;width:32px;height:32px;border-radius:999px;background:${accent.pin};border:3px solid #ffffff;display:flex;align-items:center;justify-content:center;color:#ffffff;font-size:18px;font-weight:900;box-shadow:0 14px 28px rgba(15,23,42,0.24);">!</div>
+      <div style="position:absolute;top:56px;left:50%;transform:translateX(-50%);min-width:86px;max-width:132px;padding:5px 8px;border-radius:999px;background:${labelColors.background};border:1px solid ${labelColors.border};color:${labelColors.text};text-align:center;box-shadow:0 14px 28px rgba(15,23,42,0.24);">
+        <div style="font-size:10px;font-weight:800;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeMarkerText(marker.label)}</div>
+        <div style="margin-top:2px;font-size:9px;line-height:1.2;color:${labelColors.subtitle};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeMarkerText(marker.subtitle)}</div>
+      </div>
+    </div>
+  `;
+}
+
 function hasIncidentPin(incident: Pick<Incident, 'gps_lat' | 'gps_lng'>): incident is Incident & {
   gps_lat: number;
   gps_lng: number;
@@ -550,6 +609,8 @@ function hasIncidentPin(incident: Pick<Incident, 'gps_lat' | 'gps_lng'>): incide
 export default function ResponderLeafletMap({
   households,
   incidents,
+  purokRiskProfiles = [],
+  alertRules = [],
   selectedHousehold,
   onSelectHousehold,
   selectedIncident,
@@ -578,6 +639,7 @@ export default function ResponderLeafletMap({
   const onSelectIncidentRef = useRef(onSelectIncident);
   const selectedHouseholdControlledRef = useRef(selectedHousehold !== undefined);
   const selectedIncidentControlledRef = useRef(selectedIncident !== undefined);
+  const zoneLayerRef = useRef<LeafletLayerGroup | null>(null);
   const householdLayerRef = useRef<LeafletLayerGroup | null>(null);
   const incidentLayerRef = useRef<LeafletLayerGroup | null>(null);
   const baseTileRefs = useRef<Partial<Record<ResponderBaseMapLayerId, LeafletTileLayer>>>({});
@@ -598,6 +660,10 @@ export default function ResponderLeafletMap({
   const activeIncidents = useMemo(
     () => incidents.filter((incident) => incident.status !== 'resolved'),
     [incidents],
+  );
+  const zoneMarkers = useMemo(
+    () => buildFieldResponseZoneMarkers(households, purokRiskProfiles, alertRules),
+    [households, purokRiskProfiles, alertRules],
   );
   const viewportReady = (mapViewport?.width ?? 0) > 0 && (mapViewport?.height ?? 0) > 0;
   const weatherOverlayVisible = showWeather && activeLayerIds.length > 0;
@@ -648,6 +714,9 @@ export default function ResponderLeafletMap({
   useEffect(() => {
     if (!runtime || !containerRef.current || mapRef.current) return;
 
+    const prefetchedTileKeys = prefetchedTileKeysRef.current;
+    const prefetchedImages = prefetchImageRefs.current;
+
     const map = runtime.map(containerRef.current, {
       zoomControl: true,
       attributionControl: true,
@@ -658,6 +727,7 @@ export default function ResponderLeafletMap({
     mapRef.current = map;
     map.setView([DEFAULT_BARANGAY_CENTER.lat, DEFAULT_BARANGAY_CENTER.lng], 14);
 
+    zoneLayerRef.current = runtime.layerGroup().addTo(map);
     householdLayerRef.current = runtime.layerGroup().addTo(map);
     incidentLayerRef.current = runtime.layerGroup().addTo(map);
 
@@ -734,17 +804,18 @@ export default function ResponderLeafletMap({
       map.off('click', handleMapClick);
       map.remove();
       mapRef.current = null;
+      zoneLayerRef.current = null;
       householdLayerRef.current = null;
       incidentLayerRef.current = null;
       baseTileRefs.current = {};
       weatherTileRefs.current = {};
       activeBaseLayerRef.current = null;
-      prefetchedTileKeysRef.current.clear();
-      prefetchImageRefs.current.forEach((image) => {
+      prefetchedTileKeys.clear();
+      prefetchedImages.forEach((image) => {
         image.onload = null;
         image.onerror = null;
       });
-      prefetchImageRefs.current.clear();
+      prefetchedImages.clear();
       setBaseLayerReady(false);
       setMapViewport(null);
     };
@@ -860,6 +931,10 @@ export default function ResponderLeafletMap({
 
     const pinnedHouseholds = households.filter(hasHouseholdPin);
     const pinnedIncidents = activeIncidents.filter(hasIncidentPin);
+    const zoneFocusPoints = zoneMarkers.map((marker) => ({
+      lat: marker.lat,
+      lng: marker.lng,
+    }));
     const incidentFocusPoints = pickPrimaryCluster(
       pinnedIncidents.map((incident) => ({
         lat: incident.gps_lat,
@@ -872,7 +947,11 @@ export default function ResponderLeafletMap({
         lng: household.gps_long,
       })),
     );
-    const preferredFocusPoints = incidentFocusPoints.length > 0 ? incidentFocusPoints : focusPoints;
+    const preferredFocusPoints = incidentFocusPoints.length > 0
+      ? incidentFocusPoints
+      : focusPoints.length > 0
+        ? focusPoints
+        : zoneFocusPoints;
 
     if (preferredFocusPoints.length === 0) {
       map.setView([DEFAULT_BARANGAY_CENTER.lat, DEFAULT_BARANGAY_CENTER.lng], 14);
@@ -891,14 +970,34 @@ export default function ResponderLeafletMap({
       { padding: [28, 28], maxZoom: weatherOverlayVisible ? 15 : 16 },
     );
     queueMapRefresh(map);
-  }, [runtime, households, activeIncidents, activeSelectedHousehold, activeSelectedIncident, weatherOverlayVisible]);
+  }, [runtime, households, activeIncidents, activeSelectedHousehold, activeSelectedIncident, weatherOverlayVisible, zoneMarkers]);
 
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !runtime || !householdLayerRef.current || !incidentLayerRef.current) return;
+    if (!map || !runtime || !zoneLayerRef.current || !householdLayerRef.current || !incidentLayerRef.current) return;
 
+    zoneLayerRef.current.clearLayers();
     householdLayerRef.current.clearLayers();
     incidentLayerRef.current.clearLayers();
+
+    zoneMarkers.forEach((marker) => {
+      const zoneMarker = runtime.marker([marker.lat, marker.lng], {
+        interactive: false,
+        keyboard: false,
+        zIndexOffset: -200,
+        title: marker.source === 'alert_rule'
+          ? `${marker.label} automatic alert zone`
+          : `${marker.label} flood-prone zone`,
+        icon: runtime.divIcon({
+          className: 'responder-zone-marker',
+          html: buildZoneMarkerHtml(marker),
+          iconSize: [92, 92],
+          iconAnchor: [46, 46],
+        }),
+      });
+
+      zoneLayerRef.current?.addLayer(zoneMarker);
+    });
 
     households.filter(hasHouseholdPin).forEach((household) => {
       const isSelected = activeSelectedHousehold?.id === household.id;
@@ -947,6 +1046,7 @@ export default function ResponderLeafletMap({
     runtime,
     households,
     activeIncidents,
+    zoneMarkers,
     activeSelectedHousehold,
     activeSelectedIncident,
     onSelectHousehold,

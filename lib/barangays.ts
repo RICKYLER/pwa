@@ -1,4 +1,6 @@
 export const DEFAULT_BARANGAY_ID = 'anitapan' as const;
+export const MABINI_MUNICIPALITY = 'Mabini' as const;
+export const MABINI_PROVINCE = 'Davao de Oro' as const;
 
 export const BARANGAY_IDS = [
   'anitapan',
@@ -62,4 +64,12 @@ export function normalizeBarangaySelection(value?: string | null): BarangayId | 
   }
 
   return value;
+}
+
+export function isMabiniMunicipality(value?: string | null) {
+  return typeof value === 'string' && value.trim().toLowerCase() === MABINI_MUNICIPALITY.toLowerCase();
+}
+
+export function normalizeMabiniMunicipality() {
+  return MABINI_MUNICIPALITY;
 }

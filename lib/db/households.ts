@@ -1,6 +1,8 @@
 import { db, STORE_NAMES } from './indexeddb';
 import type {
+  DisasterRiskLevel,
   Household,
+  HazardType,
   HouseholdStatus,
   LocationConfidence,
   HouseholdRegistrationStatus,
@@ -12,6 +14,8 @@ import { runServerMutation } from '@/lib/mutations';
 import { bootstrapCurrentPathData } from '@/lib/supabase/route-bootstrap';
 import { getLocationMasterList } from './location-master';
 import { mapSupabaseRow } from '@/lib/supabase/row-mapper';
+import { MABINI_MUNICIPALITY } from '@/lib/barangays';
+import { parseHazardTags } from '@/lib/disaster-alerts';
 import {
   getHouseholdRegistrationStatus,
   getStoredOrDerivedPinQaStatus,
@@ -89,6 +93,7 @@ function deriveLocationConfidence(household: Household): LocationConfidence {
 export function normalizeHousehold(household: Household): Household {
   const normalizedHousehold = {
     ...household,
+    municipality: household.municipality?.trim() || MABINI_MUNICIPALITY,
     gps_lat: normalizeCoordinate(household.gps_lat),
     gps_long: normalizeCoordinate(household.gps_long),
     location_verified: Boolean(household.location_verified),
@@ -97,6 +102,8 @@ export function normalizeHousehold(household: Household): Household {
     registration_status: getHouseholdRegistrationStatus(household),
     registration_submitted_at: normalizeDate(household.registration_submitted_at),
     registration_reviewed_at: normalizeDate(household.registration_reviewed_at),
+    hazard_tags: parseHazardTags(household.hazard_tags),
+    disaster_profile_updated_at: normalizeDate(household.disaster_profile_updated_at),
   };
 
   return {
@@ -115,6 +122,8 @@ export async function getHouseholds(filters?: {
   barangay_id?: string;
   registration_status?: HouseholdRegistrationStatus | 'all';
   applicant_user_id?: string;
+  hazard?: HazardType | 'all';
+  disaster_risk_level?: DisasterRiskLevel | 'all';
 }): Promise<Household[]> {
   try {
     const all = (await db.getAll<Household>(STORE_NAMES.households)).map(normalizeHousehold);
@@ -141,6 +150,14 @@ export async function getHouseholds(filters?: {
       filtered = filtered.filter((household) =>
         getHouseholdRegistrationStatus(household) === filters.registration_status,
       );
+    }
+
+    if (filters?.hazard && filters.hazard !== 'all') {
+      filtered = filtered.filter((household) => household.hazard_tags?.includes(filters.hazard as HazardType));
+    }
+
+    if (filters?.disaster_risk_level && filters.disaster_risk_level !== 'all') {
+      filtered = filtered.filter((household) => household.disaster_risk_level === filters.disaster_risk_level);
     }
 
     if (filters?.search) {
@@ -318,6 +335,23 @@ export async function updateHousehold(id: string, updates: Partial<Household>): 
           typeof updates.contact_number === 'string'
             ? (updates.contact_number.trim() || null)
             : updates.contact_number,
+        hazard_tags: Array.isArray(updates.hazard_tags) ? updates.hazard_tags : updates.hazard_tags,
+        disaster_risk_level:
+          typeof updates.disaster_risk_level === 'string'
+            ? updates.disaster_risk_level
+            : updates.disaster_risk_level,
+        evacuation_site:
+          typeof updates.evacuation_site === 'string'
+            ? (updates.evacuation_site.trim() || null)
+            : updates.evacuation_site,
+        special_assistance_notes:
+          typeof updates.special_assistance_notes === 'string'
+            ? (updates.special_assistance_notes.trim() || null)
+            : updates.special_assistance_notes,
+        disaster_profile_updated_at:
+          updates.disaster_profile_updated_at instanceof Date
+            ? updates.disaster_profile_updated_at.toISOString()
+            : updates.disaster_profile_updated_at,
       },
     });
 

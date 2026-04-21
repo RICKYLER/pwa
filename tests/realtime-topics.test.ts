@@ -27,6 +27,22 @@ test('admin users subscribe to admin-scoped realtime topics', () => {
     'role:admin:distribution',
     'role:admin:incidents',
     'role:admin:audit',
+    'user:user-default:notifications',
+  ]);
+});
+
+test('responder users subscribe to incident topics and personal notifications', () => {
+  const topics = getRealtimeTopicsForUser(makeUser({
+    id: 'responder-456',
+    role: 'responder',
+    barangay_id: 'pindasan',
+  }));
+
+  assert.deepEqual(topics, [
+    'global:programs',
+    'barangay:pindasan:registry',
+    'role:incident_staff:incidents',
+    'user:responder-456:notifications',
   ]);
 });
 

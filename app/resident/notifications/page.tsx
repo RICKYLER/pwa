@@ -10,8 +10,10 @@ import {
   Inbox,
   Loader2,
   MapPin,
+  ShieldAlert,
   Users2,
 } from 'lucide-react';
+import { PurokFloodProfileCard } from '@/components/PurokFloodProfileCard';
 import ResidentShell from '@/components/resident/ResidentShell';
 import {
   CivicBadge,
@@ -21,6 +23,8 @@ import {
   CivicSectionHeading,
 } from '@/components/ui/civic-primitives';
 import { getDefaultRouteForUser, getCurrentUser, isResidentUser } from '@/lib/auth';
+import { getHouseholds } from '@/lib/db/households';
+import { getPurokRiskProfile } from '@/lib/db/purok-risk-profiles';
 import {
   getUserNotifications,
   isFallbackUserNotificationId,
@@ -29,8 +33,18 @@ import {
 } from '@/lib/db/user-notifications';
 import type {
   DistributionStatus,
+  Household,
+  PurokRiskProfile,
   UserNotification,
 } from '@/lib/db/schema';
+import {
+  buildAffectedAreaLabel,
+  DISASTER_ALERT_SEVERITY_LABELS,
+  DISASTER_ALERT_TRIGGER_SOURCE_LABELS,
+  HAZARD_LABELS,
+  parseDisasterAlertNotification,
+} from '@/lib/disaster-alerts';
+import { PUROK_FLOOD_CONTROL_STATUS_LABELS } from '@/lib/purok-risk-profiles';
 import {
   DISTRIBUTION_NOTIFICATION_SCOPE_LABELS,
   DISTRIBUTION_NOTIFICATION_STATUS_LABELS,
@@ -38,6 +52,7 @@ import {
   getDistributionNotificationAudienceLabel,
   parseDistributionEventNotification,
 } from '@/lib/distribution-notifications';
+import { resolveResidentActiveApprovedHousehold } from '@/lib/resident-households';
 
 declare global {
   interface WindowEventMap {
@@ -77,10 +92,25 @@ function formatSchedule(value: string) {
   }).format(parsed);
 }
 
+function formatPayloadDateTime(value?: string) {
+  if (!value) {
+    return 'Just now';
+  }
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return value;
+  }
+
+  return formatDateTime(parsed);
+}
+
 export default function ResidentNotificationsPage() {
   const router = useRouter();
   const user = getCurrentUser();
   const [notifications, setNotifications] = useState<UserNotification[]>([]);
+  const [activeHousehold, setActiveHousehold] = useState<Household | null>(null);
+  const [purokRiskProfile, setPurokRiskProfile] = useState<PurokRiskProfile | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [markingId, setMarkingId] = useState<string | null>(null);
@@ -96,6 +126,7 @@ export default function ResidentNotificationsPage() {
       return;
     }
 
+    const residentUser = user;
     let cancelled = false;
 
     async function loadNotifications() {
@@ -104,9 +135,18 @@ export default function ResidentNotificationsPage() {
           setIsLoading(true);
         }
 
-        const nextNotifications = await getUserNotifications();
+        const [nextNotifications, households] = await Promise.all([
+          getUserNotifications(),
+          getHouseholds({ applicant_user_id: residentUser.id }),
+        ]);
+        const nextActiveHousehold = resolveResidentActiveApprovedHousehold(households);
+        const nextPurokRiskProfile = nextActiveHousehold
+          ? await getPurokRiskProfile(nextActiveHousehold.barangay_id, nextActiveHousehold.purok_sitio)
+          : null;
         if (!cancelled) {
           setNotifications(nextNotifications);
+          setActiveHousehold(nextActiveHousehold ?? null);
+          setPurokRiskProfile(nextPurokRiskProfile ?? null);
         }
       } finally {
         if (!cancelled) {
@@ -116,7 +156,7 @@ export default function ResidentNotificationsPage() {
     }
 
     function handleDataChanged(event: WindowEventMap['mswdo-data-changed']) {
-      if (event.detail.table !== 'user_notifications') {
+      if (event.detail.table !== 'user_notifications' && event.detail.table !== 'purok_risk_profiles' && event.detail.table !== 'households') {
         return;
       }
 
@@ -165,13 +205,13 @@ export default function ResidentNotificationsPage() {
   return (
     <ResidentShell
       title="Notifications"
-      subtitle="Review your latest distribution event notices from the barangay."
+      subtitle="Review your latest disaster alerts and distribution notices from the barangay."
     >
       <div className="grid gap-4 sm:grid-cols-2">
         <CivicKpiCard
           label="Inbox Items"
           value={notifications.length}
-          hint="Resident-only notices created from new distribution events."
+          hint="Resident notices include both distribution updates and automatic disaster alerts."
           icon={Inbox}
           tone="navy"
         />
@@ -184,11 +224,21 @@ export default function ResidentNotificationsPage() {
         />
       </div>
 
+      {activeHousehold ? (
+        <div className="mt-6">
+          <PurokFloodProfileCard
+            household={activeHousehold}
+            profile={purokRiskProfile}
+            description="Your current purok flood profile stays visible here while you review alert history."
+          />
+        </div>
+      ) : null}
+
       <CivicPanel className="mt-6 sm:p-6">
         <CivicSectionHeading
           icon={Bell}
           title="Resident inbox"
-          description="Each distribution update appears here with its latest status, schedule, audience, location, and admin note."
+          description="Each inbox item shows the latest distribution update or weather-triggered alert, including the affected area and any evacuation guidance."
         />
 
         {isLoading ? (
@@ -207,10 +257,18 @@ export default function ResidentNotificationsPage() {
         ) : (
           <div className="mt-6 space-y-4">
             {notifications.map((notification) => {
-              const payload = parseDistributionEventNotification(notification);
+              const distributionPayload = parseDistributionEventNotification(notification);
+              const disasterPayload = parseDisasterAlertNotification(notification);
               const isUnread = !notification.read_at;
               const isExpanded = expandedId === notification.id;
               const isMarkingRead = markingId === notification.id;
+              const affectedArea = disasterPayload
+                ? buildAffectedAreaLabel({
+                  barangay_id: disasterPayload.barangay_id,
+                  purok_sitio: disasterPayload.purok_sitio,
+                  municipality: disasterPayload.municipality,
+                })
+                : '';
 
               return (
                 <div
@@ -241,16 +299,29 @@ export default function ResidentNotificationsPage() {
                         <p className="mt-2 text-sm leading-6 text-slate-600">{notification.body}</p>
 
                         <div className="mt-4 flex flex-wrap gap-2">
-                          {payload ? (
+                          {distributionPayload ? (
                             <>
                               <CivicBadge
-                                label={getDistributionNotificationAudienceLabel(payload.target_scope, payload.target_group)}
+                                label={getDistributionNotificationAudienceLabel(distributionPayload.target_scope, distributionPayload.target_group)}
                                 tone="teal"
                               />
-                              <CivicBadge label={DISTRIBUTION_NOTIFICATION_TYPE_LABELS[payload.type]} tone="slate" />
+                              <CivicBadge label={DISTRIBUTION_NOTIFICATION_TYPE_LABELS[distributionPayload.type]} tone="slate" />
                               <CivicBadge
-                                label={DISTRIBUTION_NOTIFICATION_STATUS_LABELS[payload.status]}
-                                tone={STATUS_BADGE_TONES[payload.status]}
+                                label={DISTRIBUTION_NOTIFICATION_STATUS_LABELS[distributionPayload.status]}
+                                tone={STATUS_BADGE_TONES[distributionPayload.status]}
+                              />
+                            </>
+                          ) : null}
+                          {disasterPayload ? (
+                            <>
+                              <CivicBadge label={HAZARD_LABELS[disasterPayload.hazard]} tone="teal" />
+                              <CivicBadge
+                                label={DISASTER_ALERT_SEVERITY_LABELS[disasterPayload.severity]}
+                                tone={disasterPayload.severity === 'warning' ? 'rose' : 'amber'}
+                              />
+                              <CivicBadge
+                                label={DISASTER_ALERT_TRIGGER_SOURCE_LABELS[disasterPayload.trigger_source]}
+                                tone="slate"
                               />
                             </>
                           ) : null}
@@ -266,12 +337,12 @@ export default function ResidentNotificationsPage() {
                     </div>
                   </button>
 
-                  {isExpanded && payload ? (
+                  {isExpanded && distributionPayload ? (
                     <div className="border-t border-slate-200/80 bg-white/80 px-5 py-5 sm:px-6">
                       <div className="mb-4 flex flex-wrap items-center gap-2">
                         <CivicBadge
-                          label={`Current status: ${DISTRIBUTION_NOTIFICATION_STATUS_LABELS[payload.status]}`}
-                          tone={STATUS_BADGE_TONES[payload.status]}
+                          label={`Current status: ${DISTRIBUTION_NOTIFICATION_STATUS_LABELS[distributionPayload.status]}`}
+                          tone={STATUS_BADGE_TONES[distributionPayload.status]}
                         />
                         <CivicBadge label={`Latest update ${formatDateTime(notification.updatedAt)}`} tone="slate" />
                       </div>
@@ -283,7 +354,7 @@ export default function ResidentNotificationsPage() {
                             Schedule
                           </div>
                           <p className="mt-3 text-sm font-semibold text-slate-900">
-                            {formatSchedule(payload.scheduled_date)}
+                            {formatSchedule(distributionPayload.scheduled_date)}
                           </p>
                         </div>
 
@@ -293,10 +364,10 @@ export default function ResidentNotificationsPage() {
                             Audience
                           </div>
                           <p className="mt-3 text-sm font-semibold text-slate-900">
-                            {getDistributionNotificationAudienceLabel(payload.target_scope, payload.target_group)}
+                            {getDistributionNotificationAudienceLabel(distributionPayload.target_scope, distributionPayload.target_group)}
                           </p>
                           <p className="mt-1 text-xs text-slate-500">
-                            {DISTRIBUTION_NOTIFICATION_SCOPE_LABELS[payload.target_scope]} based event
+                            {DISTRIBUTION_NOTIFICATION_SCOPE_LABELS[distributionPayload.target_scope]} based event
                           </p>
                         </div>
 
@@ -305,14 +376,111 @@ export default function ResidentNotificationsPage() {
                             <MapPin className="h-4 w-4" />
                             Location
                           </div>
-                          <p className="mt-3 text-sm font-semibold text-slate-900">{payload.location}</p>
+                          <p className="mt-3 text-sm font-semibold text-slate-900">{distributionPayload.location}</p>
                         </div>
                       </div>
 
-                      {payload.notes?.trim() ? (
+                      {distributionPayload.notes?.trim() ? (
                         <div className="mt-4 rounded-[22px] border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-900">
                           <p className="font-semibold">Additional notes</p>
-                          <p className="mt-1">{payload.notes.trim()}</p>
+                          <p className="mt-1">{distributionPayload.notes.trim()}</p>
+                        </div>
+                      ) : null}
+
+                      {!isUnread ? (
+                        <div className="mt-4 inline-flex items-center gap-2 text-xs font-medium text-emerald-700">
+                          <CheckCircle2 className="h-4 w-4" />
+                          Read {formatDateTime(notification.read_at)}
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : null}
+
+                  {isExpanded && disasterPayload ? (
+                    <div className="border-t border-slate-200/80 bg-white/80 px-5 py-5 sm:px-6">
+                      <div className="mb-4 flex flex-wrap items-center gap-2">
+                        <CivicBadge
+                          label={`${DISASTER_ALERT_SEVERITY_LABELS[disasterPayload.severity]} alert`}
+                          tone={disasterPayload.severity === 'warning' ? 'rose' : 'amber'}
+                        />
+                        <CivicBadge
+                          label={DISASTER_ALERT_TRIGGER_SOURCE_LABELS[disasterPayload.trigger_source]}
+                          tone="slate"
+                        />
+                        <CivicBadge label={`Issued ${formatPayloadDateTime(disasterPayload.issued_at)}`} tone="slate" />
+                      </div>
+
+                      <div className="grid gap-3 md:grid-cols-3">
+                        <div className="rounded-[22px] border border-slate-200 bg-slate-50 px-4 py-3">
+                          <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
+                            <ShieldAlert className="h-4 w-4" />
+                            Hazard
+                          </div>
+                          <p className="mt-3 text-sm font-semibold text-slate-900">{HAZARD_LABELS[disasterPayload.hazard]}</p>
+                          <p className="mt-1 text-xs text-slate-500">
+                            {DISASTER_ALERT_SEVERITY_LABELS[disasterPayload.severity]} level
+                          </p>
+                        </div>
+
+                        <div className="rounded-[22px] border border-slate-200 bg-slate-50 px-4 py-3">
+                          <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
+                            <MapPin className="h-4 w-4" />
+                            Affected Area
+                          </div>
+                          <p className="mt-3 text-sm font-semibold text-slate-900">{affectedArea || 'Mabini, Davao de Oro'}</p>
+                        </div>
+
+                        <div className="rounded-[22px] border border-slate-200 bg-slate-50 px-4 py-3">
+                          <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
+                            <CalendarDays className="h-4 w-4" />
+                            Trigger Basis
+                          </div>
+                          <p className="mt-3 text-sm font-semibold text-slate-900">{disasterPayload.trigger_reason}</p>
+                        </div>
+                      </div>
+
+                      {disasterPayload.weather_summary?.trim() ? (
+                        <div className="mt-4 rounded-[22px] border border-cyan-200 bg-cyan-50 px-4 py-3 text-sm leading-6 text-cyan-950">
+                          <p className="font-semibold">Weather summary</p>
+                          <p className="mt-1">{disasterPayload.weather_summary.trim()}</p>
+                        </div>
+                      ) : null}
+
+                      {disasterPayload.evacuation_site?.trim() ? (
+                        <div className="mt-4 rounded-[22px] border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm leading-6 text-emerald-900">
+                          <p className="font-semibold">Evacuation site</p>
+                          <p className="mt-1">{disasterPayload.evacuation_site.trim()}</p>
+                        </div>
+                      ) : null}
+
+                      {disasterPayload.flood_control_status ? (
+                        <div className="mt-4 rounded-[22px] border border-slate-200 bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-700">
+                          <p className="font-semibold text-slate-900">Flood control status</p>
+                          <p className="mt-1">{PUROK_FLOOD_CONTROL_STATUS_LABELS[disasterPayload.flood_control_status]}</p>
+                          {disasterPayload.flood_control_notes?.trim() ? (
+                            <p className="mt-2 text-slate-600">{disasterPayload.flood_control_notes.trim()}</p>
+                          ) : null}
+                        </div>
+                      ) : null}
+
+                      {disasterPayload.default_evacuation_site?.trim() ? (
+                        <div className="mt-4 rounded-[22px] border border-cyan-200 bg-cyan-50 px-4 py-3 text-sm leading-6 text-cyan-950">
+                          <p className="font-semibold">Default purok evacuation site</p>
+                          <p className="mt-1">{disasterPayload.default_evacuation_site.trim()}</p>
+                        </div>
+                      ) : null}
+
+                      {disasterPayload.warning_notes?.trim() ? (
+                        <div className="mt-4 rounded-[22px] border border-rose-200 bg-rose-50 px-4 py-3 text-sm leading-6 text-rose-900">
+                          <p className="font-semibold">Purok warning notes</p>
+                          <p className="mt-1">{disasterPayload.warning_notes.trim()}</p>
+                        </div>
+                      ) : null}
+
+                      {disasterPayload.special_assistance_notes?.trim() ? (
+                        <div className="mt-4 rounded-[22px] border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-900">
+                          <p className="font-semibold">Special assistance notes</p>
+                          <p className="mt-1">{disasterPayload.special_assistance_notes.trim()}</p>
                         </div>
                       ) : null}
 

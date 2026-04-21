@@ -18,6 +18,8 @@ function normalizeDate(value: unknown): Date | undefined {
 export function normalizeUserNotification(notification: UserNotification): UserNotification {
   return {
     ...notification,
+    event_id: typeof notification.event_id === 'string' ? notification.event_id : undefined,
+    alert_id: typeof notification.alert_id === 'string' ? notification.alert_id : undefined,
     read_at: normalizeDate(notification.read_at),
     createdAt: normalizeDate(notification.createdAt) ?? new Date(),
     updatedAt: normalizeDate(notification.updatedAt) ?? new Date(),

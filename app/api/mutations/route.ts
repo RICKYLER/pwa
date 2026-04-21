@@ -7,6 +7,7 @@ import type {
   InventoryMovementType,
   LocationMasterList,
   PackageTemplate,
+  PurokRiskProfile,
   Resident,
 } from '@/lib/db/schema';
 import { requireAuthenticatedUser } from '@/lib/server/auth-guards';
@@ -24,6 +25,7 @@ import {
   deleteDistributionEventOnServer,
   releaseDistributionPackageOnServer,
   saveLocationMasterListOnServer,
+  savePurokRiskProfilesOnServer,
   markUserNotificationReadOnServer,
   updateDistributionEventOnServer,
   updateHouseholdOnServer,
@@ -32,6 +34,11 @@ import {
   updateInventoryItemOnServer,
   updateResidentOnServer,
 } from '@/lib/server/supabase-mutations';
+import {
+  createDisasterAlertRuleOnServer,
+  runAutomaticDisasterAlertEvaluation,
+  updateDisasterAlertRuleOnServer,
+} from '@/lib/server/disaster-alerts';
 
 export const runtime = 'nodejs';
 
@@ -156,6 +163,47 @@ export async function POST(request: NextRequest) {
           headers: { 'Cache-Control': 'no-store' },
         });
       }
+      case 'create_disaster_alert_rule': {
+        const input = body.input;
+        if (!input || typeof input !== 'object') {
+          return badRequest('input payload is required.');
+        }
+
+        const rule = await createDisasterAlertRuleOnServer(
+          authResult.user,
+          input,
+        );
+
+        return NextResponse.json({ rule }, {
+          headers: { 'Cache-Control': 'no-store' },
+        });
+      }
+      case 'update_disaster_alert_rule': {
+        const ruleId = typeof body.ruleId === 'string' ? body.ruleId : '';
+        const updates = body.updates;
+        if (!ruleId || !updates || typeof updates !== 'object') {
+          return badRequest('ruleId and updates are required.');
+        }
+
+        const rule = await updateDisasterAlertRuleOnServer(
+          authResult.user,
+          ruleId,
+          updates,
+        );
+
+        return NextResponse.json({ rule }, {
+          headers: { 'Cache-Control': 'no-store' },
+        });
+      }
+      case 'run_disaster_alert_evaluation': {
+        const data = await runAutomaticDisasterAlertEvaluation({
+          initiatedBy: authResult.user,
+        });
+
+        return NextResponse.json(data, {
+          headers: { 'Cache-Control': 'no-store' },
+        });
+      }
       case 'save_location_master_list': {
         const input = body.input;
         if (!input || typeof input !== 'object') {
@@ -168,6 +216,32 @@ export async function POST(request: NextRequest) {
         );
 
         return NextResponse.json(data, {
+          headers: { 'Cache-Control': 'no-store' },
+        });
+      }
+      case 'save_purok_risk_profiles': {
+        const input = body.input;
+        if (!input || typeof input !== 'object') {
+          return badRequest('input payload is required.');
+        }
+
+        const profiles = await savePurokRiskProfilesOnServer(
+          authResult.user,
+          input as {
+            barangay_id: string;
+            profiles: Array<Pick<
+              PurokRiskProfile,
+              | 'purok_sitio'
+              | 'flood_prone'
+              | 'flood_control_status'
+              | 'flood_control_notes'
+              | 'default_evacuation_site'
+              | 'warning_notes'
+            >>;
+          },
+        );
+
+        return NextResponse.json({ profiles }, {
           headers: { 'Cache-Control': 'no-store' },
         });
       }

@@ -1,6 +1,6 @@
 ﻿'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   CheckCircle2,
@@ -22,18 +22,30 @@ import ResponderSelectionSummary from '@/components/ResponderSelectionSummary';
 import { MobileActionBar, MobileListCard, MobilePageHeader } from '@/components/mobile/mobile-primitives';
 import { CivicBadge, CivicEmptyState, CivicPage, CivicPanel } from '@/components/ui/civic-primitives';
 import { getCurrentUser, hasRole } from '@/lib/auth';
+import { getDisasterAlertRules } from '@/lib/db/disaster-alerts';
 import { getDistributionEvents } from '@/lib/db/distribution';
 import { getHouseholds } from '@/lib/db/households';
 import { getIncidents, seedDemoIncidents, updateIncidentStatus } from '@/lib/db/incidents';
 import { db, STORE_NAMES } from '@/lib/db/indexeddb';
+import { getPurokRiskProfiles } from '@/lib/db/purok-risk-profiles';
 import type {
+  DisasterAlertRule,
   DistributionEvent,
   Household,
   Incident,
   IncidentStatus,
+  PurokFloodControlStatus,
+  PurokRiskProfile,
   Resident,
   VulnerabilityFlags,
 } from '@/lib/db/schema';
+import {
+  buildFieldResponseZoneMarkers,
+  buildPurokRiskProfileMap,
+  getPurokRiskProfileForHousehold,
+  matchesPurokRiskFilters,
+  PUROK_FLOOD_CONTROL_STATUS_LABELS,
+} from '@/lib/purok-risk-profiles';
 import { openResponderMapLocation } from '@/lib/responder-map-links';
 import { useResponderMapControls } from '@/hooks/useResponderMapControls';
 import {
@@ -73,6 +85,9 @@ const INCIDENT_STATUS_OPTIONS: { value: IncidentStatus; label: string; descripti
   { value: 'responding', label: 'Responding', description: 'Responder is on the way or already on site.' },
   { value: 'resolved', label: 'Resolved', description: 'Incident is contained and the task is closed.' },
 ];
+
+const PUROK_FLOOD_CONTROL_OPTIONS: PurokFloodControlStatus[] = ['protected', 'partial', 'none', 'unknown'];
+type PurokFloodProneFilter = 'all' | 'flood_prone' | 'not_flood_prone';
 
 function howLongAgo(date: Date): string {
   const minutesPassed = Math.floor((Date.now() - new Date(date).getTime()) / 60000);
@@ -191,6 +206,10 @@ export default function ResponderMobile() {
   const [priorities, setPriorities] = useState<PriorityHousehold[]>([]);
   const [events, setEvents] = useState<DistributionEvent[]>([]);
   const [mapHouseholds, setMapHouseholds] = useState<Household[]>([]);
+  const [purokRiskProfiles, setPurokRiskProfiles] = useState<PurokRiskProfile[]>([]);
+  const [alertRules, setAlertRules] = useState<DisasterAlertRule[]>([]);
+  const [filterFloodProne, setFilterFloodProne] = useState<PurokFloodProneFilter>('all');
+  const [filterFloodControlStatus, setFilterFloodControlStatus] = useState<PurokFloodControlStatus | 'all'>('all');
   const [loading, setLoading] = useState(true);
   const [sheetIncident, setSheetIncident] = useState<Incident | null>(null);
   const [selectedHousehold, setSelectedHousehold] = useState<Household | null>(null);
@@ -201,6 +220,10 @@ export default function ResponderMobile() {
   const [queueOpen, setQueueOpen] = useState(false);
   const [priorityOpen, setPriorityOpen] = useState(false);
   const reloadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const purokRiskProfileMap = useMemo(
+    () => buildPurokRiskProfileMap(purokRiskProfiles),
+    [purokRiskProfiles],
+  );
 
   const loadData = useCallback(async () => {
     if (!user) return;
@@ -209,7 +232,7 @@ export default function ResponderMobile() {
     try {
       await seedDemoIncidents(user.id);
 
-      const [allIncidents, allApprovedHouseholds, allResidents, allFlags, ongoingEvents] = await Promise.all([
+      const [allIncidents, allApprovedHouseholds, allResidents, allFlags, ongoingEvents, profiles, rules] = await Promise.all([
         getIncidents(),
         getHouseholds({
           registration_status: 'approved',
@@ -217,12 +240,16 @@ export default function ResponderMobile() {
         db.getAll<Resident>(STORE_NAMES.residents),
         db.getAll<VulnerabilityFlags>(STORE_NAMES.vulnerability_flags),
         getDistributionEvents({ status: 'ongoing' }),
+        getPurokRiskProfiles(user.role === 'admin' ? undefined : user.barangay_id),
+        getDisasterAlertRules(),
       ]);
       const allHouseholds = getResponderMappedHouseholds(allApprovedHouseholds, user);
 
       setIncidents(allIncidents);
       setEvents(ongoingEvents);
       setMapHouseholds(allHouseholds);
+      setPurokRiskProfiles(profiles);
+      setAlertRules(rules);
 
       const householdsWithScores: PriorityHousehold[] = allHouseholds
         .map((household) => {
@@ -275,7 +302,7 @@ export default function ResponderMobile() {
     }
 
     function handleDataChanged(event: WindowEventMap['mswdo-data-changed']) {
-      if (!['households', 'residents', 'vulnerability_flags', 'incidents', 'distribution_events'].includes(event.detail.table)) {
+      if (!['households', 'residents', 'vulnerability_flags', 'incidents', 'distribution_events', 'purok_risk_profiles', 'disaster_alert_rules'].includes(event.detail.table)) {
         return;
       }
 
@@ -316,7 +343,17 @@ export default function ResponderMobile() {
 
   const activeIncidents = incidents.filter((incident) => incident.status !== 'resolved');
   const resolvedCount = incidents.filter((incident) => incident.status === 'resolved').length;
+  const filteredMapHouseholds = mapHouseholds.filter((household) => matchesPurokRiskFilters(household, purokRiskProfileMap, {
+    floodProne: filterFloodProne,
+    floodControlStatus: filterFloodControlStatus,
+  }));
+  const visibleFloodZoneCount = buildFieldResponseZoneMarkers(filteredMapHouseholds, purokRiskProfiles, alertRules).length;
+  const filteredPriorities = priorities.filter((priority) => matchesPurokRiskFilters(priority.household, purokRiskProfileMap, {
+    floodProne: filterFloodProne,
+    floodControlStatus: filterFloodControlStatus,
+  }));
   const hasSelection = Boolean(selectedHousehold || selectedIncident);
+  const hasPurokFilters = filterFloodProne !== 'all' || filterFloodControlStatus !== 'all';
 
   return (
     <>
@@ -465,17 +502,18 @@ export default function ResponderMobile() {
                   <div key={index} className="h-32 animate-pulse rounded-[24px] bg-slate-100" />
                 ))}
               </div>
-            ) : priorities.length === 0 ? (
+            ) : filteredPriorities.length === 0 ? (
               <CivicEmptyState
                 icon={Users}
                 title="No priority households"
                 description="Vulnerability scoring did not surface any check-ins right now."
               />
             ) : (
-              priorities.map((priority, index) => {
+              filteredPriorities.map((priority, index) => {
                 const labels = getVulnerabilityLabels(priority.flags);
                 const alreadyVisited = visited.has(priority.household.id);
                 const canNavigate = priority.household.gps_lat !== undefined && priority.household.gps_long !== undefined;
+                const purokRiskProfile = getPurokRiskProfileForHousehold(priority.household, purokRiskProfileMap);
 
                 return (
                   <MobileListCard
@@ -485,6 +523,16 @@ export default function ResponderMobile() {
                     leading={<span className="text-sm font-bold">{index + 1}</span>}
                     status={(
                       <>
+                        <CivicBadge
+                          label={purokRiskProfile?.flood_prone ? 'Flood-prone purok' : 'Not flood-prone'}
+                          tone={purokRiskProfile?.flood_prone ? 'rose' : 'emerald'}
+                          className="text-[10px]"
+                        />
+                        <CivicBadge
+                          label={PUROK_FLOOD_CONTROL_STATUS_LABELS[purokRiskProfile?.flood_control_status ?? 'unknown']}
+                          tone="slate"
+                          className="text-[10px]"
+                        />
                         {labels.map((label) => (
                           <CivicBadge key={label} label={label} tone="rose" className="text-[10px]" />
                         ))}
@@ -547,7 +595,7 @@ export default function ResponderMobile() {
       <CivicPage className="space-y-4 px-4 py-4 pb-40">
         <MobilePageHeader
           title="Field response"
-          subtitle={loading ? 'Loading field operations...' : `${activeIncidents.length} active incidents · ${mapHouseholds.length} verified household pins · ${getResponderCoverageLabel(user)}`}
+          subtitle={loading ? 'Loading field operations...' : `${activeIncidents.length} active incidents · ${filteredMapHouseholds.length} verified household pins · ${getResponderCoverageLabel(user)}`}
           primaryAction={(
             <Button
               type="button"
@@ -564,7 +612,7 @@ export default function ResponderMobile() {
         <div className="grid grid-cols-3 gap-2">
           {[
             { label: 'Active', value: activeIncidents.length },
-            { label: 'Priority', value: priorities.length },
+            { label: 'Priority', value: filteredPriorities.length },
             { label: 'Resolved', value: resolvedCount },
           ].map((metric) => (
             <CivicPanel key={metric.label} className="rounded-[22px] p-3 text-center">
@@ -574,6 +622,77 @@ export default function ResponderMobile() {
           ))}
         </div>
 
+        <CivicPanel className="space-y-3 rounded-[24px] p-4">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Purok filters</p>
+              <h2 className="mt-1 text-base font-bold text-slate-950">Flood profile targeting</h2>
+              <p className="mt-1 text-sm text-slate-500">Trim the household map and check-in queue using official purok flood profile data.</p>
+            </div>
+            {hasPurokFilters ? (
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  setFilterFloodProne('all');
+                  setFilterFloodControlStatus('all');
+                }}
+                className="h-10 rounded-full border-slate-200 px-4 text-xs font-semibold text-slate-700"
+              >
+                Clear
+              </Button>
+            ) : null}
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-2">
+            <label className="space-y-2">
+              <span className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">Flood-prone purok</span>
+              <select
+                value={filterFloodProne}
+                onChange={(event) => setFilterFloodProne(event.target.value as PurokFloodProneFilter)}
+                className="h-11 w-full rounded-[18px] border border-slate-200 bg-white px-4 text-sm text-slate-700 outline-none focus:border-cyan-900"
+              >
+                <option value="all">All puroks</option>
+                <option value="flood_prone">Flood-prone only</option>
+                <option value="not_flood_prone">Not flood-prone</option>
+              </select>
+            </label>
+
+            <label className="space-y-2">
+              <span className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">Flood control</span>
+              <select
+                value={filterFloodControlStatus}
+                onChange={(event) => setFilterFloodControlStatus(event.target.value as PurokFloodControlStatus | 'all')}
+                className="h-11 w-full rounded-[18px] border border-slate-200 bg-white px-4 text-sm text-slate-700 outline-none focus:border-cyan-900"
+              >
+                <option value="all">All flood control statuses</option>
+                {PUROK_FLOOD_CONTROL_OPTIONS.map((status) => (
+                  <option key={status} value={status}>{PUROK_FLOOD_CONTROL_STATUS_LABELS[status]}</option>
+                ))}
+              </select>
+            </label>
+          </div>
+
+          <div className="flex flex-wrap gap-2">
+            <CivicBadge label={`${filteredMapHouseholds.length} mapped households`} tone="emerald" className="text-[10px]" />
+            <CivicBadge label={`${filteredPriorities.length} priority check-ins`} tone="amber" className="text-[10px]" />
+            {filterFloodProne !== 'all' ? (
+              <CivicBadge
+                label={filterFloodProne === 'flood_prone' ? 'Flood-prone puroks' : 'Not flood-prone'}
+                tone="rose"
+                className="text-[10px]"
+              />
+            ) : null}
+            {filterFloodControlStatus !== 'all' ? (
+              <CivicBadge
+                label={PUROK_FLOOD_CONTROL_STATUS_LABELS[filterFloodControlStatus]}
+                tone="slate"
+                className="text-[10px]"
+              />
+            ) : null}
+          </div>
+        </CivicPanel>
+
         <CivicPanel className="space-y-4 rounded-[26px] p-4">
           <div className="flex items-start justify-between gap-3">
             <div>
@@ -582,14 +701,17 @@ export default function ResponderMobile() {
               <p className="mt-1 text-sm text-slate-500">Only approved and location-verified households appear here. Tap markers to open the selection drawer.</p>
             </div>
             <div className="flex flex-col items-end gap-1">
-              <CivicBadge label={`${mapHouseholds.length} verified pins`} tone="emerald" className="text-[10px]" />
+              <CivicBadge label={`${filteredMapHouseholds.length} verified pins`} tone="emerald" className="text-[10px]" />
+              <CivicBadge label={`${visibleFloodZoneCount} risk zones`} tone="amber" className="text-[10px]" />
               <CivicBadge label={mapControls.activeBaseLayer.label} tone="navy" className="text-[10px]" />
             </div>
           </div>
 
           <ResponderLeafletMap
-            households={mapHouseholds}
+            households={filteredMapHouseholds}
             incidents={incidents}
+            purokRiskProfiles={purokRiskProfiles}
+            alertRules={alertRules}
             selectedHousehold={selectedHousehold}
             onSelectHousehold={(household) => {
               setSelectedHousehold(household);
@@ -687,7 +809,7 @@ export default function ResponderMobile() {
             className="h-12 rounded-[20px] border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700"
           >
             <ShieldAlert className="h-4 w-4" />
-            {loading ? '--' : priorities.length}
+            {loading ? '--' : filteredPriorities.length}
           </Button>
         )}
       />

@@ -57,13 +57,13 @@ function LoadingSkeleton() {
     <div className="space-y-5">
       <div>
         <div className="mb-2 h-4 w-28 rounded-full bg-slate-100" />
-        <div className="h-[58px] animate-pulse rounded-[22px] border border-slate-200 bg-slate-50" />
+        <div className="h-12 animate-pulse rounded-md border border-slate-200 bg-slate-50" />
       </div>
       <div>
         <div className="mb-2 h-4 w-24 rounded-full bg-slate-100" />
-        <div className="h-[58px] animate-pulse rounded-[22px] border border-slate-200 bg-slate-50" />
+        <div className="h-12 animate-pulse rounded-md border border-slate-200 bg-slate-50" />
       </div>
-      <div className="h-[56px] animate-pulse rounded-[20px] bg-slate-200" />
+      <div className="h-12 animate-pulse rounded-md bg-slate-200" />
     </div>
   );
 }
@@ -171,13 +171,13 @@ export default function LoginPage() {
   return (
     <CivicAuthShell
       heroEyebrow="Civic access"
-      heroTitle="E-Mabini: A Dynamic Household Census and Disaster Management System"
-      heroDescription="Use your assigned account to access E-Mabini. Staff accounts open operational tools, while verified residents continue to self-service registration and status tracking."
+      heroTitle="MABINI DISASTER RISK HOUSEHOLD PROFILING SYSTEM"
+      heroDescription="Use your assigned account to access the Mabini Disaster Risk Household Profiling System. Staff accounts open operational tools, while verified residents continue to self-service registration and status tracking."
       heroBadge="Municipality of Mabini"
       heroFootnote="Residents should use their own account. Staff credentials stay reserved for operations and review."
       panelEyebrow="Account sign in"
       panelTitle="Welcome back"
-      panelDescription="Sign in with your assigned account to continue in E-Mabini. Staff users land on the operations workspace, and verified residents land on the self-service portal."
+      panelDescription="Sign in with your assigned account to continue in the Mabini Disaster Risk Household Profiling System. Staff users land on the operations workspace, and verified residents land on the self-service portal."
       panelAside={
         <div className="inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-3.5 py-1.5 text-[11px] font-semibold uppercase tracking-[0.18em] text-emerald-700">
           <ShieldCheck className="h-4 w-4" />
@@ -195,7 +195,7 @@ export default function LoginPage() {
       {isMounted ? (
         <form onSubmit={handleSubmit} className="space-y-4">
           {sessionReason === 'account-removed' || sessionReason === 'account-deactivated' || sessionReason === 'access-updated' ? (
-            <div className="rounded-[20px] border border-amber-200 bg-amber-50/90 px-4 py-3 text-sm text-amber-950">
+            <div className="rounded-md border-l-4 border-amber-500 bg-amber-50 px-4 py-3 text-sm text-amber-950 shadow-sm">
               <p className="font-semibold">
                 {sessionReason === 'account-removed'
                   ? 'Resident account removed'
@@ -214,14 +214,14 @@ export default function LoginPage() {
           ) : null}
 
           {inactiveAccountMessage ? (
-            <div className="rounded-[20px] border border-amber-200 bg-amber-50/90 px-4 py-3 text-sm text-amber-950">
+            <div className="rounded-md border-l-4 border-amber-500 bg-amber-50 px-4 py-3 text-sm text-amber-950 shadow-sm">
               <p className="font-semibold">Account deactivated</p>
               <p className="mt-1 leading-5 text-amber-900">{inactiveAccountMessage}</p>
             </div>
           ) : null}
 
-          <div className="rounded-[20px] border border-cyan-100 bg-cyan-50/75 px-4 py-3 text-sm text-slate-600">
-            <p className="font-semibold text-cyan-950">One sign-in page</p>
+          <div className="rounded-md border border-blue-100 bg-blue-50/50 px-4 py-3 text-sm text-slate-600">
+            <p className="font-semibold text-blue-900">One sign-in page</p>
             <p className="mt-1 leading-5">
               Staff use assigned credentials. Residents use a verified resident account.
             </p>
@@ -242,7 +242,7 @@ export default function LoginPage() {
                 setVerificationHelpVisible(false);
                 setVerificationMessage('');
               }}
-              className="h-[52px] w-full rounded-[20px] border border-slate-200 bg-slate-50 px-4 text-sm text-slate-900 shadow-[inset_0_1px_0_rgba(255,255,255,0.8)] outline-none transition placeholder:text-slate-400 focus:border-cyan-800 focus:bg-white focus:ring-4 focus:ring-cyan-900/10"
+              className="h-12 w-full rounded-md border border-slate-300 bg-white px-4 text-sm text-slate-900 shadow-sm outline-none transition placeholder:text-slate-400 focus:border-blue-700 focus:ring-2 focus:ring-blue-700/20"
               placeholder="name@email.com"
               autoComplete="username"
               required
@@ -258,7 +258,7 @@ export default function LoginPage() {
               </label>
               <Link
                 href={forgotPasswordHref}
-                className="text-xs font-semibold text-cyan-800 transition hover:text-cyan-950"
+                className="text-xs font-semibold text-blue-700 transition hover:text-blue-900"
               >
                 Forgot password?
               </Link>
@@ -274,7 +274,7 @@ export default function LoginPage() {
                   setVerificationHelpVisible(false);
                   setVerificationMessage('');
                 }}
-                className="h-[52px] w-full rounded-[20px] border border-slate-200 bg-slate-50 px-4 pr-12 text-sm text-slate-900 shadow-[inset_0_1px_0_rgba(255,255,255,0.8)] outline-none transition placeholder:text-slate-400 focus:border-cyan-800 focus:bg-white focus:ring-4 focus:ring-cyan-900/10"
+                className="h-12 w-full rounded-md border border-slate-300 bg-white px-4 pr-12 text-sm text-slate-900 shadow-sm outline-none transition placeholder:text-slate-400 focus:border-blue-700 focus:ring-2 focus:ring-blue-700/20"
                 placeholder="Enter your password"
                 autoComplete="current-password"
                 required
@@ -292,7 +292,7 @@ export default function LoginPage() {
           </div>
 
           {error ? (
-            <div className="flex items-start gap-3 rounded-[20px] border border-rose-200 bg-rose-50/90 px-4 py-3 text-sm text-rose-800">
+            <div className="flex items-start gap-3 rounded-md border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800 shadow-sm">
               <div className="mt-0.5 flex h-5 w-5 items-center justify-center rounded-full bg-rose-100 text-xs font-bold text-rose-700">
                 !
               </div>
@@ -301,7 +301,7 @@ export default function LoginPage() {
           ) : null}
 
           {verificationHelpVisible ? (
-            <div className="rounded-[22px] border border-amber-200 bg-amber-50/90 p-4 text-sm text-amber-950">
+            <div className="rounded-md border border-amber-300 bg-amber-50 p-4 text-sm text-amber-950 shadow-sm">
               <div className="flex items-start gap-3">
                 <Mail className="mt-0.5 h-4 w-4 flex-shrink-0 text-amber-700" />
                 <div className="space-y-3">
@@ -311,7 +311,7 @@ export default function LoginPage() {
                     You can resend the email or return to the verification page.
                   </p>
                   {verificationMessage ? (
-                    <p className="rounded-[18px] border border-emerald-200 bg-emerald-50 px-3 py-2 text-emerald-700">
+                    <p className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-emerald-700">
                       {verificationMessage}
                     </p>
                   ) : null}
@@ -322,14 +322,14 @@ export default function LoginPage() {
                         void handleResendVerification();
                       }}
                       disabled={isResendingVerification || isLoading}
-                      className="inline-flex items-center justify-center gap-2 rounded-[16px] border border-amber-300 bg-white px-4 py-2.5 font-semibold text-amber-900 transition hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-60"
+                      className="inline-flex items-center justify-center gap-2 rounded-md border border-amber-300 bg-white px-4 py-2 font-semibold text-amber-900 shadow-sm transition hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-60"
                     >
                       {isResendingVerification ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
                       {isResendingVerification ? 'Sending...' : 'Resend verification email'}
                     </button>
                     <Link
                       href={verifyPageHref}
-                      className="inline-flex items-center justify-center rounded-[16px] bg-amber-600 px-4 py-2.5 font-semibold text-white transition hover:bg-amber-700"
+                      className="inline-flex items-center justify-center rounded-md bg-amber-600 px-4 py-2 font-semibold text-white shadow-sm transition hover:bg-amber-700"
                     >
                       Open verification page
                     </Link>
@@ -342,7 +342,7 @@ export default function LoginPage() {
           <button
             type="submit"
             disabled={isLoading}
-            className="inline-flex h-[52px] w-full items-center justify-center gap-2 rounded-[18px] bg-cyan-950 px-4 text-sm font-semibold text-white shadow-[0_24px_42px_-28px_rgba(8,47,73,0.75)] transition hover:bg-cyan-900 disabled:cursor-not-allowed disabled:opacity-60"
+            className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-md bg-blue-900 px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-800 disabled:cursor-not-allowed disabled:opacity-60"
           >
             {isLoading ? (
               <>
@@ -357,10 +357,10 @@ export default function LoginPage() {
             )}
           </button>
 
-          <div className="rounded-[20px] border border-cyan-100 bg-[linear-gradient(180deg,rgba(236,250,255,0.95),rgba(243,248,251,0.95))] px-4 py-3.5">
+          <div className="rounded-md border border-slate-200 bg-slate-50 px-4 py-4 shadow-sm">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-cyan-800">Resident self-service</p>
+                <p className="text-xs font-bold uppercase tracking-wider text-slate-500">Resident self-service</p>
                 <p className="mt-1 text-sm font-semibold text-slate-950">Need a resident account?</p>
                 <p className="mt-1 text-sm leading-5 text-slate-600">
                   Create one first, verify your email, then sign in here.
@@ -368,7 +368,7 @@ export default function LoginPage() {
               </div>
               <Link
                 href="/resident/register"
-                className="inline-flex items-center justify-center rounded-[16px] bg-cyan-950 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-cyan-900"
+                className="inline-flex items-center justify-center rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50"
               >
                 Create account
               </Link>

@@ -20,6 +20,7 @@ export function getRealtimeTopicsForUser(user: User | null | undefined): string[
         'role:admin:distribution',
         'role:admin:incidents',
         'role:admin:audit',
+        `user:${user.id}:notifications`,
       ]);
     case 'encoder':
       return uniqueTopics([
@@ -40,6 +41,7 @@ export function getRealtimeTopicsForUser(user: User | null | undefined): string[
         ...topics,
         `barangay:${user.barangay_id}:registry`,
         'role:incident_staff:incidents',
+        `user:${user.id}:notifications`,
       ]);
     case 'resident':
       return uniqueTopics([

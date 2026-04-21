@@ -1,7 +1,7 @@
 'use client';
 
 import { FormEvent, useEffect, useRef, useState } from 'react';
-import type { Household, PWDType } from '@/lib/db/schema';
+import type { DisasterRiskLevel, HazardType, Household, PWDType, PurokRiskProfile } from '@/lib/db/schema';
 import type { AddressValidationSummary } from '@/lib/address-validation';
 import { Autocomplete } from '@react-google-maps/api';
 import {
@@ -17,11 +17,13 @@ import {
   Trash2,
   User,
 } from 'lucide-react';
+import { PurokFloodProfileCard } from '@/components/PurokFloodProfileCard';
 import { LocationPicker } from '@/components/LocationPicker';
 import { useGoogleMaps } from '@/components/GoogleMapsProvider';
 import { getCurrentUser } from '@/lib/auth';
 import { getAllPuroks } from '@/lib/db/households';
 import { getLocationMasterList } from '@/lib/db/location-master';
+import { getPurokRiskProfile } from '@/lib/db/purok-risk-profiles';
 import { DEFAULT_BARANGAY_CENTER } from '@/lib/map-pins';
 import {
   buildDefaultSearchBounds,
@@ -32,10 +34,15 @@ import {
   getPlacePinDetails,
   mergePurokOptions,
   normalizeBarangayName,
-  normalizeMunicipalityName,
   normalizePurokSitio,
   searchLocation,
 } from '@/lib/geocoding';
+import {
+  DISASTER_RISK_LEVEL_LABELS,
+  HAZARD_LABELS,
+  parseHazardTags,
+} from '@/lib/disaster-alerts';
+import { DEFAULT_BARANGAY_ID, MABINI_MUNICIPALITY } from '@/lib/barangays';
 
 // Partial resident data collected before the household ID is known
 export interface MemberDraft {
@@ -73,7 +80,6 @@ const EMPTY_MEMBER: MemberDraft = {
   pwd_type: '',
 };
 
-const DEFAULT_MUNICIPALITY = process.env.NEXT_PUBLIC_DEFAULT_MUNICIPALITY?.trim() || '';
 const PWD_TYPE_LABELS: Record<PWDType, string> = {
   physical: 'Physical',
   visual: 'Visual',
@@ -93,6 +99,15 @@ const RELATIONSHIP_OPTIONS = [
   'Parent',
   'Relative',
 ];
+const HOUSEHOLD_HAZARD_OPTIONS: HazardType[] = [
+  'flood',
+  'typhoon',
+  'landslide',
+  'storm_surge',
+  'fire',
+  'earthquake',
+];
+const DISASTER_RISK_OPTIONS: DisasterRiskLevel[] = ['low', 'medium', 'high'];
 
 function validationTone(status: AddressValidationSummary['status']) {
   switch (status) {
@@ -194,9 +209,9 @@ export function HouseholdForm({ initialData, onSubmit, isLoading = false }: Hous
   const addressAutocompleteRef = useRef<google.maps.places.Autocomplete | null>(null);
   const [formData, setFormData] = useState({
     head_name: initialData?.head_name || '',
-    barangay_id: initialData?.barangay_id || 'barangay-1',
-    barangay_name: initialData?.barangay_name || formatBarangayName(initialData?.barangay_id || 'barangay-1'),
-    municipality: initialData?.municipality || DEFAULT_MUNICIPALITY,
+    barangay_id: initialData?.barangay_id || currentUser?.barangay_id || DEFAULT_BARANGAY_ID,
+    barangay_name: initialData?.barangay_name || formatBarangayName(initialData?.barangay_id || currentUser?.barangay_id || DEFAULT_BARANGAY_ID),
+    municipality: MABINI_MUNICIPALITY,
     purok_sitio: initialData?.purok_sitio ? normalizePurokSitio(initialData.purok_sitio) : '',
     street_address: initialData?.street_address || '',
     landmark_directions: initialData?.landmark_directions || '',
@@ -209,6 +224,11 @@ export function HouseholdForm({ initialData, onSubmit, isLoading = false }: Hous
     location_verified: initialData?.location_verified ?? false,
     location_verified_at: initialData?.location_verified_at,
     location_verified_by: initialData?.location_verified_by,
+    hazard_tags: parseHazardTags(initialData?.hazard_tags),
+    disaster_risk_level: (initialData?.disaster_risk_level || 'medium') as DisasterRiskLevel,
+    evacuation_site: initialData?.evacuation_site || '',
+    special_assistance_notes: initialData?.special_assistance_notes || '',
+    disaster_profile_updated_at: initialData?.disaster_profile_updated_at,
   });
 
   const [members, setMembers] = useState<MemberDraft[]>([]);
@@ -224,6 +244,7 @@ export function HouseholdForm({ initialData, onSubmit, isLoading = false }: Hous
   const [isValidatingAddress, setIsValidatingAddress] = useState(false);
   const [lastValidatedAddress, setLastValidatedAddress] = useState('');
   const [purokOptions, setPurokOptions] = useState<string[]>([]);
+  const [purokRiskProfile, setPurokRiskProfile] = useState<PurokRiskProfile | null>(null);
   const [masterListLocked, setMasterListLocked] = useState(false);
   const [manualPinRequired, setManualPinRequired] = useState(false);
   const [manualPinConfirmed, setManualPinConfirmed] = useState(
@@ -317,7 +338,7 @@ export function HouseholdForm({ initialData, onSubmit, isLoading = false }: Hous
           if (masterList) {
             setFormData((prev) => ({
               ...prev,
-              municipality: masterList.municipality || prev.municipality,
+              municipality: MABINI_MUNICIPALITY,
               barangay_name: masterList.barangay_name || prev.barangay_name,
               purok_sitio: prev.purok_sitio,
             }));
@@ -337,6 +358,35 @@ export function HouseholdForm({ initialData, onSubmit, isLoading = false }: Hous
       cancelled = true;
     };
   }, [formData.barangay_id]);
+
+  useEffect(() => {
+    const normalizedPurok = normalizePurokSitio(formData.purok_sitio);
+    if (!normalizedPurok) {
+      setPurokRiskProfile(null);
+      return;
+    }
+
+    let cancelled = false;
+
+    async function loadPurokProfile() {
+      try {
+        const profile = await getPurokRiskProfile(formData.barangay_id, normalizedPurok);
+        if (!cancelled) {
+          setPurokRiskProfile(profile ?? null);
+        }
+      } catch {
+        if (!cancelled) {
+          setPurokRiskProfile(null);
+        }
+      }
+    }
+
+    void loadPurokProfile();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [formData.barangay_id, formData.purok_sitio]);
 
   useEffect(() => {
     if (pinSource !== 'address_search' || !lastPinnedAddress || addressLookup === lastPinnedAddress) {
@@ -372,7 +422,7 @@ export function HouseholdForm({ initialData, onSubmit, isLoading = false }: Hous
       ...prev,
       street_address: nextStreetAddress,
       barangay_name: masterListLocked ? prev.barangay_name : pin?.barangayName || prev.barangay_name,
-      municipality: masterListLocked ? prev.municipality : pin?.municipality || prev.municipality,
+      municipality: MABINI_MUNICIPALITY,
       purok_sitio: pin?.purokSitio || prev.purok_sitio,
       gps_lat: pin?.lat ?? prev.gps_lat,
       gps_long: pin?.lng ?? prev.gps_long,
@@ -442,7 +492,7 @@ export function HouseholdForm({ initialData, onSubmit, isLoading = false }: Hous
         ...prev,
         street_address: geocoded.streetAddress || prev.street_address,
         barangay_name: masterListLocked ? prev.barangay_name : geocoded.barangayName || prev.barangay_name,
-        municipality: masterListLocked ? prev.municipality : geocoded.municipality || prev.municipality,
+        municipality: MABINI_MUNICIPALITY,
         purok_sitio: geocoded.purokSitio || prev.purok_sitio,
         gps_lat: geocoded.lat,
         gps_long: geocoded.lng,
@@ -554,6 +604,7 @@ export function HouseholdForm({ initialData, onSubmit, isLoading = false }: Hous
     setError('');
     try {
       const payload = { ...formData };
+      payload.municipality = MABINI_MUNICIPALITY;
 
       if (manualPinRequired && (payload.gps_lat === undefined || payload.gps_long === undefined)) {
         throw new Error('Manual pin required: Google could not locate the address. Please drop a pin on the map before saving.');
@@ -589,6 +640,8 @@ export function HouseholdForm({ initialData, onSubmit, isLoading = false }: Hous
       payload.location_verified_by = payload.location_verified
         ? (payload.location_verified_by || currentUser?.id)
         : undefined;
+      payload.hazard_tags = parseHazardTags(payload.hazard_tags);
+      payload.disaster_profile_updated_at = new Date();
 
       await onSubmit(payload, members);
     } catch (err) {
@@ -704,25 +757,15 @@ export function HouseholdForm({ initialData, onSubmit, isLoading = false }: Hous
                       type="text"
                       required
                       value={formData.municipality}
-                      onChange={(e) => {
-                        setMatchedAddress('');
-                        setFormData((prev) => ({ ...prev, municipality: e.target.value }));
-                      }}
-                      onBlur={(e) => {
-                        const normalized = normalizeMunicipalityName(e.target.value);
-                        setFormData((prev) => ({ ...prev, municipality: normalized }));
-                      }}
                       className="w-full rounded-md border border-input bg-background py-2 pl-10 pr-3 text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
                       placeholder="e.g., Mabini"
-                      disabled={isLoading || masterListLocked}
-                      readOnly={masterListLocked}
+                      disabled={isLoading}
+                      readOnly
                     />
                   </div>
-                  {masterListLocked && (
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      Controlled by the admin master list for this barangay.
-                    </p>
-                  )}
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Automatic alerts in this build are locked to Mabini, Davao de Oro.
+                  </p>
                 </div>
 
                 <div>
@@ -996,6 +1039,150 @@ export function HouseholdForm({ initialData, onSubmit, isLoading = false }: Hous
             </select>
           </div>
 
+          <div className="md:col-span-2">
+            <div className="rounded-xl border border-border bg-muted/20 p-4">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <h3 className="text-sm font-semibold text-foreground">Disaster Risk Profile</h3>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Mark which hazards affect this household so Mabini automatic alerts can target the right families.
+                  </p>
+                </div>
+                <span className="inline-flex rounded-full bg-amber-100 px-2.5 py-1 text-[11px] font-medium text-amber-900">
+                  Mabini only
+                </span>
+              </div>
+
+              {formData.purok_sitio.trim() ? (
+                <div className="mt-4">
+                  <PurokFloodProfileCard
+                    household={formData}
+                    profile={purokRiskProfile}
+                    title="Official Purok Flood Profile"
+                    description="This admin-managed purok profile stays separate from the household-specific tags and notes below."
+                    className="border-cyan-200 bg-cyan-50/60"
+                  />
+                </div>
+              ) : null}
+
+              {purokRiskProfile?.default_evacuation_site?.trim() && !formData.evacuation_site.trim() ? (
+                <div className="mt-4 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-3 text-sm text-emerald-900">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <p className="font-semibold">Suggested evacuation site from the purok profile</p>
+                      <p className="mt-1">{purokRiskProfile.default_evacuation_site.trim()}</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setFormData((prev) => ({
+                        ...prev,
+                        evacuation_site: purokRiskProfile.default_evacuation_site ?? '',
+                      }))}
+                      className="inline-flex items-center gap-2 rounded-full bg-emerald-700 px-4 py-2 text-xs font-semibold text-white hover:bg-emerald-800"
+                    >
+                      Use suggestion
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+
+              <div className="mt-4">
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Hazard tags
+                </p>
+                <div className="mt-3 grid gap-2 md:grid-cols-3">
+                  {HOUSEHOLD_HAZARD_OPTIONS.map((hazard) => {
+                    const checked = formData.hazard_tags.includes(hazard);
+                    return (
+                      <label
+                        key={hazard}
+                        className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm transition ${
+                          checked
+                            ? 'border-cyan-200 bg-cyan-50 text-cyan-950'
+                            : 'border-border bg-background text-foreground'
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={(event) => {
+                            const nextTags = event.target.checked
+                              ? [...formData.hazard_tags, hazard]
+                              : formData.hazard_tags.filter((entry) => entry !== hazard);
+                            setFormData((prev) => ({
+                              ...prev,
+                              hazard_tags: parseHazardTags(nextTags),
+                            }));
+                          }}
+                          className="h-4 w-4 rounded border-input"
+                          disabled={isLoading}
+                        />
+                        <span>{HAZARD_LABELS[hazard]}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
+                <div>
+                  <label className="mb-2 block text-sm font-medium text-foreground">
+                    Risk level
+                  </label>
+                  <select
+                    value={formData.disaster_risk_level}
+                    onChange={(event) => setFormData((prev) => ({
+                      ...prev,
+                      disaster_risk_level: event.target.value as DisasterRiskLevel,
+                    }))}
+                    className="w-full rounded-md border border-input bg-background px-3 py-2 text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                    disabled={isLoading}
+                  >
+                    {DISASTER_RISK_OPTIONS.map((riskLevel) => (
+                      <option key={riskLevel} value={riskLevel}>
+                        {DISASTER_RISK_LEVEL_LABELS[riskLevel]}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="mb-2 block text-sm font-medium text-foreground">
+                    Evacuation site
+                  </label>
+                  <input
+                    type="text"
+                    value={formData.evacuation_site}
+                    onChange={(event) => setFormData((prev) => ({
+                      ...prev,
+                      evacuation_site: event.target.value,
+                    }))}
+                    className="w-full rounded-md border border-input bg-background px-3 py-2 text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                    placeholder="e.g., Barangay gymnasium"
+                    disabled={isLoading}
+                  />
+                </div>
+              </div>
+
+              <div className="mt-4">
+                <label className="mb-2 block text-sm font-medium text-foreground">
+                  Special assistance notes
+                </label>
+                <textarea
+                  rows={3}
+                  value={formData.special_assistance_notes}
+                  onChange={(event) => setFormData((prev) => ({
+                    ...prev,
+                    special_assistance_notes: event.target.value,
+                  }))}
+                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                  placeholder="e.g., senior household members need assisted evacuation or medicine support"
+                  disabled={isLoading}
+                />
+              </div>
+            </div>
+          </div>
+
           {/* GPS Pin Picker */}
           <div className="md:col-span-2">
             <label className="block text-sm font-medium text-foreground mb-2">
@@ -1090,7 +1277,7 @@ export function HouseholdForm({ initialData, onSubmit, isLoading = false }: Hous
                     gps_long: lng,
                     street_address: details?.streetAddress || details?.displayName || prev.street_address,
                     barangay_name: masterListLocked ? prev.barangay_name : details?.barangayName || prev.barangay_name,
-                    municipality: masterListLocked ? prev.municipality : details?.municipality || prev.municipality,
+                    municipality: MABINI_MUNICIPALITY,
                     purok_sitio: details?.purokSitio || prev.purok_sitio,
                     location_source: 'manual_pin' as const,
                     location_confidence: 'high' as const,

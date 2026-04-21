@@ -66,7 +66,22 @@ const AUTH_SESSION_TIMEOUT_MS = 10_000;
 
 async function fetchWithTimeout(input: RequestInfo | URL, init: RequestInit, timeoutMs: number) {
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  const requestSignal = init.signal;
+  const handleAbort = () => {
+    controller.abort(requestSignal?.reason);
+  };
+
+  if (requestSignal) {
+    if (requestSignal.aborted) {
+      handleAbort();
+    } else {
+      requestSignal.addEventListener('abort', handleAbort, { once: true });
+    }
+  }
+
+  const timeoutId = setTimeout(() => {
+    controller.abort(new DOMException(`Request timed out after ${timeoutMs}ms`, 'TimeoutError'));
+  }, timeoutMs);
 
   try {
     return await fetch(input, {
@@ -75,7 +90,19 @@ async function fetchWithTimeout(input: RequestInfo | URL, init: RequestInit, tim
     });
   } finally {
     clearTimeout(timeoutId);
+    requestSignal?.removeEventListener('abort', handleAbort);
   }
+}
+
+function isTimeoutLikeError(error: unknown): error is Error {
+  return error instanceof Error && (error.name === 'AbortError' || error.name === 'TimeoutError');
+}
+
+function restoreStoredSessionSnapshot() {
+  const snapshotUser = readStoredSessionSnapshot();
+  currentUser = snapshotUser;
+  sessionSource = snapshotUser ? 'snapshot' : null;
+  return snapshotUser;
 }
 
 function normalizeUser(user: User | null): User | null {
@@ -315,13 +342,6 @@ export async function hydrateSession(force = false): Promise<User | null> {
     credentials: 'same-origin',
     headers: { Accept: 'application/json' },
   }, AUTH_SESSION_TIMEOUT_MS)
-    .catch(async (error) => {
-      if (error instanceof Error && error.name === 'AbortError') {
-        console.warn(`Session hydration timed out after ${AUTH_SESSION_TIMEOUT_MS}ms.`);
-      }
-
-      throw error;
-    })
     .then(async (response) => {
       if (!response.ok) {
         currentUser = null;
@@ -337,9 +357,22 @@ export async function hydrateSession(force = false): Promise<User | null> {
       return currentUser;
     })
     .catch((error) => {
-      console.error('Failed to hydrate session:', error);
-      currentUser = null;
-      sessionSource = null;
+      const snapshotUser = restoreStoredSessionSnapshot();
+
+      if (snapshotUser) {
+        if (isTimeoutLikeError(error)) {
+          console.info(`Session hydration timed out after ${AUTH_SESSION_TIMEOUT_MS}ms. Using cached session snapshot.`);
+        } else {
+          console.info('Session hydration failed. Using cached session snapshot.');
+        }
+
+        return snapshotUser;
+      }
+
+      if (isTimeoutLikeError(error)) {
+        console.info(`Session hydration timed out after ${AUTH_SESSION_TIMEOUT_MS}ms.`);
+      }
+
       persistSessionSnapshot(null);
       return null;
     })

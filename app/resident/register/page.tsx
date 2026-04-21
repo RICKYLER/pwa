@@ -137,8 +137,8 @@ export default function ResidentRegisterPage() {
       features={REGISTER_FEATURES}
       stats={REGISTER_STATS}
     >
-      <div className="mb-5 rounded-[22px] border border-cyan-100 bg-cyan-50/75 px-4 py-3.5">
-        <p className="text-sm font-semibold text-cyan-950">Before you continue</p>
+      <div className="mb-5 rounded-md border border-blue-100 bg-blue-50 px-4 py-4 shadow-sm">
+        <p className="text-sm font-semibold text-blue-900">Before you continue</p>
         <p className="mt-1 text-sm leading-5 text-slate-600">
           Use an email address you can access right now. We will send the verification link there, and this account cannot sign in until that step is complete.
         </p>
@@ -158,7 +158,7 @@ export default function ResidentRegisterPage() {
                 value={form.name}
                 onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))}
                 required
-                className="h-[52px] w-full rounded-[20px] border border-slate-200 bg-slate-50 py-3 pl-11 pr-4 text-sm text-slate-900 shadow-[inset_0_1px_0_rgba(255,255,255,0.8)] outline-none transition placeholder:text-slate-400 focus:border-cyan-800 focus:bg-white focus:ring-4 focus:ring-cyan-900/10"
+                className="h-12 w-full rounded-md border border-slate-300 bg-white py-2 pl-11 pr-4 text-sm text-slate-900 shadow-sm outline-none transition placeholder:text-slate-400 focus:border-blue-700 focus:ring-2 focus:ring-blue-700/20"
                 placeholder="Enter your full name"
                 autoComplete="name"
               />
@@ -177,7 +177,7 @@ export default function ResidentRegisterPage() {
                 value={form.email}
                 onChange={(event) => setForm((current) => ({ ...current, email: event.target.value }))}
                 required
-                className="h-[52px] w-full rounded-[20px] border border-slate-200 bg-slate-50 py-3 pl-11 pr-4 text-sm text-slate-900 shadow-[inset_0_1px_0_rgba(255,255,255,0.8)] outline-none transition placeholder:text-slate-400 focus:border-cyan-800 focus:bg-white focus:ring-4 focus:ring-cyan-900/10"
+                className="h-12 w-full rounded-md border border-slate-300 bg-white py-2 pl-11 pr-4 text-sm text-slate-900 shadow-sm outline-none transition placeholder:text-slate-400 focus:border-blue-700 focus:ring-2 focus:ring-blue-700/20"
                 placeholder="you@example.com"
                 autoComplete="email"
               />
@@ -195,7 +195,7 @@ export default function ResidentRegisterPage() {
                 value={form.barangay_id}
                 onChange={(event) => setForm((current) => ({ ...current, barangay_id: event.target.value }))}
                 required
-                className="h-[52px] w-full appearance-none rounded-[20px] border border-slate-200 bg-slate-50 py-3 pl-11 pr-4 text-sm text-slate-900 shadow-[inset_0_1px_0_rgba(255,255,255,0.8)] outline-none transition focus:border-cyan-800 focus:bg-white focus:ring-4 focus:ring-cyan-900/10"
+                className="h-12 w-full appearance-none rounded-md border border-slate-300 bg-white py-2 pl-11 pr-4 text-sm text-slate-900 shadow-sm outline-none transition focus:border-blue-700 focus:ring-2 focus:ring-blue-700/20"
               >
                 <option value="">Select barangay</option>
                 {BARANGAY_OPTIONS.map((option) => (
@@ -221,7 +221,7 @@ export default function ResidentRegisterPage() {
                 value={form.password}
                 onChange={(event) => setForm((current) => ({ ...current, password: event.target.value }))}
                 required
-                className="h-[52px] w-full rounded-[20px] border border-slate-200 bg-slate-50 py-3 pl-11 pr-12 text-sm text-slate-900 shadow-[inset_0_1px_0_rgba(255,255,255,0.8)] outline-none transition placeholder:text-slate-400 focus:border-cyan-800 focus:bg-white focus:ring-4 focus:ring-cyan-900/10"
+                className="h-12 w-full rounded-md border border-slate-300 bg-white py-2 pl-11 pr-12 text-sm text-slate-900 shadow-sm outline-none transition placeholder:text-slate-400 focus:border-blue-700 focus:ring-2 focus:ring-blue-700/20"
                 placeholder="Minimum 8 characters"
                 autoComplete="new-password"
               />
@@ -247,7 +247,7 @@ export default function ResidentRegisterPage() {
                 value={form.confirmPassword}
                 onChange={(event) => setForm((current) => ({ ...current, confirmPassword: event.target.value }))}
                 required
-                className="h-[52px] w-full rounded-[20px] border border-slate-200 bg-slate-50 py-3 pl-11 pr-12 text-sm text-slate-900 shadow-[inset_0_1px_0_rgba(255,255,255,0.8)] outline-none transition placeholder:text-slate-400 focus:border-cyan-800 focus:bg-white focus:ring-4 focus:ring-cyan-900/10"
+                className="h-12 w-full rounded-md border border-slate-300 bg-white py-2 pl-11 pr-12 text-sm text-slate-900 shadow-sm outline-none transition placeholder:text-slate-400 focus:border-blue-700 focus:ring-2 focus:ring-blue-700/20"
                 placeholder="Re-enter your password"
                 autoComplete="new-password"
               />
@@ -262,12 +262,12 @@ export default function ResidentRegisterPage() {
           </div>
         </div>
 
-        <div className="rounded-[20px] border border-slate-200 bg-slate-50/80 px-4 py-3 text-xs leading-5 text-slate-600 sm:text-sm">
+        <div className="rounded-md border border-slate-200 bg-slate-50 px-4 py-3 text-xs leading-5 text-slate-600 sm:text-sm">
           Passwords should be at least 8 characters long and easy for you to remember securely.
         </div>
 
         {error ? (
-          <div className="flex items-start gap-3 rounded-[20px] border border-rose-200 bg-rose-50/90 px-4 py-3 text-sm text-rose-800">
+          <div className="flex items-start gap-3 rounded-md border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800 shadow-sm">
             <AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0" />
             <span>{error}</span>
           </div>
@@ -276,7 +276,7 @@ export default function ResidentRegisterPage() {
         <button
           type="submit"
           disabled={isSubmitting}
-          className="inline-flex h-[52px] w-full items-center justify-center gap-2 rounded-[18px] bg-cyan-950 px-4 text-sm font-semibold text-white shadow-[0_24px_42px_-28px_rgba(8,47,73,0.75)] transition hover:bg-cyan-900 disabled:cursor-not-allowed disabled:opacity-60"
+          className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-md bg-blue-900 px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-800 disabled:cursor-not-allowed disabled:opacity-60"
         >
           {isSubmitting ? 'Creating account...' : 'Create account and send verification'}
         </button>
@@ -285,7 +285,7 @@ export default function ResidentRegisterPage() {
       <div className="mt-4 text-center text-sm text-slate-600">
         Already have a resident account?
         {' '}
-        <Link href="/login" className="font-semibold text-cyan-800 transition hover:text-cyan-950">
+        <Link href="/login" className="font-semibold text-blue-700 transition hover:text-blue-900">
           Sign in here
         </Link>
       </div>

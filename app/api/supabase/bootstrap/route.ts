@@ -4,6 +4,10 @@ import { requireAuthenticatedUser } from '@/lib/server/auth-guards';
 import { getSupabaseAdminClient, getSupabaseAdminConfig } from '@/lib/server/supabase-admin';
 import { resolveSupabaseUserId } from '@/lib/server/supabase-user-ids';
 import {
+  listDisasterAlertRulesForUser,
+  listDisasterAlertsForUser,
+} from '@/lib/server/disaster-alerts';
+import {
   SUPABASE_BOOTSTRAP_TABLES,
   type SupabaseBootstrapTable,
 } from '@/lib/supabase/row-mapper';
@@ -186,6 +190,27 @@ async function loadLocationMasters(user: User) {
     : await query.eq('barangay_id', user.barangay_id).order('barangay_name', { ascending: true });
 
   if (error) throw new Error(error.message);
+  return data ?? [];
+}
+
+async function loadPurokRiskProfiles(user: User) {
+  const supabase = getSupabaseAdminClient();
+  const query = supabase
+    .from('purok_risk_profiles')
+    .select('*');
+
+  const { data, error } = user.role === 'admin'
+    ? await query.order('purok_sitio', { ascending: true })
+    : await query.eq('barangay_id', user.barangay_id).order('purok_sitio', { ascending: true });
+
+  if (error) {
+    if (isMissingTableError(error, 'purok_risk_profiles')) {
+      return [];
+    }
+
+    throw new Error(error.message);
+  }
+
   return data ?? [];
 }
 
@@ -381,7 +406,7 @@ async function loadUserNotifications(
   user: User,
   remoteUserId: string | null,
 ) {
-  if (user.role !== 'resident') {
+  if (!['resident', 'admin', 'responder'].includes(user.role)) {
     return [];
   }
 
@@ -451,13 +476,22 @@ async function buildBootstrapPayload(
   const canReadDistributionEvents = user.role === 'admin' || user.role === 'encoder' || user.role === 'responder';
   const canReadDistributionRecords = user.role === 'admin' || user.role === 'encoder';
   const canReadIncidents = ['admin', 'encoder', 'health_worker', 'responder'].includes(user.role);
+  const canReadDisasterAlertRules = ['admin', 'responder'].includes(user.role);
+  const canReadDisasterAlerts = ['admin', 'responder'].includes(user.role);
   const remoteUserId = shouldResolveRemoteUserId
     ? await resolveSupabaseUserId(user.id).catch(() => null)
     : null;
   const programsPromise = wants('programs') ? loadPrograms() : null;
   const locationMasterPromise = wants('location_master_lists') ? loadLocationMasters(user) : null;
+  const purokRiskProfilesPromise = wants('purok_risk_profiles') ? loadPurokRiskProfiles(user) : null;
   const auditLogsPromise = wants('audit_logs') ? loadAuditLogs(remoteUserId, user.role) : null;
   const incidentsPromise = wants('incidents') && canReadIncidents ? loadIncidents() : null;
+  const disasterAlertRulesPromise = wants('disaster_alert_rules') && canReadDisasterAlertRules
+    ? listDisasterAlertRulesForUser(user)
+    : null;
+  const disasterAlertsPromise = wants('disaster_alerts') && canReadDisasterAlerts
+    ? listDisasterAlertsForUser(user)
+    : null;
   const distributionEventsPromise = wants('distribution_events') && canReadDistributionEvents
     ? loadDistributionEvents(user)
     : null;
@@ -523,6 +557,10 @@ async function buildBootstrapPayload(
     payload.location_master_lists = await locationMasterPromise;
   }
 
+  if (purokRiskProfilesPromise) {
+    payload.purok_risk_profiles = await purokRiskProfilesPromise;
+  }
+
   if (auditLogsPromise) {
     payload.audit_logs = await auditLogsPromise;
   }
@@ -554,6 +592,14 @@ async function buildBootstrapPayload(
 
   if (incidentsPromise) {
     payload.incidents = await incidentsPromise;
+  }
+
+  if (disasterAlertRulesPromise) {
+    payload.disaster_alert_rules = await disasterAlertRulesPromise;
+  }
+
+  if (disasterAlertsPromise) {
+    payload.disaster_alerts = await disasterAlertsPromise;
   }
 
   return payload;

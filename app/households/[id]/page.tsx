@@ -3,15 +3,23 @@
 import { useEffect, useState } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import Link from 'next/link';
+import { PurokFloodProfileCard } from '@/components/PurokFloodProfileCard';
 import { getCurrentUser, hasPermission } from '@/lib/auth';
 import { getAllPuroks, getHousehold, updateHousehold } from '@/lib/db/households';
+import { getPurokRiskProfile } from '@/lib/db/purok-risk-profiles';
 import {
   getResidentsInHousehold, createResident, updateResident,
   deleteResident, getResidentVulnerabilityFlags,
 } from '@/lib/db/residents';
 import { calculateAge } from '@/lib/db/vulnerability';
-import { Household, Resident, VulnerabilityFlags } from '@/lib/db/schema';
+import { type DisasterRiskLevel, type HazardType, Household, PurokRiskProfile, Resident, VulnerabilityFlags } from '@/lib/db/schema';
 import { mergePurokOptions, normalizePurokSitio } from '@/lib/geocoding';
+import {
+  DISASTER_RISK_LEVEL_LABELS,
+  HAZARD_LABELS,
+  parseHazardTags,
+} from '@/lib/disaster-alerts';
+import { MABINI_MUNICIPALITY } from '@/lib/barangays';
 import {
   ArrowLeft, Plus, Edit2, Trash2, Save, X, User, MapPin,
   Phone, Home, CheckCircle2, AlertTriangle, ChevronDown, Navigation,
@@ -22,6 +30,15 @@ interface ResidentWithFlags { resident: Resident; flags: VulnerabilityFlags | un
 
 const CIVIL_STATUSES = ['single', 'married', 'widowed', 'separated'] as const;
 const HOUSEHOLD_STATUSES = ['active', 'moved_out', 'deceased'] as const;
+const HOUSEHOLD_HAZARD_OPTIONS: HazardType[] = [
+  'flood',
+  'typhoon',
+  'landslide',
+  'storm_surge',
+  'fire',
+  'earthquake',
+];
+const DISASTER_RISK_OPTIONS: DisasterRiskLevel[] = ['low', 'medium', 'high'];
 type HHStatus = typeof HOUSEHOLD_STATUSES[number];
 
 const emptyResidentForm = {
@@ -45,13 +62,19 @@ export default function HouseholdDetailsPage() {
     head_name: '',
     street_address: '',
     purok_sitio: '',
+    municipality: MABINI_MUNICIPALITY,
     contact_number: '',
     status: 'active' as typeof HOUSEHOLD_STATUSES[number],
     gps_lat: undefined as number | undefined,
     gps_long: undefined as number | undefined,
+    hazard_tags: [] as HazardType[],
+    disaster_risk_level: 'medium' as DisasterRiskLevel,
+    evacuation_site: '',
+    special_assistance_notes: '',
   });
   const [isSavingHH, setIsSavingHH] = useState(false);
   const [purokOptions, setPurokOptions] = useState<string[]>([]);
+  const [purokRiskProfile, setPurokRiskProfile] = useState<PurokRiskProfile | null>(null);
 
   // Resident add / edit state
   const [showAddResident, setShowAddResident] = useState(false);
@@ -82,22 +105,63 @@ export default function HouseholdDetailsPage() {
       const hh = await getHousehold(householdId);
       if (!hh) { router.push('/households'); return; }
       const nextPurokOptions = await getAllPuroks(hh.barangay_id);
+      const profile = await getPurokRiskProfile(hh.barangay_id, hh.purok_sitio);
       setHousehold(hh);
       setPurokOptions(mergePurokOptions([...nextPurokOptions, hh.purok_sitio]));
+      setPurokRiskProfile(profile ?? null);
       setHhForm({
         head_name: hh.head_name,
         street_address: hh.street_address ?? '',
         purok_sitio: normalizePurokSitio(hh.purok_sitio),
+        municipality: MABINI_MUNICIPALITY,
         contact_number: hh.contact_number ?? '',
         status: hh.status as typeof HOUSEHOLD_STATUSES[number],
         gps_lat: hh.gps_lat,
         gps_long: hh.gps_long,
+        hazard_tags: parseHazardTags(hh.hazard_tags),
+        disaster_risk_level: hh.disaster_risk_level ?? 'medium',
+        evacuation_site: hh.evacuation_site ?? '',
+        special_assistance_notes: hh.special_assistance_notes ?? '',
       });
       const list = await getResidentsInHousehold(householdId);
       const withFlags = await Promise.all(list.map(async r => ({ resident: r, flags: await getResidentVulnerabilityFlags(r.id) })));
       setResidents(withFlags);
     } catch (e) { console.error(e); } finally { setIsLoading(false); }
   }
+
+  useEffect(() => {
+    if (!household) {
+      setPurokRiskProfile(null);
+      return;
+    }
+
+    const normalizedPurok = normalizePurokSitio(hhForm.purok_sitio);
+    if (!normalizedPurok) {
+      setPurokRiskProfile(null);
+      return;
+    }
+
+    let cancelled = false;
+
+    async function loadPurokProfile() {
+      try {
+        const profile = await getPurokRiskProfile(household!.barangay_id, normalizedPurok);
+        if (!cancelled) {
+          setPurokRiskProfile(profile ?? null);
+        }
+      } catch {
+        if (!cancelled) {
+          setPurokRiskProfile(null);
+        }
+      }
+    }
+
+    void loadPurokProfile();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [hhForm.purok_sitio, household]);
 
   // ── Household save ──────────────────────────────────────────────────────────
   async function handleSaveHousehold() {
@@ -108,18 +172,37 @@ export default function HouseholdDetailsPage() {
     }
     setIsSavingHH(true);
     try {
-      await updateHousehold(household.id, {
+      const updatedHousehold = await updateHousehold(household.id, {
         head_name: hhForm.head_name.trim(),
         street_address: hhForm.street_address.trim(),
         purok_sitio: normalizedPurok,
+        municipality: MABINI_MUNICIPALITY,
         contact_number: hhForm.contact_number.trim(),
         status: hhForm.status,
         gps_lat: hhForm.gps_lat,
         gps_long: hhForm.gps_long,
+        hazard_tags: parseHazardTags(hhForm.hazard_tags),
+        disaster_risk_level: hhForm.disaster_risk_level,
+        evacuation_site: hhForm.evacuation_site.trim(),
+        special_assistance_notes: hhForm.special_assistance_notes.trim(),
+        disaster_profile_updated_at: new Date(),
       });
       setPurokOptions((current) => mergePurokOptions([...current, normalizedPurok]));
-      setHhForm((current) => ({ ...current, purok_sitio: normalizedPurok }));
-      setHousehold(prev => prev ? { ...prev, ...hhForm, purok_sitio: normalizedPurok } : prev);
+      setHousehold(updatedHousehold);
+      setHhForm({
+        head_name: updatedHousehold.head_name,
+        street_address: updatedHousehold.street_address ?? '',
+        purok_sitio: normalizePurokSitio(updatedHousehold.purok_sitio),
+        municipality: MABINI_MUNICIPALITY,
+        contact_number: updatedHousehold.contact_number ?? '',
+        status: updatedHousehold.status as HHStatus,
+        gps_lat: updatedHousehold.gps_lat,
+        gps_long: updatedHousehold.gps_long,
+        hazard_tags: parseHazardTags(updatedHousehold.hazard_tags),
+        disaster_risk_level: updatedHousehold.disaster_risk_level ?? 'medium',
+        evacuation_site: updatedHousehold.evacuation_site ?? '',
+        special_assistance_notes: updatedHousehold.special_assistance_notes ?? '',
+      });
       setIsEditingHH(false);
       showToast('Household updated successfully.');
     } catch { showToast('Failed to save changes.', 'error'); } finally { setIsSavingHH(false); }
@@ -341,17 +424,162 @@ export default function HouseholdDetailsPage() {
 
                   {/* Status */}
                   <div>
+                    <label className="block text-xs font-semibold text-slate-500 mb-1.5 uppercase tracking-wide">Municipality</label>
+                    <input
+                      type="text"
+                      value={hhForm.municipality}
+                      readOnly
+                      className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm bg-slate-50 text-slate-600"
+                    />
+                    <p className="mt-1 text-xs text-slate-400">Automatic household disaster alerts are locked to Mabini.</p>
+                  </div>
+
+                  <div>
                     <label className="block text-xs font-semibold text-slate-500 mb-1.5 uppercase tracking-wide">Status</label>
                     <div className="relative">
                       <select value={hhForm.status}
                         onChange={e => setHhForm(f => ({ ...f, status: e.target.value as any }))}
                         className="w-full appearance-none px-3 pr-8 py-2.5 border border-slate-200 rounded-xl text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-400 transition-all">
                         <option value="active">Active</option>
-                        <option value="inactive">Inactive</option>
                         <option value="moved_out">Moved Out</option>
+                        <option value="deceased">Deceased</option>
                       </select>
                       <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
                     </div>
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-slate-200/80 bg-slate-50 p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <h3 className="text-sm font-semibold text-slate-900">Disaster Risk Profile</h3>
+                      <p className="mt-1 text-xs text-slate-500">
+                        These fields drive Mabini-only automatic household disaster alerts.
+                      </p>
+                    </div>
+                    <span className="rounded-full bg-amber-100 px-2.5 py-1 text-[11px] font-semibold text-amber-900">
+                      Mabini only
+                    </span>
+                  </div>
+
+                  {hhForm.purok_sitio.trim() ? (
+                    <div className="mt-4">
+                      <PurokFloodProfileCard
+                        household={{
+                          barangay_id: household.barangay_id,
+                          purok_sitio: hhForm.purok_sitio,
+                          evacuation_site: hhForm.evacuation_site,
+                        }}
+                        profile={purokRiskProfile}
+                        title="Official Purok Flood Profile"
+                        description="This admin-managed purok profile stays separate from the household-specific risk details below."
+                        className="border-cyan-200 bg-cyan-50/60"
+                      />
+                    </div>
+                  ) : null}
+
+                  {purokRiskProfile?.default_evacuation_site?.trim() && !hhForm.evacuation_site.trim() ? (
+                    <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div>
+                          <p className="font-semibold">Suggested evacuation site from the purok profile</p>
+                          <p className="mt-1">{purokRiskProfile.default_evacuation_site.trim()}</p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setHhForm((current) => ({
+                            ...current,
+                            evacuation_site: purokRiskProfile.default_evacuation_site ?? '',
+                          }))}
+                          className="rounded-full bg-emerald-700 px-4 py-2 text-xs font-semibold text-white hover:bg-emerald-800"
+                        >
+                          Use suggestion
+                        </button>
+                      </div>
+                    </div>
+                  ) : null}
+
+                  <div className="mt-4">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Hazard tags</p>
+                    <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                      {HOUSEHOLD_HAZARD_OPTIONS.map((hazard) => {
+                        const checked = hhForm.hazard_tags.includes(hazard);
+                        return (
+                          <label
+                            key={hazard}
+                            className={`flex items-center gap-2 rounded-xl border px-3 py-2 text-sm transition ${
+                              checked
+                                ? 'border-cyan-200 bg-cyan-50 text-cyan-950'
+                                : 'border-slate-200 bg-white text-slate-700'
+                            }`}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={(event) => {
+                                const nextTags = event.target.checked
+                                  ? [...hhForm.hazard_tags, hazard]
+                                  : hhForm.hazard_tags.filter((entry) => entry !== hazard);
+                                setHhForm((current) => ({
+                                  ...current,
+                                  hazard_tags: parseHazardTags(nextTags),
+                                }));
+                              }}
+                              className="h-4 w-4 rounded border-slate-300"
+                            />
+                            <span>{HAZARD_LABELS[hazard]}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-500 mb-1.5 uppercase tracking-wide">Risk Level</label>
+                      <div className="relative">
+                        <select
+                          value={hhForm.disaster_risk_level}
+                          onChange={(event) => setHhForm((current) => ({
+                            ...current,
+                            disaster_risk_level: event.target.value as DisasterRiskLevel,
+                          }))}
+                          className="w-full appearance-none px-3 pr-8 py-2.5 border border-slate-200 rounded-xl text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-400"
+                        >
+                          {DISASTER_RISK_OPTIONS.map((riskLevel) => (
+                            <option key={riskLevel} value={riskLevel}>
+                              {DISASTER_RISK_LEVEL_LABELS[riskLevel]}
+                            </option>
+                          ))}
+                        </select>
+                        <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-500 mb-1.5 uppercase tracking-wide">Evacuation Site</label>
+                      <input
+                        type="text"
+                        value={hhForm.evacuation_site}
+                        onChange={(event) => setHhForm((current) => ({ ...current, evacuation_site: event.target.value }))}
+                        className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-400"
+                        placeholder="Barangay gym, school, or shelter"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="mt-4">
+                    <label className="block text-xs font-semibold text-slate-500 mb-1.5 uppercase tracking-wide">Special Assistance Notes</label>
+                    <textarea
+                      rows={3}
+                      value={hhForm.special_assistance_notes}
+                      onChange={(event) => setHhForm((current) => ({
+                        ...current,
+                        special_assistance_notes: event.target.value,
+                      }))}
+                      className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-400"
+                      placeholder="Wheelchair support, medicine transport, assisted evacuation, or other household-specific needs."
+                    />
                   </div>
                 </div>
 
@@ -377,11 +605,16 @@ export default function HouseholdDetailsPage() {
                     setHhForm({
                       head_name: household.head_name,
                       street_address: household.street_address ?? '',
-                      purok_sitio: household.purok_sitio,
+                      purok_sitio: normalizePurokSitio(household.purok_sitio),
+                      municipality: MABINI_MUNICIPALITY,
                       contact_number: household.contact_number ?? '',
-                      status: household.status as any,
+                      status: household.status as HHStatus,
                       gps_lat: household.gps_lat,
                       gps_long: household.gps_long,
+                      hazard_tags: parseHazardTags(household.hazard_tags),
+                      disaster_risk_level: household.disaster_risk_level ?? 'medium',
+                      evacuation_site: household.evacuation_site ?? '',
+                      special_assistance_notes: household.special_assistance_notes ?? '',
                     });
                   }}
                     className="flex items-center gap-2 px-5 py-2.5 border border-slate-200 text-slate-600 rounded-xl text-sm font-medium hover:bg-slate-50 transition-colors">
@@ -396,6 +629,7 @@ export default function HouseholdDetailsPage() {
                   { label: 'Household Head', value: household.head_name, icon: User },
                   { label: 'Street Address', value: household.street_address || 'N/A', icon: MapPin },
                   { label: 'Purok / Sitio', value: household.purok_sitio, icon: Home },
+                  { label: 'Municipality', value: household.municipality || MABINI_MUNICIPALITY, icon: Home },
                   { label: 'Contact Number', value: household.contact_number || 'N/A', icon: Phone },
                 ].map(f => {
                   const Icon = f.icon;
@@ -422,6 +656,74 @@ export default function HouseholdDetailsPage() {
                       }`}>
                       {household.status === 'moved_out' ? 'Moved Out' : household.status.charAt(0).toUpperCase() + household.status.slice(1)}
                     </span>
+                  </div>
+                </div>
+                <div className="sm:col-span-2">
+                  <PurokFloodProfileCard
+                    household={household}
+                    profile={purokRiskProfile}
+                    description="Official purok guidance is shown separately from the household-specific risk profile below."
+                    className="border-cyan-200 bg-cyan-50/60"
+                  />
+                </div>
+                <div className="sm:col-span-2 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <p className="text-xs text-slate-400 font-medium">Disaster Risk Profile</p>
+                      <p className="mt-1 text-sm text-slate-600">
+                        Hazard tags and assistance details used by Mabini-only automatic alerts.
+                      </p>
+                    </div>
+                    <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold ${
+                      household.disaster_risk_level === 'high'
+                        ? 'bg-rose-100 text-rose-700'
+                        : household.disaster_risk_level === 'medium'
+                          ? 'bg-amber-100 text-amber-800'
+                          : 'bg-emerald-100 text-emerald-700'
+                    }`}>
+                      {DISASTER_RISK_LEVEL_LABELS[household.disaster_risk_level ?? 'medium']}
+                    </span>
+                  </div>
+
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {parseHazardTags(household.hazard_tags).length > 0 ? (
+                      parseHazardTags(household.hazard_tags).map((hazard) => (
+                        <span
+                          key={hazard}
+                          className="inline-flex items-center rounded-full bg-cyan-100 px-2.5 py-1 text-[11px] font-semibold text-cyan-950"
+                        >
+                          {HAZARD_LABELS[hazard]}
+                        </span>
+                      ))
+                    ) : (
+                      <span className="inline-flex items-center rounded-full bg-slate-200 px-2.5 py-1 text-[11px] font-semibold text-slate-600">
+                        No hazard tags yet
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <div className="rounded-xl bg-white px-3 py-3">
+                      <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Evacuation Site</p>
+                      <p className="mt-1 text-sm font-semibold text-slate-800">
+                        {household.evacuation_site?.trim() || 'Not set'}
+                      </p>
+                    </div>
+                    <div className="rounded-xl bg-white px-3 py-3">
+                      <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Profile Updated</p>
+                      <p className="mt-1 text-sm font-semibold text-slate-800">
+                        {household.disaster_profile_updated_at
+                          ? new Intl.DateTimeFormat('en-PH', { dateStyle: 'medium', timeStyle: 'short' }).format(household.disaster_profile_updated_at)
+                          : 'Not updated yet'}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="mt-3 rounded-xl bg-white px-3 py-3">
+                    <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Special Assistance Notes</p>
+                    <p className="mt-1 text-sm leading-6 text-slate-700">
+                      {household.special_assistance_notes?.trim() || 'No special assistance notes recorded.'}
+                    </p>
                   </div>
                 </div>
                 {household.gps_lat !== undefined && household.gps_long !== undefined && (

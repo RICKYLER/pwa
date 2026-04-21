@@ -213,6 +213,22 @@ create table if not exists public.location_master_lists (
   updated_by uuid references public.users (id) on delete set null
 );
 
+create table if not exists public.purok_risk_profiles (
+  id text primary key default gen_random_uuid()::text,
+  barangay_id text not null,
+  purok_sitio text not null,
+  flood_prone boolean not null default false,
+  flood_control_status text not null default 'unknown'
+    check (flood_control_status in ('protected', 'partial', 'none', 'unknown')),
+  flood_control_notes text,
+  default_evacuation_site text,
+  warning_notes text,
+  updated_at timestamptz not null default timezone('utc', now()),
+  updated_by uuid references public.users (id) on delete set null,
+  sync_status text not null default 'pending'
+    check (sync_status in ('pending', 'synced'))
+);
+
 create table if not exists public.households (
   id text primary key default gen_random_uuid()::text,
   head_name text not null,
@@ -453,7 +469,7 @@ create table if not exists public.audit_logs (
   user_id uuid references public.users (id) on delete set null,
   action text not null,
   entity_type text not null
-    check (entity_type in ('household', 'resident', 'distribution', 'incident', 'inventory', 'user', 'location_master')),
+    check (entity_type in ('household', 'resident', 'distribution', 'incident', 'inventory', 'user', 'location_master', 'disaster_alert', 'disaster_alert_rule', 'purok_risk_profile')),
   entity_id text not null,
   changes jsonb,
   "timestamp" timestamptz not null default timezone('utc', now())
@@ -513,6 +529,10 @@ create index if not exists audit_logs_timestamp_idx on public.audit_logs ("times
 create index if not exists sync_backups_entity_idx on public.sync_backups (entity_type, entity_id, synced_at desc);
 create index if not exists password_setup_tokens_user_id_idx on public.password_setup_tokens (user_id, used_at, expires_at desc);
 create index if not exists email_verification_tokens_user_id_idx on public.email_verification_tokens (user_id, used_at, expires_at desc);
+create index if not exists purok_risk_profiles_barangay_id_idx on public.purok_risk_profiles (barangay_id);
+
+create unique index if not exists purok_risk_profiles_barangay_purok_idx
+  on public.purok_risk_profiles (barangay_id, purok_sitio);
 
 create unique index if not exists distribution_records_unique_household_per_event
   on public.distribution_records (event_id, household_id)
@@ -531,6 +551,12 @@ execute function public.set_updated_at();
 drop trigger if exists location_master_lists_set_updated_at on public.location_master_lists;
 create trigger location_master_lists_set_updated_at
 before update on public.location_master_lists
+for each row
+execute function public.set_updated_at();
+
+drop trigger if exists purok_risk_profiles_set_updated_at on public.purok_risk_profiles;
+create trigger purok_risk_profiles_set_updated_at
+before update on public.purok_risk_profiles
 for each row
 execute function public.set_updated_at();
 
@@ -737,6 +763,7 @@ $$;
 
 alter table public.users enable row level security;
 alter table public.location_master_lists enable row level security;
+alter table public.purok_risk_profiles enable row level security;
 alter table public.households enable row level security;
 alter table public.residents enable row level security;
 alter table public.vulnerability_flags enable row level security;
@@ -782,6 +809,26 @@ using (
 drop policy if exists "location_master_lists_write_admin" on public.location_master_lists;
 create policy "location_master_lists_write_admin"
 on public.location_master_lists
+for all
+using (public.is_admin())
+with check (public.is_admin());
+
+drop policy if exists "purok_risk_profiles_read_authenticated" on public.purok_risk_profiles;
+drop policy if exists "purok_risk_profiles_read_scoped" on public.purok_risk_profiles;
+create policy "purok_risk_profiles_read_scoped"
+on public.purok_risk_profiles
+for select
+using (
+  public.current_user_is_active()
+  and (
+    public.is_admin()
+    or barangay_id = public.current_user_barangay_id()
+  )
+);
+
+drop policy if exists "purok_risk_profiles_write_admin" on public.purok_risk_profiles;
+create policy "purok_risk_profiles_write_admin"
+on public.purok_risk_profiles
 for all
 using (public.is_admin())
 with check (public.is_admin());
@@ -1023,6 +1070,7 @@ alter table public.distribution_events replica identity full;
 alter table public.distribution_records replica identity full;
 alter table public.incidents replica identity full;
 alter table public.location_master_lists replica identity full;
+alter table public.purok_risk_profiles replica identity full;
 alter table public.audit_logs replica identity full;
 alter table public.sync_backups replica identity full;
 alter table public.password_setup_tokens replica identity full;
@@ -1034,6 +1082,7 @@ declare
   v_tables text[] := array[
     'users',
     'location_master_lists',
+    'purok_risk_profiles',
     'households',
     'residents',
     'vulnerability_flags',

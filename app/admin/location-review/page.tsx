@@ -317,7 +317,12 @@ export default function AdminLocationReviewPage() {
       const [records, residentRecords, masterList] = await Promise.all([
         getHouseholds(),
         getResidents({ status: 'active' }),
-        getLocationMasterList(user.barangay_id),
+        getLocationMasterList(user.barangay_id)
+      ]);
+
+      const mergedPuroks = mergePurokOptions([
+        ...(masterList?.puroks ?? []),
+        ...records.map((household) => household.purok_sitio),
       ]);
 
       setHouseholds(records);
@@ -326,10 +331,7 @@ export default function AdminLocationReviewPage() {
       setMasterForm({
         municipality: masterList?.municipality || records[0]?.municipality || '',
         barangay_name: masterList?.barangay_name || records[0]?.barangay_name || '',
-        puroks: mergePurokOptions([
-          ...(masterList?.puroks ?? []),
-          ...records.map((household) => household.purok_sitio),
-        ]),
+        puroks: mergedPuroks,
       });
     } catch (error) {
       console.error(error);
@@ -473,7 +475,6 @@ export default function AdminLocationReviewPage() {
     rejected: households.filter((household) => getHouseholdRegistrationStatus(household) === 'rejected').length,
     needsCorrection: households.filter((household) => getHouseholdRegistrationStatus(household) === 'needs_correction').length,
   };
-
   return (
     <AppShell title="Location Review">
       <div className="mx-auto max-w-[1520px] space-y-6 p-4 sm:p-6 lg:p-8">
@@ -1159,6 +1160,7 @@ export default function AdminLocationReviewPage() {
           </div>
         </div>
       </div>
-    </AppShell>
+
+      </AppShell>
   );
 }
