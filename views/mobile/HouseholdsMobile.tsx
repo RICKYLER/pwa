@@ -219,7 +219,15 @@ export default function HouseholdsMobile() {
             </Link>
           </Button>
         ) : null}
-        secondaryActions={pendingCount > 0 ? <CivicBadge label={`${pendingCount} pending review`} tone="amber" /> : null}
+        secondaryActions={pendingCount > 0 ? (
+          user.role === 'admin' ? (
+            <Link href="/admin/location-review?tab=pending">
+              <CivicBadge label={`${pendingCount} pending review`} tone="amber" />
+            </Link>
+          ) : (
+            <CivicBadge label={`${pendingCount} pending review`} tone="amber" />
+          )
+        ) : null}
       />
 
       <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2">
@@ -253,7 +261,12 @@ export default function HouseholdsMobile() {
 
       {isMissingLocationMode ? (
         <div className="rounded-[22px] border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-          Showing approved active households that still need a map pin.
+          <p>Showing approved active households that still need a map pin.</p>
+          {user.role === 'admin' ? (
+            <Link href="/admin/location-review?tab=approved&issue=missing_coordinates" className="mt-2 inline-block text-xs font-semibold text-amber-900 underline underline-offset-4">
+              Open review queue
+            </Link>
+          ) : null}
         </div>
       ) : null}
 

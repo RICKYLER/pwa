@@ -194,7 +194,15 @@ export default function HouseholdsDesktop() {
           : user.role === 'admin'
             ? `${households.length} records tracked across all barangays.`
             : `${households.length} records tracked in ${user.barangay_id}.`}
-        aside={pendingCount > 0 ? <CivicBadge label={`${pendingCount} pending review`} tone="amber" /> : null}
+        aside={pendingCount > 0 ? (
+          user.role === 'admin' ? (
+            <Link href="/admin/location-review?tab=pending">
+              <CivicBadge label={`${pendingCount} pending review`} tone="amber" />
+            </Link>
+          ) : (
+            <CivicBadge label={`${pendingCount} pending review`} tone="amber" />
+          )
+        ) : null}
       />
 
       {isMissingLocationMode ? (
@@ -206,9 +214,16 @@ export default function HouseholdsDesktop() {
                 Showing approved active households that still need a usable map pin.
               </p>
             </div>
-            <Link href="/households" className="text-xs font-semibold text-amber-900 underline underline-offset-4">
-              Show all households
-            </Link>
+            <div className="flex items-center gap-4">
+              {user.role === 'admin' ? (
+                <Link href="/admin/location-review?tab=approved&issue=missing_coordinates" className="text-xs font-semibold text-amber-900 underline underline-offset-4">
+                  Open review queue
+                </Link>
+              ) : null}
+              <Link href="/households" className="text-xs font-semibold text-amber-900 underline underline-offset-4">
+                Show all households
+              </Link>
+            </div>
           </div>
         </CivicPanel>
       ) : null}

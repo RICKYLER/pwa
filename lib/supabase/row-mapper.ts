@@ -143,6 +143,17 @@ export function mapSupabaseRow(table: SupabaseBootstrapTable, row: Record<string
             : {},
         syncStatus: 'synced' as const,
       };
+    case 'incidents':
+      return {
+        ...base,
+        ...metadata,
+        reported_at: toOptionalDate(base.reported_at) ?? new Date(),
+        context_snapshot:
+          base.context_snapshot && typeof base.context_snapshot === 'object'
+            ? base.context_snapshot
+            : undefined,
+        syncStatus: 'synced' as const,
+      };
     case 'location_master_lists':
     case 'purok_risk_profiles':
       return {

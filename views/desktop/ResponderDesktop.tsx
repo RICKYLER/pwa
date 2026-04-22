@@ -3,15 +3,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { getCurrentUser, hasRole } from '@/lib/auth';
-import { getIncidents, updateIncidentStatus, seedDemoIncidents } from '@/lib/db/incidents';
+import { createIncident, getIncidents, updateIncidentStatus, seedDemoIncidents } from '@/lib/db/incidents';
 import { getDistributionEvents } from '@/lib/db/distribution';
-import { getDisasterAlertRules } from '@/lib/db/disaster-alerts';
+import { getDisasterAlerts, getDisasterAlertRules } from '@/lib/db/disaster-alerts';
 import { db, STORE_NAMES } from '@/lib/db/indexeddb';
 import { getHouseholds } from '@/lib/db/households';
 import { getSupabaseBrowserClient } from '@/lib/supabase/client';
 import { bootstrapSupabaseTables } from '@/lib/supabase/bootstrap';
 import { getPurokRiskProfiles, savePurokRiskProfiles } from '@/lib/db/purok-risk-profiles';
+import { getUserNotifications } from '@/lib/db/user-notifications';
 import type {
+  DisasterAlert,
+  DisasterAlertNotificationPayload,
   DisasterAlertRule,
   DistributionEvent,
   Household,
@@ -20,9 +23,10 @@ import type {
   PurokFloodControlStatus,
   PurokRiskProfile,
   Resident,
+  UserNotification,
   VulnerabilityFlags,
 } from '@/lib/db/schema';
-import { AlertCircle, BellRing, CheckCircle2, CloudRain, Edit2, MapPin, Package, Radio, RefreshCw, ShieldAlert, Users, Wind, Zap } from 'lucide-react';
+import { AlertCircle, BellRing, CheckCircle2, CloudRain, Edit2, MapPin, Package, Radio, RefreshCw, ShieldAlert, Siren, Users, Wind, Zap } from 'lucide-react';
 import WeatherWidget from '@/components/WeatherWidget';
 import ResponderLeafletMap from '@/components/ResponderLeafletMap';
 import ResponderMapControlPanel from '@/components/ResponderMapControlPanel';
@@ -35,6 +39,12 @@ import {
   matchesPurokRiskFilters,
   PUROK_FLOOD_CONTROL_STATUS_LABELS,
 } from '@/lib/purok-risk-profiles';
+import {
+  buildAffectedAreaLabel,
+  HAZARD_LABELS,
+  parseDisasterAlertNotification,
+} from '@/lib/disaster-alerts';
+import { buildAlertDerivedIncidentDraft } from '@/lib/incident-alerts';
 import { openResponderMapLocation } from '@/lib/responder-map-links';
 import { useResponderMapControls } from '@/hooks/useResponderMapControls';
 import {
@@ -85,6 +95,17 @@ interface PriorityHousehold {
   residents: Resident[];
   flags: VulnerabilityFlags[];
   score: number;
+}
+
+interface AlertIncidentSuggestion {
+  id: string;
+  payload: DisasterAlertNotificationPayload;
+  notification: UserNotification;
+  alert?: DisasterAlert;
+  linkedIncident?: Incident;
+  locationLabel: string;
+  gps_lat?: number;
+  gps_lng?: number;
 }
 
 function timeAgo(date: Date): string {
@@ -141,19 +162,23 @@ export default function ResponderDesktop() {
   const [mapHouseholds, setMapHouseholds] = useState<Household[]>([]);
   const [purokRiskProfiles, setPurokRiskProfiles] = useState<PurokRiskProfile[]>([]);
   const [alertRules, setAlertRules] = useState<DisasterAlertRule[]>([]);
+  const [alerts, setAlerts] = useState<DisasterAlert[]>([]);
+  const [notifications, setNotifications] = useState<UserNotification[]>([]);
   const [liveWeather, setLiveWeather] = useState<FieldResponseWeatherPayload | null>(null);
   const [filterFloodProne, setFilterFloodProne] = useState<PurokFloodProneFilter>('all');
   const [filterFloodControlStatus, setFilterFloodControlStatus] = useState<PurokFloodControlStatus | 'all'>('all');
   const [loading, setLoading] = useState(true);
   const [selectedHousehold, setSelectedHousehold] = useState<Household | null>(null);
   const [selectedIncident, setSelectedIncident] = useState<Incident | null>(null);
-  const [activeTab, setActiveTab] = useState<'incidents' | 'priorities' | 'events' | 'zones'>('incidents');
+  const [activeTab, setActiveTab] = useState<'incidents' | 'suggestions' | 'priorities' | 'events' | 'zones'>('incidents');
   const [updatingId, setUpdatingId] = useState<string | null>(null);
+  const [creatingFromAlertId, setCreatingFromAlertId] = useState<string | null>(null);
   const [visitedIds, setVisitedIds] = useState<Set<string>>(new Set());
   const [pingZones, setPingZones] = useState<Set<string>>(new Set());
   const [pingModal, setPingModal] = useState<{ purok: PurokRiskProfile; householdCount: number } | null>(null);
   const [updatingPurokStatus, setUpdatingPurokStatus] = useState<string | null>(null);
   const [isSendingPing, setIsSendingPing] = useState(false);
+  const [suggestionModal, setSuggestionModal] = useState<AlertIncidentSuggestion | null>(null);
   const [editingPurokId, setEditingPurokId] = useState<string | null>(null);
   const [purokEditForm, setPurokEditForm] = useState<{
     default_evacuation_site: string;
@@ -182,7 +207,7 @@ export default function ResponderDesktop() {
 
     try {
       await seedDemoIncidents(user.id);
-      const [allIncidents, allHouseholds, residents, flags, ongoingEvents, profiles, rules] = await Promise.all([
+      const [allIncidents, allHouseholds, residents, flags, ongoingEvents, profiles, rules, latestAlerts, latestNotifications] = await Promise.all([
         getIncidents(),
         getHouseholds({
           registration_status: 'approved',
@@ -192,6 +217,8 @@ export default function ResponderDesktop() {
         getDistributionEvents({ status: 'ongoing' }),
         getPurokRiskProfiles(user.role === 'admin' ? undefined : user.barangay_id),
         getDisasterAlertRules(),
+        getDisasterAlerts(),
+        getUserNotifications(),
       ]);
       const households = getResponderMappedHouseholds(allHouseholds, user);
 
@@ -200,6 +227,8 @@ export default function ResponderDesktop() {
       setMapHouseholds(households);
       setPurokRiskProfiles(profiles);
       setAlertRules(rules);
+      setAlerts(latestAlerts);
+      setNotifications(latestNotifications);
 
       const scored: PriorityHousehold[] = households
         .map((household) => {
@@ -259,7 +288,17 @@ export default function ResponderDesktop() {
     }
 
     function handleDataChanged(event: WindowEventMap['mswdo-data-changed']) {
-      if (!['households', 'residents', 'vulnerability_flags', 'incidents', 'distribution_events', 'purok_risk_profiles', 'disaster_alert_rules'].includes(event.detail.table)) {
+      if (![
+        'households',
+        'residents',
+        'vulnerability_flags',
+        'incidents',
+        'distribution_events',
+        'purok_risk_profiles',
+        'disaster_alert_rules',
+        'disaster_alerts',
+        'user_notifications',
+      ].includes(event.detail.table)) {
         return;
       }
 
@@ -423,11 +462,104 @@ export default function ResponderDesktop() {
     }
   };
 
+  const alertRuleMap = useMemo(
+    () => new Map(alertRules.map((rule) => [rule.id, rule])),
+    [alertRules],
+  );
+  const alertMap = useMemo(
+    () => new Map(alerts.map((alert) => [alert.id, alert])),
+    [alerts],
+  );
+
+  const alertSuggestions = useMemo<AlertIncidentSuggestion[]>(() => {
+    const latestResponderNotifications = new Map<string, UserNotification>();
+
+    notifications.forEach((notification) => {
+      const payload = parseDisasterAlertNotification(notification);
+      if (!payload?.alert_id) {
+        return;
+      }
+
+      const existing = latestResponderNotifications.get(payload.alert_id);
+      if (!existing || new Date(notification.createdAt).getTime() > new Date(existing.createdAt).getTime()) {
+        latestResponderNotifications.set(payload.alert_id, notification);
+      }
+    });
+
+    const suggestions: AlertIncidentSuggestion[] = [];
+
+    Array.from(latestResponderNotifications.values()).forEach((notification) => {
+      const payload = parseDisasterAlertNotification(notification);
+      if (!payload) {
+        return;
+      }
+
+      const linkedIncident = incidents.find((incident) => (
+        incident.source_alert_id === payload.alert_id
+        && incident.status !== 'resolved'
+      ));
+      const areaHousehold = mapHouseholds.find((household) => (
+        household.purok_sitio === payload.purok_sitio
+        && household.barangay_id === payload.barangay_id
+        && typeof household.gps_lat === 'number'
+        && typeof household.gps_long === 'number'
+      ));
+      const triggerRule = alertRuleMap.get(payload.rule_id);
+
+      suggestions.push({
+        id: payload.alert_id,
+        payload,
+        notification,
+        alert: alertMap.get(payload.alert_id),
+        linkedIncident,
+        locationLabel: buildAffectedAreaLabel(payload) || payload.title,
+        gps_lat: areaHousehold?.gps_lat ?? triggerRule?.trigger_lat,
+        gps_lng: areaHousehold?.gps_long ?? triggerRule?.trigger_lng,
+      });
+    });
+
+    return suggestions.sort((left, right) => {
+        if (Boolean(left.linkedIncident) !== Boolean(right.linkedIncident)) {
+          return left.linkedIncident ? 1 : -1;
+        }
+
+        return new Date(right.payload.issued_at).getTime() - new Date(left.payload.issued_at).getTime();
+      });
+  }, [alertMap, alertRuleMap, incidents, mapHouseholds, notifications]);
+
+  async function handleCreateIncidentFromAlert(suggestion: AlertIncidentSuggestion) {
+    if (!user || creatingFromAlertId) {
+      return;
+    }
+
+    setCreatingFromAlertId(suggestion.id);
+    try {
+      const created = await createIncident(buildAlertDerivedIncidentDraft({
+        payload: suggestion.payload,
+        reportedBy: user.id,
+        gps_lat: suggestion.gps_lat,
+        gps_lng: suggestion.gps_lng,
+      }));
+
+      setIncidents((current) => [created, ...current.filter((incident) => incident.id !== created.id)]);
+      setSelectedIncident(created);
+      setSelectedHousehold(null);
+      setActiveTab('incidents');
+      setSuggestionModal(null);
+      await load();
+    } catch (error) {
+      console.error('Failed to create incident from alert:', error);
+    } finally {
+      setCreatingFromAlertId(null);
+    }
+  }
+
 
   if (!user) return null;
 
   const activeIncidents = incidents.filter((incident) => incident.status !== 'resolved');
   const resolvedCount = incidents.filter((incident) => incident.status === 'resolved').length;
+  const actionableAlertSuggestionCount = alertSuggestions.filter((suggestion) => !suggestion.linkedIncident).length;
   const filteredMapHouseholds = mapHouseholds.filter((household) => matchesPurokRiskFilters(household, purokRiskProfileMap, {
     floodProne: filterFloodProne,
     floodControlStatus: filterFloodControlStatus,
@@ -673,6 +805,7 @@ export default function ResponderDesktop() {
             <div className="flex flex-wrap gap-2">
               {([
                 { key: 'incidents', label: 'Incidents', count: activeIncidents.length },
+                { key: 'suggestions', label: 'Alert Suggestions', count: actionableAlertSuggestionCount },
                 { key: 'priorities', label: 'Check-ins', count: filteredPriorities.length },
                 { key: 'events', label: 'Events', count: events.length },
                 {
@@ -744,6 +877,30 @@ export default function ResponderDesktop() {
                             </div>
                             <p className="mt-2 text-sm font-bold text-slate-950">{incident.location}</p>
                             <p className="mt-1 text-xs leading-relaxed text-slate-500">{incident.description}</p>
+                            {incident.source === 'alert' && incident.context_snapshot ? (
+                              <div className="mt-3 rounded-2xl border border-cyan-100 bg-cyan-50 px-3 py-2.5 text-[11px] leading-5 text-cyan-900">
+                                <p className="font-bold uppercase tracking-[0.18em] text-cyan-700">Alert Context</p>
+                                <p className="mt-1">
+                                  {incident.context_snapshot.alert_title || incident.context_snapshot.trigger_reason || 'Alert-derived incident'}
+                                </p>
+                                {incident.context_snapshot.weather_summary ? (
+                                  <p className="mt-1 text-cyan-800">Weather: {incident.context_snapshot.weather_summary}</p>
+                                ) : null}
+                                {incident.context_snapshot.flood_control_status ? (
+                                  <p className="mt-1 text-cyan-800">
+                                    Flood control: {PUROK_FLOOD_CONTROL_STATUS_LABELS[incident.context_snapshot.flood_control_status]}
+                                  </p>
+                                ) : null}
+                                {incident.context_snapshot.default_evacuation_site ? (
+                                  <p className="mt-1 text-cyan-800">
+                                    Evacuation: {incident.context_snapshot.default_evacuation_site}
+                                  </p>
+                                ) : null}
+                                {incident.context_snapshot.warning_notes ? (
+                                  <p className="mt-1 text-cyan-800">{incident.context_snapshot.warning_notes}</p>
+                                ) : null}
+                              </div>
+                            ) : null}
                             <p className="mt-2 text-[11px] font-medium text-slate-400">{timeAgo(incident.reported_at)}</p>
                           </div>
                         </div>
@@ -767,6 +924,103 @@ export default function ResponderDesktop() {
                               {updatingId === incident.id ? '…' : status.label}
                             </button>
                           ))}
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            ) : null}
+
+            {activeTab === 'suggestions' ? (
+              <div className="space-y-3">
+                {loading ? (
+                  [...Array(3)].map((_, index) => (
+                    <div key={index} className="h-32 animate-pulse rounded-[24px] bg-slate-100" />
+                  ))
+                ) : alertSuggestions.length === 0 ? (
+                  <div className="rounded-[24px] border border-dashed border-slate-300 bg-slate-50 px-5 py-10 text-center">
+                    <Siren className="mx-auto h-8 w-8 text-slate-400" />
+                    <p className="mt-3 text-sm font-semibold text-slate-900">No alert-derived suggestions</p>
+                    <p className="mt-1 text-sm text-slate-500">Responder-copy alerts will appear here before they become incidents.</p>
+                  </div>
+                ) : (
+                  alertSuggestions.map((suggestion) => {
+                    const alreadyLinked = Boolean(suggestion.linkedIncident);
+                    return (
+                      <div
+                        key={suggestion.id}
+                        className={`rounded-[24px] border p-4 ${
+                          alreadyLinked
+                            ? 'border-slate-200 bg-slate-50/80'
+                            : 'border-cyan-200/80 bg-white shadow-sm shadow-cyan-100/40'
+                        }`}
+                      >
+                        <div className="flex items-start gap-3">
+                          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-cyan-50 text-lg">
+                            {INCIDENT_TYPE_ICONS[suggestion.payload.hazard] ?? '⚡'}
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <CivicBadge
+                                label={`${HAZARD_LABELS[suggestion.payload.hazard]} ${suggestion.payload.severity}`}
+                                tone={suggestion.payload.severity === 'warning' ? 'rose' : 'amber'}
+                              />
+                              <CivicBadge
+                                label={alreadyLinked ? 'Linked to active incident' : 'Ready for confirmation'}
+                                tone={alreadyLinked ? 'slate' : 'emerald'}
+                              />
+                            </div>
+                            <p className="mt-2 text-sm font-bold text-slate-950">{suggestion.locationLabel}</p>
+                            <p className="mt-1 text-xs leading-relaxed text-slate-600">{suggestion.payload.trigger_reason}</p>
+                            {suggestion.payload.weather_summary ? (
+                              <p className="mt-1 text-xs text-slate-500">Weather: {suggestion.payload.weather_summary}</p>
+                            ) : null}
+                            <div className="mt-2 flex flex-wrap gap-1.5">
+                              {suggestion.payload.flood_control_status ? (
+                                <CivicBadge
+                                  label={PUROK_FLOOD_CONTROL_STATUS_LABELS[suggestion.payload.flood_control_status]}
+                                  tone="slate"
+                                  className="text-[10px]"
+                                />
+                              ) : null}
+                              {suggestion.payload.default_evacuation_site ? (
+                                <CivicBadge
+                                  label={`Evacuation: ${suggestion.payload.default_evacuation_site}`}
+                                  tone="emerald"
+                                  className="text-[10px]"
+                                />
+                              ) : null}
+                            </div>
+                            <p className="mt-2 text-[11px] font-medium text-slate-400">{timeAgo(new Date(suggestion.payload.issued_at))}</p>
+                          </div>
+                        </div>
+                        <div className="mt-4 flex flex-wrap gap-2">
+                          <button
+                            type="button"
+                            disabled={alreadyLinked || creatingFromAlertId === suggestion.id}
+                            onClick={() => setSuggestionModal(suggestion)}
+                            className={`rounded-full px-3 py-2 text-xs font-semibold transition ${
+                              alreadyLinked
+                                ? 'cursor-not-allowed border border-slate-200 bg-slate-100 text-slate-400'
+                                : 'bg-cyan-900 text-white hover:bg-cyan-800'
+                            }`}
+                          >
+                            {creatingFromAlertId === suggestion.id ? 'Creating incident...' : 'Create incident from alert'}
+                          </button>
+                          {alreadyLinked ? (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSelectedIncident(suggestion.linkedIncident ?? null);
+                                setSelectedHousehold(null);
+                                setActiveTab('incidents');
+                              }}
+                              className="rounded-full border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50"
+                            >
+                              View linked incident
+                            </button>
+                          ) : null}
                         </div>
                       </div>
                     );
@@ -1107,6 +1361,115 @@ export default function ResponderDesktop() {
           </CivicPanel>
         </div>
       </aside>
+
+      {suggestionModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 backdrop-blur-sm sm:items-center"
+          onClick={() => {
+            if (!creatingFromAlertId) {
+              setSuggestionModal(null);
+            }
+          }}
+        >
+          <div
+            className="w-full max-w-lg rounded-t-[32px] bg-white p-6 shadow-2xl sm:rounded-[32px]"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-start gap-3">
+              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-[18px] bg-cyan-100">
+                <Siren className="h-6 w-6 text-cyan-700" />
+              </div>
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-cyan-700">Alert to Incident</p>
+                <h3 className="mt-0.5 text-xl font-black text-slate-950">Create responder case</h3>
+                <p className="mt-1 text-sm text-slate-500">
+                  Confirm this alert should become an operational incident. The record will stay linked to the original alert.
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-5 space-y-3 rounded-[24px] border border-slate-200 bg-slate-50 p-4">
+              <div className="flex flex-wrap gap-2">
+                <CivicBadge
+                  label={HAZARD_LABELS[suggestionModal.payload.hazard]}
+                  tone={suggestionModal.payload.severity === 'warning' ? 'rose' : 'amber'}
+                />
+                <CivicBadge
+                  label={suggestionModal.payload.severity === 'warning' ? 'Suggested high severity' : 'Suggested medium severity'}
+                  tone="slate"
+                />
+              </div>
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Location</p>
+                <p className="mt-1 text-sm font-bold text-slate-950">{suggestionModal.locationLabel}</p>
+              </div>
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Trigger reason</p>
+                <p className="mt-1 text-sm leading-6 text-slate-700">{suggestionModal.payload.trigger_reason}</p>
+              </div>
+              {suggestionModal.payload.weather_summary ? (
+                <div>
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Weather summary</p>
+                  <p className="mt-1 text-sm leading-6 text-slate-700">{suggestionModal.payload.weather_summary}</p>
+                </div>
+              ) : null}
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div>
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Flood control</p>
+                  <p className="mt-1 text-sm text-slate-700">
+                    {suggestionModal.payload.flood_control_status
+                      ? PUROK_FLOOD_CONTROL_STATUS_LABELS[suggestionModal.payload.flood_control_status]
+                      : 'No flood-control snapshot'}
+                  </p>
+                  {suggestionModal.payload.flood_control_notes ? (
+                    <p className="mt-1 text-xs leading-5 text-slate-500">{suggestionModal.payload.flood_control_notes}</p>
+                  ) : null}
+                </div>
+                <div>
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Evacuation / note</p>
+                  <p className="mt-1 text-sm text-slate-700">
+                    {suggestionModal.payload.default_evacuation_site
+                      ?? suggestionModal.payload.evacuation_site
+                      ?? 'No evacuation site snapshot'}
+                  </p>
+                  {suggestionModal.payload.warning_notes ? (
+                    <p className="mt-1 text-xs leading-5 text-slate-500">{suggestionModal.payload.warning_notes}</p>
+                  ) : null}
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-6 flex gap-3">
+              <button
+                type="button"
+                disabled={Boolean(creatingFromAlertId)}
+                onClick={() => setSuggestionModal(null)}
+                className="flex-1 rounded-2xl border border-slate-200 bg-white py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={Boolean(creatingFromAlertId)}
+                onClick={() => void handleCreateIncidentFromAlert(suggestionModal)}
+                className="flex-1 inline-flex items-center justify-center gap-2 rounded-2xl bg-cyan-900 py-3 text-sm font-bold text-white shadow-sm shadow-cyan-200 transition hover:bg-cyan-800 disabled:opacity-60"
+              >
+                {creatingFromAlertId === suggestionModal.id ? (
+                  <>
+                    <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" />
+                    Creating incident...
+                  </>
+                ) : (
+                  <>
+                    <Siren className="h-4 w-4" />
+                    Confirm and create incident
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── Ping Confirmation Modal ─────────────────────────────── */}
       {pingModal && (

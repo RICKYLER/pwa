@@ -451,6 +451,13 @@ create table if not exists public.incidents (
   reported_at timestamptz not null default timezone('utc', now()),
   photo_url text,
   description text not null,
+  source text
+    check (source in ('manual', 'alert')),
+  source_alert_id text,
+  source_rule_id text,
+  hazard_context text
+    check (hazard_context in ('flood', 'typhoon', 'landslide', 'storm_surge', 'fire', 'earthquake')),
+  context_snapshot jsonb,
   sync_status text not null default 'pending'
     check (sync_status in ('pending', 'synced'))
 );
@@ -525,6 +532,7 @@ create index if not exists distribution_events_status_idx on public.distribution
 create index if not exists distribution_records_event_id_idx on public.distribution_records (event_id);
 create index if not exists incidents_status_idx on public.incidents (status);
 create index if not exists incidents_reported_at_idx on public.incidents (reported_at desc);
+create index if not exists incidents_source_alert_id_idx on public.incidents (source_alert_id);
 create index if not exists audit_logs_timestamp_idx on public.audit_logs ("timestamp" desc);
 create index if not exists sync_backups_entity_idx on public.sync_backups (entity_type, entity_id, synced_at desc);
 create index if not exists password_setup_tokens_user_id_idx on public.password_setup_tokens (user_id, used_at, expires_at desc);

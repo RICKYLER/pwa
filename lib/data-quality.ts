@@ -191,7 +191,7 @@ export function summarizeOperationalDataQuality(params: {
       label: 'Households Missing Coordinates',
       description: 'Approved active households that still need a usable map pin.',
       count: params.householdsMissingLocation.length,
-      href: '/households?issue=missing_location',
+      href: '/admin/location-review?tab=approved&issue=missing_coordinates',
       sample_labels: params.householdsMissingLocation.slice(0, 3).map((household) => household.head_name),
     },
     {

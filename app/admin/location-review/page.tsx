@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { GoogleMap, InfoWindow, Marker } from '@react-google-maps/api';
 import {
   ArrowUpRight,
@@ -60,6 +60,30 @@ import {
 const CONFIDENCE_OPTIONS: LocationConfidence[] = ['high', 'medium', 'low'];
 const REVIEW_TABS: HouseholdRegistrationStatus[] = HOUSEHOLD_REGISTRATION_STATUSES;
 const REVIEW_BOOTSTRAP_TABLES = ['households', 'residents', 'location_master_lists'] as const;
+const REVIEW_NOTE_SHORTCUTS = [
+  {
+    label: 'Wrong pin',
+    note: 'Wrong pin. Please move the marker to the exact household location.',
+  },
+  {
+    label: 'Incomplete address',
+    note: 'Incomplete address. Please add the complete street, purok, and landmark details.',
+  },
+  {
+    label: 'Duplicate household',
+    note: 'Possible duplicate household. Please confirm the correct active registration.',
+  },
+  {
+    label: 'Missing members',
+    note: 'Missing household members. Please complete the household roster before approval.',
+  },
+  {
+    label: 'Unreadable document',
+    note: 'Unreadable document. Please upload a clearer supporting file.',
+  },
+] as const;
+
+type QueueIssueFilter = 'all' | 'missing_coordinates';
 
 interface ToastState {
   type: 'success' | 'error';
@@ -152,8 +176,72 @@ function buildInitialReviewDraft(
   };
 }
 
+function isReviewTab(value: string | null): value is HouseholdRegistrationStatus {
+  return REVIEW_TABS.includes(value as HouseholdRegistrationStatus);
+}
+
+function getQueueFlagChips(params: {
+  household: Household;
+  households: Household[];
+  memberCount: number;
+}) {
+  const { household, households, memberCount } = params;
+  const chips: Array<{ label: string; className: string }> = [];
+  const pinQaStatus = getStoredOrDerivedPinQaStatus(household, households);
+
+  if (!hasHouseholdPin(household)) {
+    chips.push({
+      label: 'No pin',
+      className: 'border-rose-200 bg-rose-50 text-rose-700',
+    });
+  } else if (!household.location_verified) {
+    chips.push({
+      label: 'Needs verification',
+      className: 'border-amber-200 bg-amber-50 text-amber-700',
+    });
+  }
+
+  if (pinQaStatus === 'duplicate') {
+    chips.push({
+      label: 'Duplicate pin',
+      className: 'border-rose-200 bg-rose-50 text-rose-700',
+    });
+  }
+
+  if (!household.supporting_document_data) {
+    chips.push({
+      label: 'No document',
+      className: 'border-amber-200 bg-amber-50 text-amber-700',
+    });
+  }
+
+  if (memberCount === 0) {
+    chips.push({
+      label: 'No members',
+      className: 'border-amber-200 bg-amber-50 text-amber-700',
+    });
+  }
+
+  return chips;
+}
+
+function getApprovalBlockers(household: Household, households: Household[]) {
+  const blockers: string[] = [];
+
+  if (!hasHouseholdPin(household)) {
+    blockers.push('No pin');
+  }
+
+  if (getStoredOrDerivedPinQaStatus(household, households) === 'duplicate') {
+    blockers.push('Duplicate pin');
+  }
+
+  return blockers;
+}
+
 export default function AdminLocationReviewPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const user = getCurrentUser();
   const { isLoaded } = useGoogleMaps();
 
@@ -165,6 +253,7 @@ export default function AdminLocationReviewPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [activeTab, setActiveTab] = useState<HouseholdRegistrationStatus>('pending');
+  const [queueIssueFilter, setQueueIssueFilter] = useState<QueueIssueFilter>('all');
   const [pinQaFilter, setPinQaFilter] = useState<PinQaStatus | 'all'>('all');
   const [newPurok, setNewPurok] = useState('');
   const [toast, setToast] = useState<ToastState | null>(null);
@@ -205,11 +294,28 @@ export default function AdminLocationReviewPage() {
     focusMapOnPinnedHouseholds(map, households, DEFAULT_BARANGAY_CENTER);
   }, [households, map, selectedId]);
 
-  const filteredHouseholds = useMemo(() => {
-    return households
+  useEffect(() => {
+    const nextTab = searchParams.get('tab');
+    const nextIssue = searchParams.get('issue');
+
+    setActiveTab(isReviewTab(nextTab) ? nextTab : 'pending');
+    setQueueIssueFilter(nextIssue === 'missing_coordinates' ? 'missing_coordinates' : 'all');
+    setSearch('');
+    setPinQaFilter('all');
+  }, [searchParams]);
+
+  const buildQueue = useCallback((records: Household[]) => {
+    return records
       .filter((household) => getHouseholdRegistrationStatus(household) === activeTab)
       .filter((household) => {
-        const pinQaStatus = getStoredOrDerivedPinQaStatus(household, households);
+        if (queueIssueFilter !== 'missing_coordinates') {
+          return true;
+        }
+
+        return !hasHouseholdPin(household);
+      })
+      .filter((household) => {
+        const pinQaStatus = getStoredOrDerivedPinQaStatus(household, records);
         if (pinQaFilter !== 'all' && pinQaStatus !== pinQaFilter) {
           return false;
         }
@@ -235,17 +341,28 @@ export default function AdminLocationReviewPage() {
       .sort((left, right) => {
         const leftSubmitted = new Date(left.registration_submitted_at || left.createdAt).getTime();
         const rightSubmitted = new Date(right.registration_submitted_at || right.createdAt).getTime();
+        if (activeTab === 'pending') {
+          return leftSubmitted - rightSubmitted;
+        }
         return rightSubmitted - leftSubmitted;
       });
-  }, [activeTab, households, pinQaFilter, search]);
+  }, [activeTab, pinQaFilter, queueIssueFilter, search]);
+
+  const filteredHouseholds = useMemo(() => buildQueue(households), [buildQueue, households]);
+
+  const findNextQueueSelectionId = useCallback((records: Household[], excludedId?: string) => {
+    const queue = buildQueue(records).filter((household) => household.id !== excludedId);
+    const actionable = queue.find((household) => getApprovalBlockers(household, records).length === 0);
+    return actionable?.id ?? queue[0]?.id ?? null;
+  }, [buildQueue]);
 
   useEffect(() => {
-    if (filteredHouseholds.some((household) => household.id === selectedId)) {
+    if (selectedId && filteredHouseholds.some((household) => household.id === selectedId)) {
       return;
     }
 
-    setSelectedId(filteredHouseholds[0]?.id || null);
-  }, [filteredHouseholds, selectedId]);
+    setSelectedId(findNextQueueSelectionId(households));
+  }, [filteredHouseholds, findNextQueueSelectionId, households, selectedId]);
 
   const selectedHousehold = households.find((household) => household.id === selectedId) || null;
   const residentsByHouseholdId = useMemo(() => {
@@ -281,12 +398,20 @@ export default function AdminLocationReviewPage() {
       .filter(Boolean) as Household[];
   }, [households, selectedHousehold]);
 
-  const canApprove = Boolean(
-    selectedHousehold
-    && hasHouseholdPin(selectedHousehold)
-    && reviewDraft.location_verified
-    && reviewDraft.pin_qa_status === 'valid',
-  );
+  const selectedMemberCount = selectedHousehold
+    ? (residentsByHouseholdId.get(selectedHousehold.id)?.length ?? 0)
+    : 0;
+  const selectedQueueFlags = selectedHousehold
+    ? getQueueFlagChips({
+      household: selectedHousehold,
+      households,
+      memberCount: selectedMemberCount,
+    })
+    : [];
+  const selectedApprovalBlockers = selectedHousehold
+    ? getApprovalBlockers(selectedHousehold, households)
+    : [];
+  const canApprove = Boolean(selectedHousehold && selectedApprovalBlockers.length === 0);
 
   const approvedMasterList = useMemo(() => {
     return households
@@ -395,30 +520,74 @@ export default function AdminLocationReviewPage() {
     setNewPurok('');
   }
 
-  async function persistReview(nextStatus?: HouseholdRegistrationStatus) {
+  function appendReviewShortcut(note: string) {
+    setReviewDraft((current) => {
+      const trimmed = current.registration_review_notes.trim();
+      const nextNotes = trimmed ? `${trimmed}\n${note}` : note;
+      return {
+        ...current,
+        registration_review_notes: nextNotes,
+      };
+    });
+  }
+
+  async function persistReview(options?: {
+    nextStatus?: HouseholdRegistrationStatus;
+    autoAdvance?: boolean;
+    requireNote?: boolean;
+    forceApproveReady?: boolean;
+    emptyNoteMessage?: string;
+    successMessage?: string;
+  }) {
     if (!user || !selectedHousehold) return;
+
+    const trimmedReviewNotes = reviewDraft.registration_review_notes.trim();
+    if (options?.requireNote && !trimmedReviewNotes) {
+      showToast('error', options.emptyNoteMessage || 'Add a short note before saving this review.');
+      return;
+    }
+
+    if (options?.forceApproveReady) {
+      const blockers = getApprovalBlockers(selectedHousehold, households);
+      if (blockers.length > 0) {
+        showToast('error', `Approve & Next is blocked: ${blockers.join(', ')}.`);
+        return;
+      }
+    }
+
+    const nextStatus = options?.nextStatus;
+    const nextLocationVerified = options?.forceApproveReady ? true : reviewDraft.location_verified;
+    const nextPinQaStatus = options?.forceApproveReady ? 'valid' : reviewDraft.pin_qa_status;
 
     setIsSavingReview(true);
     try {
       const updated = await updateHousehold(selectedHousehold.id, {
         landmark_directions: reviewDraft.landmark_directions.trim(),
         location_confidence: reviewDraft.location_confidence,
-        location_verified: reviewDraft.location_verified,
-        location_verified_at: reviewDraft.location_verified ? new Date() : undefined,
-        location_verified_by: reviewDraft.location_verified ? user.id : undefined,
+        location_verified: nextLocationVerified,
+        location_verified_at: nextLocationVerified ? new Date() : undefined,
+        location_verified_by: nextLocationVerified ? user.id : undefined,
         registration_status: nextStatus ?? getHouseholdRegistrationStatus(selectedHousehold),
         registration_reviewed_at: nextStatus ? new Date() : selectedHousehold.registration_reviewed_at,
         registration_reviewed_by: nextStatus ? user.id : selectedHousehold.registration_reviewed_by,
-        registration_review_notes: reviewDraft.registration_review_notes.trim(),
-        pin_qa_status: reviewDraft.pin_qa_status,
+        registration_review_notes: trimmedReviewNotes,
+        pin_qa_status: nextPinQaStatus,
         pin_qa_notes: reviewDraft.pin_qa_notes.trim(),
       });
 
-      setHouseholds((current) => current.map((household) => (
+      const nextHouseholds = households.map((household) => (
         household.id === updated.id ? updated : household
-      )));
+      ));
+      const nextSelectedId = options?.autoAdvance
+        ? findNextQueueSelectionId(nextHouseholds, updated.id)
+        : updated.id;
 
-      if (nextStatus) {
+      setHouseholds(nextHouseholds);
+      setSelectedId(nextSelectedId);
+
+      if (options?.successMessage) {
+        showToast('success', options.successMessage);
+      } else if (nextStatus) {
         showToast('success', `${formatRegistrationStatusLabel(nextStatus)} saved.`);
       } else {
         showToast('success', 'Review notes saved.');
@@ -434,22 +603,74 @@ export default function AdminLocationReviewPage() {
   async function handleApprove() {
     if (!selectedHousehold) return;
 
-    if (!hasHouseholdPin(selectedHousehold)) {
-      showToast('error', 'A map pin is required before approval.');
-      return;
-    }
+    await persistReview({
+      nextStatus: 'approved',
+      autoAdvance: true,
+      forceApproveReady: true,
+      successMessage: findNextQueueSelectionId(
+        households.map((household) => (
+          household.id === selectedHousehold.id
+            ? {
+              ...household,
+              registration_status: 'approved',
+              location_verified: true,
+              pin_qa_status: 'valid',
+            }
+            : household
+        )),
+        selectedHousehold.id,
+      )
+        ? 'Approved. Next record ready.'
+        : 'Approved. Queue complete.',
+    });
+  }
 
-    if (!reviewDraft.location_verified) {
-      showToast('error', 'Mark the location as verified before approval.');
-      return;
-    }
+  async function handleNeedsCorrection() {
+    if (!selectedHousehold) return;
 
-    if (reviewDraft.pin_qa_status !== 'valid') {
-      showToast('error', 'Set Map Pin QA to Valid before approval.');
-      return;
-    }
+    await persistReview({
+      nextStatus: 'needs_correction',
+      autoAdvance: true,
+      requireNote: true,
+      emptyNoteMessage: 'Add a correction note before sending this registration back.',
+      successMessage: findNextQueueSelectionId(
+        households.map((household) => (
+          household.id === selectedHousehold.id
+            ? {
+              ...household,
+              registration_status: 'needs_correction',
+            }
+            : household
+        )),
+        selectedHousehold.id,
+      )
+        ? 'Sent for correction. Next record ready.'
+        : 'Sent for correction. Queue complete.',
+    });
+  }
 
-    await persistReview('approved');
+  async function handleReject() {
+    if (!selectedHousehold) return;
+
+    await persistReview({
+      nextStatus: 'rejected',
+      autoAdvance: true,
+      requireNote: true,
+      emptyNoteMessage: 'Add a rejection note before closing this registration.',
+      successMessage: findNextQueueSelectionId(
+        households.map((household) => (
+          household.id === selectedHousehold.id
+            ? {
+              ...household,
+              registration_status: 'rejected',
+            }
+            : household
+        )),
+        selectedHousehold.id,
+      )
+        ? 'Registration rejected. Next record ready.'
+        : 'Registration rejected. Queue complete.',
+    });
   }
 
   useEffect(() => {
@@ -616,6 +837,19 @@ export default function AdminLocationReviewPage() {
               </button>
             ))}
           </div>
+          {queueIssueFilter === 'missing_coordinates' && (
+            <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-amber-800">
+              <span className="rounded-full border border-amber-200 bg-amber-50 px-3 py-1 font-semibold">
+                Missing coordinates filter active
+              </span>
+              <Link
+                href={`/admin/location-review?tab=${activeTab}`}
+                className="font-semibold text-amber-900 underline underline-offset-4"
+              >
+                Clear filter
+              </Link>
+            </div>
+          )}
         </div>
 
         <div className="grid grid-cols-1 gap-6 xl:grid-cols-[360px_minmax(0,1fr)]">
@@ -650,6 +884,7 @@ export default function AdminLocationReviewPage() {
                 <h2 className="text-base font-semibold text-slate-900">{formatRegistrationStatusLabel(activeTab)} Queue</h2>
                 <p className="mt-1 text-sm text-slate-500">
                   {filteredHouseholds.length} registration{filteredHouseholds.length !== 1 ? 's' : ''}
+                  {activeTab === 'pending' ? ' · oldest first' : ''}
                 </p>
               </div>
               <div className="max-h-[820px] space-y-2 overflow-y-auto p-3">
@@ -657,6 +892,11 @@ export default function AdminLocationReviewPage() {
                   const active = household.id === selectedId;
                   const pinQaStatus = getStoredOrDerivedPinQaStatus(household, households);
                   const memberCount = residentsByHouseholdId.get(household.id)?.length ?? 0;
+                  const queueFlags = getQueueFlagChips({
+                    household,
+                    households,
+                    memberCount,
+                  });
                   return (
                     <button
                       key={household.id}
@@ -695,6 +935,11 @@ export default function AdminLocationReviewPage() {
                             Document
                           </span>
                         )}
+                        {queueFlags.map((flag) => (
+                          <span key={flag.label} className={`rounded-full border px-2 py-1 font-medium ${flag.className}`}>
+                            {flag.label}
+                          </span>
+                        ))}
                       </div>
                     </button>
                   );
@@ -819,6 +1064,20 @@ export default function AdminLocationReviewPage() {
                       </p>
                     </div>
                   </div>
+
+                  {selectedQueueFlags.length > 0 ? (
+                    <div className="flex flex-wrap gap-2">
+                      {selectedQueueFlags.map((flag) => (
+                        <span key={flag.label} className={`rounded-full border px-3 py-1 text-xs font-semibold ${flag.className}`}>
+                          {flag.label}
+                        </span>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+                      This record is ready for a one-click approval pass.
+                    </div>
+                  )}
 
                   <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1.1fr_0.9fr]">
                     <div className="space-y-4">
@@ -1010,6 +1269,18 @@ export default function AdminLocationReviewPage() {
 
                       <div>
                         <label className="mb-2 block text-sm font-medium text-slate-700">Admin Review Notes</label>
+                        <div className="mb-2 flex flex-wrap gap-2">
+                          {REVIEW_NOTE_SHORTCUTS.map((shortcut) => (
+                            <button
+                              key={shortcut.label}
+                              type="button"
+                              onClick={() => appendReviewShortcut(shortcut.note)}
+                              className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                            >
+                              {shortcut.label}
+                            </button>
+                          ))}
+                        </div>
                         <textarea
                           rows={4}
                           value={reviewDraft.registration_review_notes}
@@ -1040,7 +1311,7 @@ export default function AdminLocationReviewPage() {
                       className="inline-flex items-center gap-2 rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
                     >
                       {isSavingReview ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-                      Save Review
+                      Save Notes
                     </button>
                     <button
                       type="button"
@@ -1049,25 +1320,25 @@ export default function AdminLocationReviewPage() {
                       className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-60"
                     >
                       <CheckCircle2 className="h-4 w-4" />
-                      Approve
+                      Approve & Next
                     </button>
                     <button
                       type="button"
-                      onClick={() => void persistReview('needs_correction')}
+                      onClick={() => void handleNeedsCorrection()}
                       disabled={isSavingReview}
                       className="inline-flex items-center gap-2 rounded-xl bg-amber-500 px-4 py-2.5 text-sm font-semibold text-white hover:bg-amber-600 disabled:opacity-60"
                     >
                       <RefreshCcw className="h-4 w-4" />
-                      Request Update
+                      Needs Correction & Next
                     </button>
                     <button
                       type="button"
-                      onClick={() => void persistReview('rejected')}
+                      onClick={() => void handleReject()}
                       disabled={isSavingReview}
                       className="inline-flex items-center gap-2 rounded-xl bg-rose-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-rose-700 disabled:opacity-60"
                     >
                       <CircleX className="h-4 w-4" />
-                      Reject
+                      Reject & Next
                     </button>
                     {selectedHousehold.gps_lat !== undefined && selectedHousehold.gps_long !== undefined && (
                       <button
@@ -1083,7 +1354,7 @@ export default function AdminLocationReviewPage() {
 
                   {!canApprove && (
                     <p className="text-xs text-slate-500">
-                      Approval requires a saved map pin, a verified location, and Map Pin QA marked as Valid.
+                      Approve & Next is blocked: {selectedApprovalBlockers.join(', ')}.
                     </p>
                   )}
                 </div>

@@ -5,13 +5,18 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from 'react';
 import {
   BeforeInstallPromptEvent,
   detectInstallPlatform,
+  getInstallFeedbackMessage,
+  getInstallFeedbackTone,
   getInstallManualSteps,
+  type InstallFeedbackStatus,
+  type InstallFeedbackTone,
   isStandaloneDisplayMode,
   PWA_INSTALL_DISMISS_STORAGE_KEY,
   type InstallPlatform,
@@ -27,6 +32,9 @@ type PwaInstallContextValue = {
   isInstallAvailable: boolean;
   canManualInstall: boolean;
   isInstalling: boolean;
+  installFeedbackStatus: InstallFeedbackStatus;
+  installFeedbackMessage: string;
+  installFeedbackTone: InstallFeedbackTone;
   isDialogOpen: boolean;
   showPrompt: boolean;
   openDialog: () => void;
@@ -70,9 +78,26 @@ export function PwaInstallProvider({ children }: { children: ReactNode }) {
   const [isInstalled, setIsInstalled] = useState(false);
   const [isDismissed, setIsDismissed] = useState(true);
   const [isInstalling, setIsInstalling] = useState(false);
+  const [installFeedbackStatus, setInstallFeedbackStatus] = useState<InstallFeedbackStatus>('idle');
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null);
   const [hasUsedInstallExperienceThisSession, setHasUsedInstallExperienceThisSession] = useState(false);
+  const installStateTimerRef = useRef<number | null>(null);
+  const feedbackTimerRef = useRef<number | null>(null);
+
+  function clearInstallStateTimer() {
+    if (installStateTimerRef.current) {
+      window.clearTimeout(installStateTimerRef.current);
+      installStateTimerRef.current = null;
+    }
+  }
+
+  function clearFeedbackTimer() {
+    if (feedbackTimerRef.current) {
+      window.clearTimeout(feedbackTimerRef.current);
+      feedbackTimerRef.current = null;
+    }
+  }
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -98,9 +123,12 @@ export function PwaInstallProvider({ children }: { children: ReactNode }) {
     }
 
     function handleInstalled() {
+      clearInstallStateTimer();
+      clearFeedbackTimer();
       clearDismissal();
       setDeferredPrompt(null);
       setIsDismissed(true);
+      setInstallFeedbackStatus('installed');
       setIsInstalled(true);
       setIsDialogOpen(false);
       setHasUsedInstallExperienceThisSession(true);
@@ -115,15 +143,41 @@ export function PwaInstallProvider({ children }: { children: ReactNode }) {
     displayModeQuery.addEventListener?.('change', handleDisplayModeChange);
 
     return () => {
+      clearInstallStateTimer();
+      clearFeedbackTimer();
       window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
       window.removeEventListener('appinstalled', handleInstalled);
       displayModeQuery.removeEventListener?.('change', handleDisplayModeChange);
     };
   }, []);
 
+  useEffect(() => {
+    if (installFeedbackStatus !== 'installed' && installFeedbackStatus !== 'dismissed') {
+      clearFeedbackTimer();
+      return;
+    }
+
+    clearFeedbackTimer();
+    feedbackTimerRef.current = window.setTimeout(() => {
+      setInstallFeedbackStatus('idle');
+    }, 4500);
+
+    return () => {
+      clearFeedbackTimer();
+    };
+  }, [installFeedbackStatus]);
+
   const isInstallAvailable = Boolean(deferredPrompt);
   const canManualInstall = true;
   const manualSteps = useMemo(() => getInstallManualSteps(platform), [platform]);
+  const installFeedbackMessage = useMemo(
+    () => getInstallFeedbackMessage(installFeedbackStatus),
+    [installFeedbackStatus],
+  );
+  const installFeedbackTone = useMemo(
+    () => getInstallFeedbackTone(installFeedbackStatus),
+    [installFeedbackStatus],
+  );
 
   const showPrompt = !isInstalled
     && !isDismissed
@@ -137,6 +191,9 @@ export function PwaInstallProvider({ children }: { children: ReactNode }) {
 
   function closeDialog() {
     setIsDialogOpen(false);
+    if (!isInstalling && installFeedbackStatus === 'manual_steps_required') {
+      setInstallFeedbackStatus('idle');
+    }
   }
 
   function dismissPrompt() {
@@ -149,25 +206,33 @@ export function PwaInstallProvider({ children }: { children: ReactNode }) {
     setHasUsedInstallExperienceThisSession(true);
 
     if (!deferredPrompt) {
+      setInstallFeedbackStatus('manual_steps_required');
       setIsDialogOpen(true);
       return 'unavailable';
     }
 
+    clearInstallStateTimer();
     setIsInstalling(true);
+    setInstallFeedbackStatus('opening_prompt');
     try {
       await deferredPrompt.prompt();
+      setInstallFeedbackStatus('awaiting_browser_action');
       const choice = await deferredPrompt.userChoice;
       setDeferredPrompt(null);
 
       if (choice.outcome === 'accepted') {
         clearDismissal();
-        setIsInstalled(true);
+        setInstallFeedbackStatus('installed');
         setIsDismissed(true);
         setIsDialogOpen(false);
+        installStateTimerRef.current = window.setTimeout(() => {
+          setIsInstalled(true);
+        }, 1200);
         return 'accepted';
       }
 
       rememberDismissal();
+      setInstallFeedbackStatus('dismissed');
       setIsDismissed(true);
       return 'dismissed';
     } finally {
@@ -182,6 +247,9 @@ export function PwaInstallProvider({ children }: { children: ReactNode }) {
     isInstallAvailable,
     canManualInstall,
     isInstalling,
+    installFeedbackStatus,
+    installFeedbackMessage,
+    installFeedbackTone,
     isDialogOpen,
     showPrompt,
     openDialog,
@@ -194,6 +262,9 @@ export function PwaInstallProvider({ children }: { children: ReactNode }) {
     isInstallAvailable,
     isInstalled,
     isInstalling,
+    installFeedbackMessage,
+    installFeedbackStatus,
+    installFeedbackTone,
     manualSteps,
     platform,
     showPrompt,

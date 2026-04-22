@@ -220,6 +220,7 @@ async function createIncidentWithId(
     try {
         const incident: Incident = {
             ...data,
+            source: data.source ?? 'manual',
             id,
             syncStatus: 'synced',
         };

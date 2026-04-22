@@ -30,7 +30,17 @@ const ROUTE_TABLES: Array<{
   },
   {
     prefix: '/responder',
-    tables: ['households', 'residents', 'vulnerability_flags', 'incidents', 'distribution_events', 'purok_risk_profiles', 'disaster_alert_rules'],
+    tables: [
+      'households',
+      'residents',
+      'vulnerability_flags',
+      'incidents',
+      'distribution_events',
+      'purok_risk_profiles',
+      'disaster_alert_rules',
+      'disaster_alerts',
+      'user_notifications',
+    ],
   },
   {
     prefix: '/inventory',

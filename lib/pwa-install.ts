@@ -10,6 +10,14 @@ export interface BeforeInstallPromptEvent extends Event {
 }
 
 export type InstallPlatform = 'ios' | 'android' | 'desktop';
+export type InstallFeedbackStatus =
+  | 'idle'
+  | 'opening_prompt'
+  | 'awaiting_browser_action'
+  | 'manual_steps_required'
+  | 'installed'
+  | 'dismissed';
+export type InstallFeedbackTone = 'info' | 'warning' | 'success';
 
 export function detectInstallPlatform(userAgent: string | null | undefined): InstallPlatform {
   const normalizedUserAgent = (userAgent ?? '').toLowerCase();
@@ -71,4 +79,44 @@ export function getInstallManualSteps(platform: InstallPlatform) {
     'Choose Install App.',
     'Confirm the install to pin it like a desktop app.',
   ];
+}
+
+export function getInstallFeedbackMessage(status: InstallFeedbackStatus) {
+  switch (status) {
+    case 'opening_prompt':
+      return 'Opening the browser install prompt...';
+    case 'awaiting_browser_action':
+      return 'Check your browser prompt to continue installation.';
+    case 'manual_steps_required':
+      return 'No install prompt appeared. Follow the install steps below.';
+    case 'installed':
+      return 'App installed successfully.';
+    case 'dismissed':
+      return 'Installation was not completed yet. You can try again anytime.';
+    default:
+      return '';
+  }
+}
+
+export function getInstallFeedbackTone(status: InstallFeedbackStatus): InstallFeedbackTone {
+  switch (status) {
+    case 'installed':
+      return 'success';
+    case 'manual_steps_required':
+    case 'dismissed':
+      return 'warning';
+    default:
+      return 'info';
+  }
+}
+
+export function getInstallActionLabel(status: InstallFeedbackStatus, defaultLabel: string) {
+  switch (status) {
+    case 'opening_prompt':
+      return 'Opening install prompt...';
+    case 'awaiting_browser_action':
+      return 'Waiting for browser prompt...';
+    default:
+      return defaultLabel;
+  }
 }

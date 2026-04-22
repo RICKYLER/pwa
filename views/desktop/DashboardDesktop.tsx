@@ -12,7 +12,6 @@ import { getIncidents } from '@/lib/db/incidents';
 import { getReportsVulnerableTotal } from '@/lib/reports-preview-data';
 import { getDefaultRouteForUser, hasPermission, restoreSession } from '@/lib/auth';
 import type { DistributionEvent, Incident } from '@/lib/db/schema';
-import WeatherWidget from '@/components/WeatherWidget';
 import {
   CivicBadge,
   CivicHero,
@@ -127,6 +126,23 @@ export default function DashboardDesktop() {
     { href: '/distribution', label: 'Distribution', description: 'Manage relief events', icon: Package, tone: 'emerald' as const, perm: 'view_reports' },
     { href: '/reports', label: 'Reports center', description: 'Open exports and summaries', icon: FileText, tone: 'amber' as const, perm: 'view_reports' },
   ].filter((link) => hasPermission(link.perm as never));
+  const adminReviewShortcuts = user.role === 'admin' ? [
+    {
+      href: '/admin/location-review?tab=pending',
+      label: 'Pending review',
+      description: 'Open the approval queue and start from the oldest submission.',
+    },
+    {
+      href: '/admin/location-review?tab=approved&issue=missing_coordinates',
+      label: 'Missing coordinates',
+      description: 'Fix approved households that still do not have a usable map pin.',
+    },
+    {
+      href: '/admin/location-review?tab=needs_correction',
+      label: 'Needs correction',
+      description: 'Recheck returned registrations that are waiting for an update.',
+    },
+  ] : [];
 
   return (
     <CivicPage className="space-y-6">
@@ -134,12 +150,7 @@ export default function DashboardDesktop() {
         eyebrow="Municipal Operations Hub"
         title={`${greeting()}, ${user.name?.split(' ')[0] ?? 'Official'}`}
         description={isLoading ? 'Loading executive briefing...' : residentsDescription}
-        aside={
-          <div className="flex flex-col items-end gap-2">
-            <CivicBadge label={new Date().toLocaleDateString('en-PH', { month: 'long', day: 'numeric', year: 'numeric' })} tone="navy" />
-            <WeatherWidget mode="compact" className="w-[300px] border-none shadow-none bg-transparent" defaultMinimized autoMinimizeInTightPanel />
-          </div>
-        }
+        aside={<CivicBadge label={new Date().toLocaleDateString('en-PH', { month: 'long', day: 'numeric', year: 'numeric' })} tone="navy" />}
       >
         <div className="mt-4 flex flex-wrap gap-2">
           <CivicBadge label={`${stats?.total_households ?? 0} total households`} tone="teal" />
@@ -345,6 +356,18 @@ export default function DashboardDesktop() {
             title="Action Center"
             description="Pending tasks and records requiring executive attention."
           />
+          <div className="mt-5 grid grid-cols-3 gap-3">
+            {adminReviewShortcuts.map((shortcut) => (
+              <Link
+                key={shortcut.href}
+                href={shortcut.href}
+                className="rounded-[22px] border border-slate-200 bg-slate-50 px-4 py-4 transition hover:-translate-y-px hover:border-cyan-200 hover:bg-cyan-50 hover:shadow-md"
+              >
+                <p className="text-sm font-bold text-slate-950">{shortcut.label}</p>
+                <p className="mt-1 text-xs leading-5 text-slate-500">{shortcut.description}</p>
+              </Link>
+            ))}
+          </div>
           <div className="mt-5 grid grid-cols-5 gap-3">
             {dataQuality.issues.map((issue) => (
               <Link

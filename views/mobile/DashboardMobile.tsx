@@ -13,7 +13,6 @@ import { getIncidents } from '@/lib/db/incidents';
 import { getReportsVulnerableTotal } from '@/lib/reports-preview-data';
 import { getDefaultRouteForUser, hasPermission, restoreSession } from '@/lib/auth';
 import type { DistributionEvent, Incident } from '@/lib/db/schema';
-import WeatherWidget from '@/components/WeatherWidget';
 import {
   CivicBadge,
   CivicHero,
@@ -122,6 +121,23 @@ export default function DashboardMobile() {
     hasPermission('view_reports') && { href: '/distribution', label: 'Distribution', icon: Package },
     hasPermission('view_reports') && { href: '/reports', label: 'Reports', icon: FileText },
   ].filter(Boolean) as { href: string; label: string; icon: typeof Home }[];
+  const adminReviewShortcuts = user.role === 'admin' ? [
+    {
+      href: '/admin/location-review?tab=pending',
+      label: 'Pending review',
+      description: 'Start with the oldest pending registration.',
+    },
+    {
+      href: '/admin/location-review?tab=approved&issue=missing_coordinates',
+      label: 'Missing coordinates',
+      description: 'Fix approved records that still need a map pin.',
+    },
+    {
+      href: '/admin/location-review?tab=needs_correction',
+      label: 'Needs correction',
+      description: 'Review registrations that were sent back for updates.',
+    },
+  ] : [];
 
   const attentionRows = [
     { label: 'Children', value: stats?.children_count ?? 0, color: 'bg-cyan-950' },
@@ -145,10 +161,6 @@ export default function DashboardMobile() {
           <CivicBadge label={`${totalVulnerable} vulnerable`} tone="amber" />
           {activeIncidents.length > 0 && <CivicBadge label={`${activeIncidents.length} active incidents`} tone="rose" />}
           {activeEvents.length > 0 && <CivicBadge label={`${activeEvents.length} distributions`} tone="navy" />}
-        </div>
-        
-        <div className="mt-5">
-          <WeatherWidget mode="compact" className="border-none shadow-none bg-slate-50/50" defaultMinimized autoMinimizeInTightPanel />
         </div>
 
         <div className="mt-5 grid grid-cols-2 gap-2">
@@ -257,6 +269,18 @@ export default function DashboardMobile() {
             title="Action Center"
             description="Tasks and records requiring executive attention."
           />
+          <div className="space-y-2">
+            {adminReviewShortcuts.map((shortcut) => (
+              <Link
+                key={shortcut.href}
+                href={shortcut.href}
+                className="block rounded-[22px] border border-slate-200 bg-slate-50 px-4 py-4"
+              >
+                <p className="text-sm font-bold text-slate-950">{shortcut.label}</p>
+                <p className="mt-1 text-xs leading-5 text-slate-500">{shortcut.description}</p>
+              </Link>
+            ))}
+          </div>
           <div className="space-y-2">
             {dataQuality.issues.map((issue) => (
               <Link

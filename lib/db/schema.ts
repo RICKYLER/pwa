@@ -24,6 +24,7 @@ export type InventoryMovementType =
 export type IncidentType = 'flood' | 'fire' | 'medical' | 'landslide' | 'typhoon' | 'other';
 export type IncidentSeverity = 'low' | 'medium' | 'high' | 'critical';
 export type IncidentStatus = 'reported' | 'verified' | 'responding' | 'resolved';
+export type IncidentSource = 'manual' | 'alert';
 export type LocationSource = 'address_search' | 'manual_pin' | 'current_gps' | 'admin_review';
 export type LocationConfidence = 'low' | 'medium' | 'high';
 export type HouseholdRegistrationStatus = 'pending' | 'approved' | 'rejected' | 'needs_correction';
@@ -352,6 +353,16 @@ export interface UserNotification {
   updatedAt: Date;
 }
 
+export interface IncidentContextSnapshot {
+  alert_title?: string;
+  trigger_reason?: string;
+  weather_summary?: string;
+  flood_control_status?: PurokFloodControlStatus;
+  flood_control_notes?: string;
+  default_evacuation_site?: string;
+  warning_notes?: string;
+}
+
 export interface Incident {
   id: string;
   type: IncidentType;
@@ -364,6 +375,11 @@ export interface Incident {
   reported_at: Date;
   photo_url?: string;
   description: string;
+  source?: IncidentSource;
+  source_alert_id?: string;
+  source_rule_id?: string;
+  hazard_context?: HazardType;
+  context_snapshot?: IncidentContextSnapshot;
   syncStatus: SyncStatus;
 }
 

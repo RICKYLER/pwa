@@ -2078,6 +2078,26 @@ export async function createIncidentOnServer(
 
   const supabase = getSupabaseAdminClient();
   const remoteActorId = await getRemoteActorId(user);
+  const source = incident.source === 'alert' ? 'alert' : 'manual';
+
+  if (source === 'alert' && incident.source_alert_id) {
+    const { data: existingLinked, error: existingLinkedError } = await supabase
+      .from('incidents')
+      .select('id, status')
+      .eq('source_alert_id', incident.source_alert_id)
+      .in('status', ['reported', 'verified', 'responding'])
+      .limit(1);
+
+    if (existingLinkedError) {
+      throw new Error(existingLinkedError.message);
+    }
+
+    const linkedIncident = existingLinked?.[0];
+    if (linkedIncident) {
+      throw new Error(`Alert ${incident.source_alert_id} already has an active incident (${linkedIncident.id}).`);
+    }
+  }
+
   const { data, error } = await supabase
     .from('incidents')
     .insert({
@@ -2092,6 +2112,14 @@ export async function createIncidentOnServer(
       reported_at: toIsoString(incident.reported_at) ?? new Date().toISOString(),
       photo_url: typeof incident.photo_url === 'string' ? incident.photo_url.trim() || null : null,
       description: incident.description.trim(),
+      source,
+      source_alert_id: typeof incident.source_alert_id === 'string' ? incident.source_alert_id.trim() || null : null,
+      source_rule_id: typeof incident.source_rule_id === 'string' ? incident.source_rule_id.trim() || null : null,
+      hazard_context: typeof incident.hazard_context === 'string' ? incident.hazard_context : null,
+      context_snapshot:
+        incident.context_snapshot && typeof incident.context_snapshot === 'object'
+          ? incident.context_snapshot
+          : null,
       sync_status: 'synced',
     })
     .select('*')
@@ -2112,6 +2140,9 @@ export async function createIncidentOnServer(
       location: incident.location,
       gps_lat: incident.gps_lat,
       gps_lng: incident.gps_lng,
+      source,
+      source_alert_id: incident.source_alert_id,
+      source_rule_id: incident.source_rule_id,
     },
   });
 

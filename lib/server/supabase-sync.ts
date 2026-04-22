@@ -405,6 +405,14 @@ async function mapQueueItemToSupabaseRow(item: SyncQueueItem, syncActorId: strin
         reported_at: toTimestamp(data.reported_at),
         photo_url: toOptionalString(data.photo_url),
         description: toRequiredString(data.description, 'incident.description'),
+        source: toOptionalString(data.source),
+        source_alert_id: toOptionalString(data.source_alert_id),
+        source_rule_id: toOptionalString(data.source_rule_id),
+        hazard_context: toOptionalString(data.hazard_context),
+        context_snapshot:
+          data.context_snapshot && typeof data.context_snapshot === 'object'
+            ? normalizeJsonValue(data.context_snapshot)
+            : null,
         sync_status: syncStatus,
       };
     case 'location_master_lists':

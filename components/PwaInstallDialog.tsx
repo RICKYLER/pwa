@@ -1,8 +1,10 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState, type ComponentType, type Dispatch, type RefObject, type SetStateAction } from 'react';
-import { Download, Home, MonitorSmartphone, Share2 } from 'lucide-react';
+import { Download, Home, Loader2, MonitorSmartphone, Share2 } from 'lucide-react';
+import PwaInstallStatusMessage from '@/components/PwaInstallStatusMessage';
 import { usePwaInstall } from '@/hooks/usePwaInstall';
+import { getInstallActionLabel } from '@/lib/pwa-install';
 import { useIsMobile } from '@/components/ui/use-mobile';
 import {
   Dialog,
@@ -147,6 +149,7 @@ export default function PwaInstallDialog() {
     isInstallAvailable,
     isInstalling,
     install,
+    installFeedbackStatus,
   } = usePwaInstall();
   const isMobile = useIsMobile();
   const [showManualSteps, setShowManualSteps] = useState(false);
@@ -160,6 +163,14 @@ export default function PwaInstallDialog() {
 
     setShowManualSteps(platform === 'ios' || !isInstallAvailable);
   }, [isDialogOpen, isInstallAvailable, platform]);
+
+  useEffect(() => {
+    if (!isDialogOpen || installFeedbackStatus !== 'manual_steps_required') {
+      return;
+    }
+
+    revealManualSteps();
+  }, [installFeedbackStatus, isDialogOpen]);
 
   function scrollToManualSteps() {
     requestAnimationFrame(() => {
@@ -235,6 +246,7 @@ export default function PwaInstallDialog() {
 
           <div className="space-y-4 overflow-y-auto px-5 pb-2">
             {content}
+            <PwaInstallStatusMessage />
           </div>
 
           <DrawerFooter className="border-t border-slate-200/70 bg-white px-5 pb-[calc(env(safe-area-inset-bottom)+1rem)] pt-4">
@@ -244,8 +256,8 @@ export default function PwaInstallDialog() {
               disabled={isInstalling}
               className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-full bg-cyan-950 px-4 text-sm font-semibold text-white transition hover:bg-cyan-900 disabled:cursor-not-allowed disabled:opacity-60"
             >
-              <Download className="h-4 w-4" />
-              {isInstalling ? 'Opening Install...' : primaryActionLabel}
+              {isInstalling ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+              {getInstallActionLabel(installFeedbackStatus, primaryActionLabel)}
             </button>
             <button
               type="button"
@@ -292,6 +304,7 @@ export default function PwaInstallDialog() {
 
         <div className="space-y-4 px-6 py-5">
           {content}
+          <PwaInstallStatusMessage />
         </div>
 
         <DialogFooter className="border-t border-slate-200/70 bg-white px-6 py-4 sm:justify-between">
@@ -325,8 +338,8 @@ export default function PwaInstallDialog() {
               disabled={isInstalling}
               className="inline-flex h-11 items-center justify-center gap-2 rounded-full bg-cyan-950 px-5 text-sm font-semibold text-white transition hover:bg-cyan-900 disabled:cursor-not-allowed disabled:opacity-60"
             >
-              <Download className="h-4 w-4" />
-              {isInstalling ? 'Opening Install...' : primaryActionLabel}
+              {isInstalling ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+              {getInstallActionLabel(installFeedbackStatus, primaryActionLabel)}
             </button>
           </div>
         </DialogFooter>
