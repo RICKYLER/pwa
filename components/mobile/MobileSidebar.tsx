@@ -1,8 +1,8 @@
-﻿'use client';
+'use client';
 
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { ChevronRight, LogOut, ShieldCheck } from 'lucide-react';
+import { ChevronRight, LogOut } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { getCurrentUser, hasPermission, logout } from '@/lib/auth';
@@ -98,8 +98,8 @@ export default function MobileSidebar({ isOpen, onClose }: MobileSidebarProps) {
         <SheetHeader className="border-b border-slate-200/70 px-4 pb-4 pt-5 text-left">
           <div className="pr-10">
             <div className="flex items-center gap-3">
-              <div className="flex h-11 w-11 items-center justify-center rounded-[18px] bg-cyan-950 text-white">
-                <ShieldCheck className="h-5 w-5" />
+              <div className="flex h-14 w-14 items-center justify-center rounded-[20px] bg-white border border-slate-200/70 overflow-hidden p-1.5 shadow-sm">
+                <img src="/dswd-logo.png" alt="DSWD Logo" className="h-full w-full object-contain" />
               </div>
               <div className="min-w-0">
                 <SheetTitle className="truncate text-base font-bold text-slate-950">MSWDO Civic Console</SheetTitle>

@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { ArrowUpRight, LogOut, ShieldCheck } from 'lucide-react';
+import { ArrowUpRight, LogOut } from 'lucide-react';
 import { getCurrentUser, hasPermission, logout } from '@/lib/auth';
 import { ADMIN_NAV_ITEMS, isPathActive, STAFF_NAV_ITEMS } from '@/lib/navigation';
 import { cn } from '@/lib/utils';
@@ -68,8 +68,8 @@ export default function DesktopSidebar() {
     <aside className="fixed inset-y-0 left-0 z-30 flex w-72 flex-col border-r border-slate-200/70 bg-[linear-gradient(180deg,rgba(248,251,255,0.98),rgba(239,246,255,0.96))] shadow-[22px_0_60px_-42px_rgba(15,23,42,0.35)] backdrop-blur">
       <div className="border-b border-slate-200/70 px-5 pb-5 pt-6">
         <div className="flex items-center gap-3">
-          <div className="flex h-12 w-12 items-center justify-center rounded-[20px] bg-cyan-950 text-white shadow-[0_20px_42px_-24px_rgba(8,47,73,0.7)]">
-            <ShieldCheck className="h-5 w-5" />
+          <div className="flex h-16 w-16 items-center justify-center rounded-[24px] bg-white shadow-[0_22px_48px_-24px_rgba(8,47,73,0.2)] overflow-hidden p-2 transition-transform hover:scale-105">
+            <img src="/dswd-logo.png" alt="DSWD Logo" className="h-full w-full object-contain" />
           </div>
           <div className="min-w-0">
             <p className="text-sm font-bold text-slate-950">MSWDO Civic Console</p>

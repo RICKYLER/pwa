@@ -2,7 +2,7 @@
 
 import type { ReactNode } from 'react';
 import type { LucideIcon } from 'lucide-react';
-import { ArrowRight, ShieldCheck } from 'lucide-react';
+import { ArrowRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 export interface CivicAuthFeature {
@@ -63,8 +63,8 @@ export default function CivicAuthShell({
           <div className="relative mx-auto flex h-full w-full max-w-[72rem] flex-col justify-between gap-8 xl:ml-auto xl:mr-0 xl:max-w-[56rem] xl:gap-7">
             <div>
               <div className="inline-flex items-center gap-3 rounded-full border border-white/80 bg-white/78 px-3.5 py-2 shadow-[0_20px_40px_-28px_rgba(8,47,73,0.35)] backdrop-blur">
-                <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-cyan-950 text-white shadow-[0_18px_36px_-24px_rgba(8,47,73,0.75)]">
-                  <ShieldCheck className="h-5 w-5" />
+                <div className="flex h-14 w-14 items-center justify-center rounded-[22px] bg-white shadow-[0_18px_36px_-24px_rgba(8,47,73,0.2)] overflow-hidden p-1.5 transition-transform hover:scale-105">
+                  <img src="/dswd-logo.png" alt="DSWD Logo" className="h-full w-full object-contain" />
                 </div>
                 <div className="min-w-0">
                   <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">E-Mabini</p>

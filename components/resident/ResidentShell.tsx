@@ -4,7 +4,7 @@ import type { ReactNode } from 'react';
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { AlertTriangle, LogOut, ShieldCheck } from 'lucide-react';
+import { AlertTriangle, LogOut } from 'lucide-react';
 import { getCurrentUser, logout } from '@/lib/auth';
 import { useSessionAccessIssue } from '@/hooks/useSessionAccessIssue';
 import { getResidentNavItems, getPageMeta, isPathActive } from '@/lib/navigation';
@@ -118,8 +118,8 @@ export default function ResidentShell({ title, subtitle, children }: ResidentShe
       <header className="civic-topbar civic-hairline sticky top-0 z-30">
         <div className="mx-auto flex max-w-[1180px] flex-wrap items-center justify-between gap-4 px-4 py-4 sm:px-6 lg:px-8">
           <div className="flex items-center gap-3">
-            <div className="flex h-11 w-11 items-center justify-center rounded-[18px] bg-cyan-950 text-white shadow-[0_18px_36px_-24px_rgba(8,47,73,0.75)]">
-              <ShieldCheck className="h-5 w-5" />
+            <div className="flex h-14 w-14 items-center justify-center rounded-[20px] bg-white border border-slate-200/70 overflow-hidden p-1.5 shadow-[0_18px_36px_-24px_rgba(8,47,73,0.2)] transition-transform hover:scale-105">
+              <img src="/dswd-logo.png" alt="DSWD Logo" className="h-full w-full object-contain" />
             </div>
             <div className="min-w-0">
               <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Resident Services</p>
