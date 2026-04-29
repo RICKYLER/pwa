@@ -33,6 +33,7 @@ import {
   updateIncidentStatusOnServer,
   updateInventoryItemOnServer,
   updateResidentOnServer,
+  verifyResidentOnServer,
 } from '@/lib/server/supabase-mutations';
 import {
   createDisasterAlertRuleOnServer,
@@ -140,6 +141,21 @@ export async function POST(request: NextRequest) {
             has_chronic_illness?: boolean;
             chronic_conditions?: string[];
           },
+        );
+
+        return NextResponse.json(data, {
+          headers: { 'Cache-Control': 'no-store' },
+        });
+      }
+      case 'verify_resident': {
+        const residentId = typeof body.residentId === 'string' ? body.residentId : '';
+        if (!residentId) {
+          return badRequest('residentId is required.');
+        }
+
+        const data = await verifyResidentOnServer(
+          authResult.user,
+          residentId,
         );
 
         return NextResponse.json(data, {

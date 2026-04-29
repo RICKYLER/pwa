@@ -4,6 +4,7 @@ export type UserRole = 'admin' | 'encoder' | 'health_worker' | 'responder' | 're
 export type UserAccountStatus = 'active' | 'inactive';
 export type HouseholdStatus = 'active' | 'moved_out' | 'deceased';
 export type ResidentStatus = 'active' | 'moved_out' | 'deceased';
+export type ResidentVerificationStatus = 'pending' | 'verified';
 export type CivilStatus = 'single' | 'married' | 'widowed' | 'separated';
 export type IncomeLevel = 'low' | 'middle' | 'high';
 export type Gender = 'M' | 'F';
@@ -127,6 +128,7 @@ export interface Resident {
   occupation?: string;
   income_level?: IncomeLevel;
   contact_number?: string;
+  verification_status: ResidentVerificationStatus;
   createdAt: Date;
   updatedAt: Date;
   syncStatus: SyncStatus;

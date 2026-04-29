@@ -302,6 +302,7 @@ async function getProfileById(userId: string): Promise<StoredUserRecord | null> 
 
     return data ? mapProfileRowToStoredUserRecord(data) : null;
   } catch (error) {
+    console.error('Supabase profile load error:', error);
     throw new Error(`Failed to load Supabase user profile: ${error instanceof Error ? error.message : 'unknown error'}`);
   }
 }

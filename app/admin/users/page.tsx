@@ -42,7 +42,6 @@ interface ToastState {
   type: 'success' | 'error' | 'info';
   msg: string;
 }
-
 type AccountAction = 'delete' | 'deactivate' | 'reactivate';
 
 function normalizeUser(user: User): User {
@@ -52,6 +51,8 @@ function normalizeUser(user: User): User {
     updatedAt: new Date(user.updatedAt),
   };
 }
+
+
 
 export default function AdminUsersPage() {
   const router = useRouter();
@@ -241,13 +242,12 @@ export default function AdminUsersPage() {
       <div className="mx-auto max-w-[1100px] space-y-5 p-4 sm:p-6 lg:p-8">
         {toast && (
           <div
-            className={`fixed right-5 top-5 z-50 flex max-w-sm items-center gap-3 rounded-2xl px-4 py-3.5 text-sm font-medium text-white shadow-2xl ${
-              toast.type === 'success'
-                ? 'bg-emerald-600'
-                : toast.type === 'info'
-                  ? 'bg-indigo-600'
-                  : 'bg-red-600'
-            }`}
+            className={`fixed right-5 top-5 z-50 flex max-w-sm items-center gap-3 rounded-2xl px-4 py-3.5 text-sm font-medium text-white shadow-2xl ${toast.type === 'success'
+              ? 'bg-emerald-600'
+              : toast.type === 'info'
+                ? 'bg-indigo-600'
+                : 'bg-red-600'
+              }`}
           >
             {toast.type === 'success' ? (
               <CheckCircle2 className="h-4 w-4 flex-shrink-0" />
@@ -390,11 +390,10 @@ export default function AdminUsersPage() {
                         key={role.key}
                         type="button"
                         onClick={() => setForm((current) => ({ ...current, role: role.key }))}
-                        className={`flex flex-col items-start gap-0.5 rounded-xl border p-3 text-left transition ${
-                          form.role === role.key
-                            ? `${role.bg} border-transparent ring-2 ${role.color}`
-                            : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50'
-                        }`}
+                        className={`flex flex-col items-start gap-0.5 rounded-xl border p-3 text-left transition ${form.role === role.key
+                          ? `${role.bg} border-transparent ring-2 ${role.color}`
+                          : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50'
+                          }`}
                       >
                         <p className="text-xs font-bold">{role.label}</p>
                         <p className="text-[10px] leading-tight opacity-70">{role.desc}</p>
@@ -479,20 +478,18 @@ export default function AdminUsersPage() {
                     return (
                       <div
                         key={user.id}
-                        className={`group flex items-center gap-4 rounded-2xl border px-5 py-4 transition ${
-                          isMe
-                            ? 'border-indigo-200 bg-indigo-50/30'
-                            : isInactive
-                              ? 'border-slate-200 bg-slate-50/90'
-                              : 'border-slate-200/60 bg-white hover:border-slate-300 hover:shadow-sm'
-                        }`}
+                        className={`group flex items-center gap-4 rounded-2xl border px-5 py-4 transition ${isMe
+                          ? 'border-indigo-200 bg-indigo-50/30'
+                          : isInactive
+                            ? 'border-slate-200 bg-slate-50/90'
+                            : 'border-slate-200/60 bg-white hover:border-slate-300 hover:shadow-sm'
+                          }`}
                       >
                         <div
-                          className={`flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full text-sm font-bold ${
-                            isMe
-                              ? 'bg-gradient-to-br from-indigo-500 to-violet-600 text-white shadow-md shadow-indigo-500/30'
-                              : 'bg-gradient-to-br from-slate-200 to-slate-300 text-slate-600'
-                          }`}
+                          className={`flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full text-sm font-bold ${isMe
+                            ? 'bg-gradient-to-br from-indigo-500 to-violet-600 text-white shadow-md shadow-indigo-500/30'
+                            : 'bg-gradient-to-br from-slate-200 to-slate-300 text-slate-600'
+                            }`}
                         >
                           {user.name.charAt(0).toUpperCase()}
                         </div>

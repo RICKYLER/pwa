@@ -9,7 +9,7 @@ import { getAllPuroks, getHousehold, updateHousehold } from '@/lib/db/households
 import { getPurokRiskProfile } from '@/lib/db/purok-risk-profiles';
 import {
   getResidentsInHousehold, createResident, updateResident,
-  deleteResident, getResidentVulnerabilityFlags,
+  deleteResident, getResidentVulnerabilityFlags, verifyResident,
 } from '@/lib/db/residents';
 import { calculateAge } from '@/lib/db/vulnerability';
 import { type DisasterRiskLevel, type HazardType, Household, PurokRiskProfile, Resident, VulnerabilityFlags } from '@/lib/db/schema';
@@ -268,6 +268,24 @@ export default function HouseholdDetailsPage() {
       setDeletingResidentId(null);
       showToast('Member removed.');
     } catch { showToast('Failed to delete member.', 'error'); }
+  }
+
+  async function handleVerifyResident(id: string) {
+    try {
+      await verifyResident(id);
+      const updated = await getResidentInState(id);
+      if (updated) {
+        setResidents(prev => prev.map(rw =>
+          rw.resident.id === id ? { ...rw, resident: updated } : rw
+        ));
+      }
+      showToast('Member verified.');
+    } catch { showToast('Failed to verify member.', 'error'); }
+  }
+
+  async function getResidentInState(id: string) {
+    const list = await getResidentsInHousehold(householdId);
+    return list.find(r => r.id === id);
   }
 
   if (!user || isLoading) return (
@@ -874,6 +892,11 @@ export default function HouseholdDetailsPage() {
                           <span className="font-semibold text-slate-900">{resident.full_name}</span>
                           <span className="text-xs text-slate-400">({age} yrs)</span>
                           <span className="text-xs text-slate-400">· {resident.gender === 'M' ? 'Male' : 'Female'}</span>
+                          {resident.verification_status === 'pending' ? (
+                            <span className="px-2 py-0.5 bg-amber-100 text-amber-700 text-[10px] font-bold rounded-full animate-pulse">Pending Verification</span>
+                          ) : (
+                            <span className="px-2 py-0.5 bg-emerald-100 text-emerald-700 text-[10px] font-bold rounded-full">Verified</span>
+                          )}
                         </div>
                         <p className="text-sm text-slate-500">{resident.relationship_to_head || 'Member'}</p>
                         {resident.occupation && <p className="text-xs text-slate-400">{resident.occupation}</p>}
@@ -888,6 +911,13 @@ export default function HouseholdDetailsPage() {
                     </div>
                     {canEdit && (
                       <div className="flex gap-1 flex-shrink-0 ml-2">
+                        {resident.verification_status === 'pending' && (
+                          <button onClick={() => handleVerifyResident(resident.id)}
+                            title="Verify"
+                            className="p-2 rounded-xl bg-emerald-50 text-emerald-600 hover:bg-emerald-100 transition-all mr-1">
+                            <CheckCircle2 className="w-4 h-4" />
+                          </button>
+                        )}
                         <button onClick={() => openEditResident(resident)}
                           title="Edit"
                           className={`p-2 rounded-xl transition-all ${isBeingEdited ? 'bg-indigo-100 text-indigo-600' : 'hover:bg-indigo-50 text-slate-400 hover:text-indigo-600'}`}>

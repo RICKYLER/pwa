@@ -33,6 +33,9 @@ export function getSupabaseAdminClient() {
         persistSession: false,
         autoRefreshToken: false,
       },
+      global: {
+        fetch: (...args) => fetch(...args),
+      },
     });
   }
 

@@ -73,13 +73,14 @@ export async function getResidentsInHousehold(household_id: string): Promise<Res
 /**
  * Create new resident
  */
-export async function createResident(data: Omit<Resident, 'id' | 'createdAt' | 'updatedAt' | 'syncStatus'>): Promise<Resident> {
+export async function createResident(data: Omit<Resident, 'id' | 'createdAt' | 'updatedAt' | 'syncStatus' | 'verification_status'>): Promise<Resident> {
   try {
     const resident: Resident = {
       ...data,
       id: generateId(),
       createdAt: new Date(),
       updatedAt: new Date(),
+      verification_status: 'pending',
       syncStatus: 'synced',
     };
 
@@ -278,6 +279,31 @@ export async function countVulnerableResidents(barangay_id: string): Promise<{
     return counts;
   } catch (error) {
     console.error('Error counting vulnerable residents:', error);
+    throw error;
+  }
+}
+
+/**
+ * Verify resident member
+ */
+export async function verifyResident(residentId: string): Promise<Resident> {
+  try {
+    await runServerMutation({
+      action: 'verify_resident',
+      residentId,
+    });
+
+    await bootstrapCurrentPathData(true);
+
+    const updatedResident = await getResident(residentId);
+    if (!updatedResident) {
+      throw new Error('Resident was verified in Supabase, but it did not rehydrate locally.');
+    }
+
+    console.log('Resident verified:', residentId);
+    return updatedResident;
+  } catch (error) {
+    console.error('Error verifying resident:', error);
     throw error;
   }
 }

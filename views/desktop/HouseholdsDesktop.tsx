@@ -67,13 +67,15 @@ export default function HouseholdsDesktop() {
   const [purokRiskProfiles, setPurokRiskProfiles] = useState<PurokRiskProfile[]>([]);
   const [search, setSearch] = useState('');
   const [filterPurok, setFilterPurok] = useState('all');
-  const [filterStatus, setFilterStatus] = useState<'all' | 'active' | 'moved_out' | 'deceased'>('active');
+  const [filterStatus, setFilterStatus] = useState<'all' | 'active' | 'moved_out' | 'deceased' | 'pending'>('active');
   const [filterHazard, setFilterHazard] = useState<HazardType | 'all'>('all');
   const [filterRiskLevel, setFilterRiskLevel] = useState<DisasterRiskLevel | 'all'>('all');
   const [filterFloodProne, setFilterFloodProne] = useState<PurokFloodProneFilter>('all');
   const [filterFloodControlStatus, setFilterFloodControlStatus] = useState<PurokFloodControlStatus | 'all'>('all');
+  const [filterUnverifiedOnly, setFilterUnverifiedOnly] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [memberCounts, setMemberCounts] = useState<Record<string, number>>({});
+  const [hasUnverifiedMembers, setHasUnverifiedMembers] = useState<Record<string, boolean>>({});
   const issueFilter = searchParams.get('issue');
   const isMissingLocationMode = issueFilter === 'missing_location';
   const purokRiskProfileMap = useMemo(
@@ -100,10 +102,14 @@ export default function HouseholdsDesktop() {
     setHouseholds(allHouseholds);
     setPurokRiskProfiles(profiles);
     const counts: Record<string, number> = {};
+    const unverified: Record<string, boolean> = {};
     for (const household of allHouseholds) {
-      counts[household.id] = (await getResidentsInHousehold(household.id)).length;
+      const hhResidents = await getResidentsInHousehold(household.id);
+      counts[household.id] = hhResidents.length;
+      unverified[household.id] = hhResidents.some(r => r.verification_status === 'pending');
     }
     setMemberCounts(counts);
+    setHasUnverifiedMembers(unverified);
     setPuroks(
       user.role === 'admin'
         ? [...new Set(allHouseholds.map((household) => household.purok_sitio).filter(Boolean))].sort()
@@ -145,7 +151,13 @@ export default function HouseholdsDesktop() {
         && !hasHouseholdPin(household)
       ));
     }
-    if (filterStatus !== 'all') result = result.filter((household) => household.status === filterStatus);
+    if (filterStatus !== 'all') {
+      if (filterStatus === 'pending') {
+        result = result.filter((household) => getHouseholdRegistrationStatus(household) === 'pending');
+      } else {
+        result = result.filter((household) => household.status === filterStatus);
+      }
+    }
     if (filterPurok !== 'all') result = result.filter((household) => household.purok_sitio === filterPurok);
     if (filterHazard !== 'all') {
       result = result.filter((household) => parseHazardTags(household.hazard_tags).includes(filterHazard));
@@ -157,6 +169,9 @@ export default function HouseholdsDesktop() {
       floodProne: filterFloodProne,
       floodControlStatus: filterFloodControlStatus,
     }));
+    if (filterUnverifiedOnly) {
+      result = result.filter((household) => hasUnverifiedMembers[household.id]);
+    }
     if (search) {
       const query = search.toLowerCase();
       result = result.filter((household) =>
@@ -167,13 +182,14 @@ export default function HouseholdsDesktop() {
     }
 
     return result;
-  }, [filterFloodControlStatus, filterFloodProne, filterHazard, filterPurok, filterRiskLevel, filterStatus, households, isMissingLocationMode, purokRiskProfileMap, search]);
+  }, [filterFloodControlStatus, filterFloodProne, filterHazard, filterPurok, filterRiskLevel, filterStatus, filterUnverifiedOnly, hasUnverifiedMembers, households, isMissingLocationMode, purokRiskProfileMap, search]);
 
   if (!user) return null;
 
   const activeCount = households.filter((household) => household.status === 'active').length;
   const movedCount = households.filter((household) => household.status === 'moved_out').length;
   const pendingCount = households.filter((household) => getHouseholdRegistrationStatus(household) === 'pending').length;
+  const unverifiedCount = Object.values(hasUnverifiedMembers).filter(Boolean).length;
   const deceasedCount = households.filter((household) => household.status === 'deceased').length;
   const hasFilters = Boolean(search)
     || filterPurok !== 'all'
@@ -182,6 +198,7 @@ export default function HouseholdsDesktop() {
     || filterRiskLevel !== 'all'
     || filterFloodProne !== 'all'
     || filterFloodControlStatus !== 'all'
+    || filterUnverifiedOnly
     || isMissingLocationMode;
 
   return (
@@ -228,11 +245,20 @@ export default function HouseholdsDesktop() {
         </CivicPanel>
       ) : null}
 
-      <div className="grid grid-cols-4 gap-4">
+      <div className="grid grid-cols-5 gap-4">
         <CivicKpiCard icon={Home} label="Total households" value={isLoading ? '—' : households.length} tone="navy" />
         <CivicKpiCard icon={Home} label="Active" value={isLoading ? '—' : activeCount} tone="emerald" />
         <CivicKpiCard icon={Users} label="Moved out" value={isLoading ? '—' : movedCount} tone="amber" />
         <CivicKpiCard icon={Activity} label="Pending review" value={isLoading ? '—' : pendingCount} tone="rose" />
+        <button onClick={() => setFilterUnverifiedOnly(!filterUnverifiedOnly)} className="text-left">
+          <CivicKpiCard
+            icon={Users}
+            label="Unverified Members"
+            value={isLoading ? '—' : unverifiedCount}
+            tone={unverifiedCount > 0 ? 'rose' : 'slate'}
+            className={filterUnverifiedOnly ? 'ring-2 ring-rose-500 ring-offset-2' : ''}
+          />
+        </button>
       </div>
 
       <CivicPanel>
@@ -313,6 +339,7 @@ export default function HouseholdsDesktop() {
           {[
             { key: 'all' as const, label: 'All', count: households.length },
             { key: 'active' as const, label: 'Active', count: activeCount },
+            { key: 'pending' as const, label: 'Pending Review', count: pendingCount },
             { key: 'moved_out' as const, label: 'Moved out', count: movedCount },
             { key: 'deceased' as const, label: 'Deceased', count: deceasedCount },
           ].map((tab) => (
@@ -323,6 +350,12 @@ export default function HouseholdsDesktop() {
               </span>
             </CivicChipButton>
           ))}
+          <CivicChipButton active={filterUnverifiedOnly} onClick={() => setFilterUnverifiedOnly(!filterUnverifiedOnly)}>
+            Unverified Members
+            <span className={`rounded-full px-2 py-0.5 text-[10px] ${filterUnverifiedOnly ? 'bg-white/12 text-white' : 'bg-rose-100 text-rose-600'}`}>
+              {isLoading ? '—' : unverifiedCount}
+            </span>
+          </CivicChipButton>
           {hasFilters ? (
             <button
               type="button"
@@ -334,6 +367,7 @@ export default function HouseholdsDesktop() {
                 setFilterRiskLevel('all');
                 setFilterFloodProne('all');
                 setFilterFloodControlStatus('all');
+                setFilterUnverifiedOnly(false);
               }}
               className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-600"
             >
@@ -397,6 +431,9 @@ export default function HouseholdsDesktop() {
                           className="text-[10px]"
                         />
                         {hasHouseholdPin(household) ? <CivicBadge label="Pinned" tone="navy" className="text-[10px]" /> : null}
+                        {hasUnverifiedMembers[household.id] ? (
+                          <CivicBadge label="Unverified Member" tone="rose" className="text-[10px] animate-pulse" />
+                        ) : null}
                       </div>
                       <div className="mt-2 flex flex-wrap gap-1">
                         <CivicBadge

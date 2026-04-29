@@ -684,6 +684,11 @@ export default function ResidentHouseholdPage() {
                             {badges.map((badge) => (
                               <CivicBadge key={`${member.id}-${badge.label}`} label={badge.label} tone={badge.tone} />
                             ))}
+                            {member.verification_status === 'pending' ? (
+                              <CivicBadge label="Pending Verification" tone="amber" />
+                            ) : (
+                              <CivicBadge label="Verified" tone="emerald" />
+                            )}
                           </div>
                           <p className="mt-1 text-sm text-slate-600">{member.relationship_to_head || 'Household member'}</p>
                           <p className="mt-1 text-xs text-slate-500">

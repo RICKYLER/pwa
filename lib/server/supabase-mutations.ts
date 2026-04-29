@@ -706,6 +706,7 @@ async function createHouseholdBundleWithoutRpc(
         civil_status: toOptionalString(member.civil_status),
         occupation: toOptionalString(member.occupation),
         income_level: toOptionalString(member.income_level),
+        verification_status: user.role === 'admin' ? 'verified' : 'pending',
         sync_status: 'synced',
       });
 
@@ -866,6 +867,7 @@ async function createResidentWithoutRpc(
       occupation: toOptionalString(resident.occupation),
       income_level: toOptionalString(resident.income_level),
       contact_number: toOptionalString(resident.contact_number),
+      verification_status: user.role === 'admin' ? 'verified' : 'pending',
       sync_status: 'synced',
     });
 
@@ -1151,6 +1153,51 @@ export async function updateResidentHealthFlagsOnServer(
     changes: {
       health_updates: updates,
     },
+  });
+
+  return data;
+}
+
+export async function verifyResidentOnServer(
+  user: User,
+  residentId: string,
+) {
+  if (!['admin', 'encoder'].includes(user.role)) {
+    throw new Error('You are not allowed to verify residents.');
+  }
+
+  const supabase = getSupabaseAdminClient();
+  const { data, error } = await supabase.rpc('verify_resident_bundle', {
+    p_resident_id: residentId,
+    p_actor_role: user.role,
+  });
+
+  if (error) {
+    if (isMissingRpcFunctionError(error, 'verify_resident_bundle')) {
+      const { data: updated, error: updateError } = await supabase
+        .from('residents')
+        .update({
+          verification_status: 'verified',
+          sync_status: 'synced',
+        })
+        .eq('id', residentId)
+        .select('*')
+        .single();
+
+      if (updateError) {
+        throw new Error(updateError.message);
+      }
+      return updated;
+    } else {
+      throw new Error(error.message);
+    }
+  }
+
+  await createAuditLogEntry({
+    user,
+    action: 'VERIFY',
+    entityType: 'resident',
+    entityId: residentId,
   });
 
   return data;

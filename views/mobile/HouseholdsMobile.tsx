@@ -1,4 +1,4 @@
-﻿'use client';
+'use client';
 
 import { useCallback, useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
@@ -54,7 +54,7 @@ const REGISTRATION_TONE = {
 
 const DEFAULT_STATUS = 'active' as const;
 
-type HouseholdFilterStatus = 'all' | 'active' | 'moved_out' | 'deceased';
+type HouseholdFilterStatus = 'all' | 'active' | 'moved_out' | 'deceased' | 'pending';
 type HouseholdSort = 'recent' | 'name' | 'members';
 const HAZARD_FILTER_OPTIONS: HazardType[] = [
   'flood',
@@ -82,10 +82,12 @@ export default function HouseholdsMobile() {
   const [filterRiskLevel, setFilterRiskLevel] = useState<DisasterRiskLevel | 'all'>('all');
   const [filterFloodProne, setFilterFloodProne] = useState<PurokFloodProneFilter>('all');
   const [filterFloodControlStatus, setFilterFloodControlStatus] = useState<PurokFloodControlStatus | 'all'>('all');
+  const [filterUnverifiedOnly, setFilterUnverifiedOnly] = useState(false);
   const [sortBy, setSortBy] = useState<HouseholdSort>('recent');
   const [filterSheetOpen, setFilterSheetOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [memberCounts, setMemberCounts] = useState<Record<string, number>>({});
+  const [hasUnverifiedMembers, setHasUnverifiedMembers] = useState<Record<string, boolean>>({});
   const issueFilter = searchParams.get('issue');
   const isMissingLocationMode = issueFilter === 'missing_location';
   const purokRiskProfileMap = buildPurokRiskProfileMap(purokRiskProfiles);
@@ -110,10 +112,14 @@ export default function HouseholdsMobile() {
     setPurokRiskProfiles(profiles);
 
     const counts: Record<string, number> = {};
+    const unverified: Record<string, boolean> = {};
     for (const household of allHouseholds) {
-      counts[household.id] = (await getResidentsInHousehold(household.id)).length;
+      const hhResidents = await getResidentsInHousehold(household.id);
+      counts[household.id] = hhResidents.length;
+      unverified[household.id] = hhResidents.some(r => r.verification_status === 'pending');
     }
     setMemberCounts(counts);
+    setHasUnverifiedMembers(unverified);
     setPuroks(
       user.role === 'admin'
         ? [...new Set(allHouseholds.map((household) => household.purok_sitio).filter(Boolean))].sort()
@@ -157,7 +163,11 @@ export default function HouseholdsMobile() {
         && !hasHouseholdPin(household)
       )
     ))
-    .filter((household) => filterStatus === 'all' || household.status === filterStatus)
+    .filter((household) => {
+      if (filterStatus === 'all') return true;
+      if (filterStatus === 'pending') return getHouseholdRegistrationStatus(household) === 'pending';
+      return household.status === filterStatus;
+    })
     .filter((household) => filterPurok === 'all' || household.purok_sitio === filterPurok)
     .filter((household) => filterHazard === 'all' || parseHazardTags(household.hazard_tags).includes(filterHazard))
     .filter((household) => filterRiskLevel === 'all' || household.disaster_risk_level === filterRiskLevel)
@@ -165,6 +175,7 @@ export default function HouseholdsMobile() {
       floodProne: filterFloodProne,
       floodControlStatus: filterFloodControlStatus,
     }))
+    .filter((household) => !filterUnverifiedOnly || hasUnverifiedMembers[household.id])
     .filter((household) => {
       if (!search) {
         return true;
@@ -193,11 +204,13 @@ export default function HouseholdsMobile() {
     || filterRiskLevel !== 'all'
     || filterFloodProne !== 'all'
     || filterFloodControlStatus !== 'all'
+    || filterUnverifiedOnly
     || sortBy !== 'recent'
     || isMissingLocationMode;
   const statusOptions = [
     { key: 'all' as const, label: 'All', count: households.length },
     { key: 'active' as const, label: 'Active', count: households.filter((household) => household.status === 'active').length },
+    { key: 'pending' as const, label: 'Pending', count: pendingCount },
     { key: 'moved_out' as const, label: 'Moved', count: households.filter((household) => household.status === 'moved_out').length },
     { key: 'deceased' as const, label: 'Deceased', count: households.filter((household) => household.status === 'deceased').length },
   ];
@@ -256,6 +269,7 @@ export default function HouseholdsMobile() {
         {filterRiskLevel !== 'all' ? <CivicBadge label={DISASTER_RISK_LEVEL_LABELS[filterRiskLevel]} tone="amber" /> : null}
         {filterFloodProne !== 'all' ? <CivicBadge label={filterFloodProne === 'flood_prone' ? 'Flood-prone puroks' : 'Not flood-prone'} tone="rose" /> : null}
         {filterFloodControlStatus !== 'all' ? <CivicBadge label={PUROK_FLOOD_CONTROL_STATUS_LABELS[filterFloodControlStatus]} tone="slate" /> : null}
+        {filterUnverifiedOnly ? <CivicBadge label="Unverified Members" tone="rose" className="animate-pulse" /> : null}
         {sortBy !== 'recent' ? <CivicBadge label={sortBy === 'name' ? 'Sorted by name' : 'Sorted by members'} tone="slate" /> : null}
       </div>
 
@@ -289,6 +303,18 @@ export default function HouseholdsMobile() {
                     </span>
                   </CivicChipButton>
                 ))}
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Member Verification</p>
+              <div className="flex flex-wrap gap-2">
+                <CivicChipButton active={filterUnverifiedOnly} onClick={() => setFilterUnverifiedOnly(!filterUnverifiedOnly)}>
+                  Unverified Members Only
+                  <span className={`rounded-full px-2 py-0.5 text-[10px] ${filterUnverifiedOnly ? 'bg-white/12 text-white' : 'bg-rose-100 text-rose-600'}`}>
+                    {isLoading ? '--' : Object.values(hasUnverifiedMembers).filter(Boolean).length}
+                  </span>
+                </CivicChipButton>
               </div>
             </div>
 
@@ -378,6 +404,7 @@ export default function HouseholdsMobile() {
                   setFilterRiskLevel('all');
                   setFilterFloodProne('all');
                   setFilterFloodControlStatus('all');
+                  setFilterUnverifiedOnly(false);
                   setSortBy('recent');
                 }}
                 className="h-11 rounded-[18px] border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700"
@@ -450,6 +477,9 @@ export default function HouseholdsMobile() {
                         className="text-[10px]"
                       />
                       {hasHouseholdPin(household) ? <CivicBadge label="Pinned" tone="navy" className="text-[10px]" /> : null}
+                      {hasUnverifiedMembers[household.id] ? (
+                        <CivicBadge label="Unverified Member" tone="rose" className="text-[10px] animate-pulse" />
+                      ) : null}
                     </>
                   )}
                   meta={(
