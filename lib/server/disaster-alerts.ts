@@ -24,7 +24,30 @@ import type {
   User,
 } from '@/lib/db/schema';
 import { selectAlertTargetHouseholds } from '@/lib/disaster-alert-targeting';
-import { fetchOpenWeatherFieldResponseWeather, type FieldResponseWeatherPayload } from '@/lib/weather';
+import {
+  fetchOpenWeatherFieldResponseWeather,
+  fetchTomorrowIoFieldResponseWeather,
+  type FieldResponseWeatherPayload,
+} from '@/lib/weather';
+
+// Single source of truth for weather data used in rule evaluation.
+// Uses the same priority as /api/weather: Tomorrow.io → OpenWeather fallback.
+async function fetchWeatherForEvaluation(
+  lat: number,
+  lng: number,
+): Promise<FieldResponseWeatherPayload> {
+  const tomorrowKey = process.env.TOMORROW_IO_API_KEY?.trim();
+  if (tomorrowKey) {
+    try {
+      return await fetchTomorrowIoFieldResponseWeather(lat, lng, tomorrowKey);
+    } catch {
+      // fall through to OpenWeather
+    }
+  }
+  const owKey = process.env.OPENWEATHER_API_KEY?.trim();
+  if (!owKey) throw new Error('No weather API key configured for alert evaluation.');
+  return fetchOpenWeatherFieldResponseWeather(lat, lng, owKey, { cache: 'no-store' });
+}
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
 import { requireSupabaseUserId } from '@/lib/server/supabase-user-ids';
 
@@ -337,6 +360,46 @@ export async function updateDisasterAlertRuleOnServer(
 
   await insertAuditLogWithAction(user, 'UPDATE', 'disaster_alert_rule', ruleId, normalized);
   return data;
+}
+
+export async function deleteDisasterAlertRuleOnServer(
+  user: User,
+  ruleId: string,
+) {
+  assertAdminRuleManager(user);
+
+  const supabase = getSupabaseAdminClient();
+  const { data: existing, error: existingError } = await supabase
+    .from('disaster_alert_rules')
+    .select('id, barangay_id, hazard')
+    .eq('id', ruleId)
+    .single();
+
+  if (existingError) {
+    throw new Error(existingError.message);
+  }
+
+  if (!existing) {
+    throw new Error('Disaster alert rule not found.');
+  }
+
+  const { error } = await supabase
+    .from('disaster_alert_rules')
+    .delete()
+    .eq('id', ruleId);
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  const remoteActorId = await requireSupabaseUserId(user);
+  await insertAuditLogBySupabaseUserId(remoteActorId, 'UPDATE', 'disaster_alert_rule', ruleId, {
+    action: 'DELETE',
+    barangay_id: existing.barangay_id,
+    hazard: existing.hazard,
+  });
+
+  return { ok: true, deleted_id: ruleId };
 }
 
 function buildWeatherSnapshot(weather: FieldResponseWeatherPayload, officialAlertTitles: string[]) {
@@ -732,9 +795,11 @@ export async function runAutomaticDisasterAlertEvaluation(options?: {
     };
   }
 
-  const apiKey = process.env.OPENWEATHER_API_KEY?.trim();
-  if (!apiKey) {
-    throw new Error('OPENWEATHER_API_KEY is required for disaster alert evaluation.');
+  // Verify at least one weather API key is present before looping
+  const hasTomorrow = Boolean(process.env.TOMORROW_IO_API_KEY?.trim());
+  const hasOpenWeather = Boolean(process.env.OPENWEATHER_API_KEY?.trim());
+  if (!hasTomorrow && !hasOpenWeather) {
+    throw new Error('No weather API key configured (TOMORROW_IO_API_KEY or OPENWEATHER_API_KEY required).');
   }
 
   const results: Array<{
@@ -758,11 +823,9 @@ export async function runAutomaticDisasterAlertEvaluation(options?: {
       continue;
     }
 
-    const weather = await fetchOpenWeatherFieldResponseWeather(
+    const weather = await fetchWeatherForEvaluation(
       Number(rule.trigger_lat),
       Number(rule.trigger_lng),
-      apiKey,
-      { cache: 'no-store' },
     );
 
     const evaluation = evaluateDisasterAlertRule(rule as DisasterAlertRule, weather, now);

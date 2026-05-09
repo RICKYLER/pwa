@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  buildDisasterAlertNotificationPayloadFromAlert,
   buildDisasterAlertNotificationBody,
   parseDisasterAlertNotification,
 } from '../lib/disaster-alerts';
-import type { UserNotification } from '../lib/db/schema';
+import type { DisasterAlert, UserNotification } from '../lib/db/schema';
 
 test('parseDisasterAlertNotification returns the validated alert payload', () => {
   const notification = {
@@ -80,4 +81,53 @@ test('buildDisasterAlertNotificationBody summarizes the hazard, area, and basis'
   assert.match(body, /Purok note:/i);
   assert.match(body, /Basis:/i);
   assert.match(body, /Weather:/i);
+});
+
+test('buildDisasterAlertNotificationPayloadFromAlert derives responder payload fields from alert data', () => {
+  const alert: DisasterAlert = {
+    id: 'alert-2',
+    rule_id: 'rule-2',
+    municipality: 'Mabini',
+    barangay_id: 'anitapan',
+    purok_sitio: 'Purok 3',
+    hazard: 'flood',
+    severity: 'warning',
+    title: 'Flood Warning',
+    message: 'Move now.',
+    trigger_source: 'hybrid',
+    trigger_reason: 'Rain and advisory threshold crossed',
+    weather_snapshot: {
+      summary: 'Heavy rain with gusty winds',
+      official_alert_titles: ['PAGASA advisory'],
+      rain_chance: 90,
+      rain_intensity_mm_per_hr: 14,
+      next_hour_precip_mm: 20,
+      wind_gust_kph: 42,
+    },
+    evacuation_site: 'Anitapan gym',
+    special_assistance_notes: 'Prioritize seniors.',
+    notify_responders: true,
+    reachable_household_count: 12,
+    unreachable_household_count: 1,
+    issued_at: new Date('2026-04-15T03:00:00.000Z'),
+    createdAt: new Date('2026-04-15T03:00:00.000Z'),
+    updatedAt: new Date('2026-04-15T03:00:00.000Z'),
+    syncStatus: 'synced',
+  };
+
+  const payload = buildDisasterAlertNotificationPayloadFromAlert({
+    alert,
+    purokRiskProfile: {
+      flood_control_status: 'partial',
+      flood_control_notes: 'Canal is still being cleared.',
+      default_evacuation_site: 'Purok 3 chapel',
+      warning_notes: 'Watch the low creek crossing.',
+    },
+  });
+
+  assert.equal(payload.alert_id, 'alert-2');
+  assert.equal(payload.weather_summary, 'Heavy rain with gusty winds');
+  assert.equal(payload.flood_control_status, 'partial');
+  assert.equal(payload.default_evacuation_site, 'Purok 3 chapel');
+  assert.equal(payload.issued_at, '2026-04-15T03:00:00.000Z');
 });

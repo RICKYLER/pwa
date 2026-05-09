@@ -37,6 +37,7 @@ import {
 } from '@/lib/server/supabase-mutations';
 import {
   createDisasterAlertRuleOnServer,
+  deleteDisasterAlertRuleOnServer,
   runAutomaticDisasterAlertEvaluation,
   updateDisasterAlertRuleOnServer,
 } from '@/lib/server/disaster-alerts';
@@ -208,6 +209,18 @@ export async function POST(request: NextRequest) {
         );
 
         return NextResponse.json({ rule }, {
+          headers: { 'Cache-Control': 'no-store' },
+        });
+      }
+      case 'delete_disaster_alert_rule': {
+        const ruleId = typeof body.ruleId === 'string' ? body.ruleId : '';
+        if (!ruleId) {
+          return badRequest('ruleId is required.');
+        }
+
+        const data = await deleteDisasterAlertRuleOnServer(authResult.user, ruleId);
+
+        return NextResponse.json(data, {
           headers: { 'Cache-Control': 'no-store' },
         });
       }

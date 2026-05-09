@@ -25,7 +25,7 @@ import { getCurrentUser, hasRole } from '@/lib/auth';
 import { getDisasterAlertRules } from '@/lib/db/disaster-alerts';
 import { getDistributionEvents } from '@/lib/db/distribution';
 import { getHouseholds } from '@/lib/db/households';
-import { getIncidents, seedDemoIncidents, updateIncidentStatus } from '@/lib/db/incidents';
+import { getIncidents, updateIncidentStatus } from '@/lib/db/incidents';
 import { db, STORE_NAMES } from '@/lib/db/indexeddb';
 import { getPurokRiskProfiles } from '@/lib/db/purok-risk-profiles';
 import type {
@@ -230,8 +230,6 @@ export default function ResponderMobile() {
 
     setLoading(true);
     try {
-      await seedDemoIncidents(user.id);
-
       const [allIncidents, allApprovedHouseholds, allResidents, allFlags, ongoingEvents, profiles, rules] = await Promise.all([
         getIncidents(),
         getHouseholds({

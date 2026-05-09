@@ -1,6 +1,7 @@
 import type { Household } from './db/schema';
+import { MABINI_CENTER } from '@/lib/mabini';
 
-export const DEFAULT_BARANGAY_CENTER = { lat: 7.843, lng: 125.621 };
+export const DEFAULT_BARANGAY_CENTER = MABINI_CENTER;
 export const HOUSEHOLD_PIN_COLOR = '#6366f1';
 
 const INCIDENT_SEVERITY_COLORS: Record<string, string> = {

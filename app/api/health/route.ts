@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import nodemailer from 'nodemailer';
 import { fetchOpenWeatherFieldResponseWeather } from '@/lib/weather';
+import { MABINI_CENTER } from '@/lib/mabini';
 import { requireAdminUser } from '@/lib/server/auth-guards';
 import { getSupabaseAdminClient, getSupabaseAdminConfig } from '@/lib/server/supabase-admin';
 
@@ -30,8 +31,8 @@ interface HealthPayload {
   checks: HealthCheckResult[];
 }
 
-const DEFAULT_LAT = 7.2186;
-const DEFAULT_LNG = 125.6208;
+const DEFAULT_LAT = MABINI_CENTER.lat;
+const DEFAULT_LNG = MABINI_CENTER.lng;
 
 function result(
   id: string,

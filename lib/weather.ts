@@ -1,5 +1,7 @@
-const DEFAULT_LAT = 7.2186;
-const DEFAULT_LNG = 125.6208;
+import { isNearMabini, MABINI_CENTER, MABINI_LOCATION_LABEL } from '@/lib/mabini';
+
+const DEFAULT_LAT = MABINI_CENTER.lat;
+const DEFAULT_LNG = MABINI_CENTER.lng;
 const COORDINATE_PRECISION = 3;
 
 type OpenWeatherFetchOptions = RequestInit & {
@@ -699,6 +701,14 @@ export function parseWeatherCoordinates(searchParams: URLSearchParams) {
   };
 }
 
+function resolveWeatherLocationLabel(lat: number, lng: number, fallback: string | null) {
+  if (isNearMabini(lat, lng)) {
+    return MABINI_LOCATION_LABEL;
+  }
+
+  return fallback;
+}
+
 export function buildOpenWeatherForecastUrl(lat: number, lng: number, apiKey: string) {
   const roundedLat = roundCoordinate(lat);
   const roundedLng = roundCoordinate(lng);
@@ -856,7 +866,11 @@ async function fetchOpenWeatherFreeFieldResponseWeather(
     location: {
       lat: parseNumber(currentData.coord?.lat) ?? parseNumber(forecastData.city?.coord?.lat) ?? roundedLat,
       lng: parseNumber(currentData.coord?.lon) ?? parseNumber(forecastData.city?.coord?.lon) ?? roundedLng,
-      name: currentData.name || forecastData.city?.name || null,
+      name: resolveWeatherLocationLabel(
+        parseNumber(currentData.coord?.lat) ?? parseNumber(forecastData.city?.coord?.lat) ?? roundedLat,
+        parseNumber(currentData.coord?.lon) ?? parseNumber(forecastData.city?.coord?.lon) ?? roundedLng,
+        currentData.name || forecastData.city?.name || null,
+      ),
       rounded: roundedLat !== lat || roundedLng !== lng,
     },
     current,
@@ -962,7 +976,11 @@ export async function fetchOpenWeatherFieldResponseWeather(
     location: {
       lat: parseNumber(data.lat) ?? roundedLat,
       lng: parseNumber(data.lon) ?? roundedLng,
-      name: readableTimezone(data.timezone),
+      name: resolveWeatherLocationLabel(
+        parseNumber(data.lat) ?? roundedLat,
+        parseNumber(data.lon) ?? roundedLng,
+        readableTimezone(data.timezone),
+      ),
       rounded: roundedLat !== lat || roundedLng !== lng,
     },
     current,
@@ -980,4 +998,292 @@ export async function fetchOpenWeatherFieldResponseWeather(
     }
     throw error;
   }
+}
+
+// ── Tomorrow.io integration ───────────────────────────────────────────────────
+// More accurate for the Philippines: 1 km hyperlocal grid, minute-level rain
+// nowcasting, and better Southeast Asia typhoon/monsoon modeling.
+
+interface TomorrowIoValues {
+  temperature?: number;
+  temperatureApparent?: number;
+  dewPoint?: number;
+  humidity?: number;
+  windSpeed?: number;
+  windDirection?: number;
+  windGust?: number;
+  pressureSurfaceLevel?: number;
+  pressureSeaLevel?: number;
+  precipitationIntensity?: number;
+  precipitationProbability?: number;
+  precipitationType?: number;
+  rainAccumulation?: number;
+  sleetAccumulation?: number;
+  snowAccumulation?: number;
+  freezingRainAccumulation?: number;
+  cloudCover?: number;
+  cloudBase?: number;
+  cloudCeiling?: number;
+  visibility?: number;
+  uvIndex?: number;
+  weatherCode?: number;
+  thunderstormProbability?: number;
+}
+
+interface TomorrowIoInterval {
+  startTime: string;
+  values: TomorrowIoValues;
+}
+
+interface TomorrowIoTimeline {
+  timestep: string;
+  intervals: TomorrowIoInterval[];
+}
+
+interface TomorrowIoTimelineResponse {
+  data?: {
+    timelines?: TomorrowIoTimeline[];
+  };
+}
+
+const TOMORROW_WEATHER_CODE_LABELS: Record<number, string> = {
+  0: 'Unknown',
+  1000: 'Clear sky',
+  1001: 'Cloudy',
+  1100: 'Mostly clear',
+  1101: 'Partly cloudy',
+  1102: 'Mostly cloudy',
+  2000: 'Fog',
+  2100: 'Light fog',
+  3000: 'Light wind',
+  3001: 'Wind',
+  3002: 'Strong wind',
+  4000: 'Drizzle',
+  4001: 'Rain',
+  4200: 'Light rain',
+  4201: 'Heavy rain',
+  5000: 'Snow',
+  5001: 'Flurries',
+  5100: 'Light snow',
+  5101: 'Heavy snow',
+  6000: 'Freezing drizzle',
+  6001: 'Freezing rain',
+  6200: 'Light freezing rain',
+  6201: 'Heavy freezing rain',
+  7000: 'Ice pellets',
+  7101: 'Heavy ice pellets',
+  7102: 'Light ice pellets',
+  8000: 'Thunderstorm',
+};
+
+function tomorrowWeatherLabel(code: number | undefined): string {
+  if (code === undefined) return 'Weather update';
+  return TOMORROW_WEATHER_CODE_LABELS[code] ?? 'Weather update';
+}
+
+function tomorrowPrecipType(type: number | undefined): number | null {
+  // 0 = N/A, 1 = rain, 2 = snow, 3 = freezing rain, 4 = ice pellets
+  if (type === undefined || type === 0) return 0;
+  if (type === 1) return 1;
+  if (type === 2) return 2;
+  if (type === 3) return 3;
+  return 1;
+}
+
+export async function fetchTomorrowIoFieldResponseWeather(
+  lat: number,
+  lng: number,
+  apiKey: string,
+): Promise<FieldResponseWeatherPayload> {
+  const location = `${lat.toFixed(4)},${lng.toFixed(4)}`;
+
+  // Fetch realtime + hourly + daily timelines in one call
+  const url = new URL('https://api.tomorrow.io/v4/timelines');
+  url.searchParams.set('location', location);
+  url.searchParams.set('fields', [
+    'temperature',
+    'temperatureApparent',
+    'dewPoint',
+    'humidity',
+    'windSpeed',
+    'windDirection',
+    'windGust',
+    'pressureSurfaceLevel',
+    'precipitationIntensity',
+    'precipitationProbability',
+    'precipitationType',
+    'rainAccumulation',
+    'cloudCover',
+    'cloudBase',
+    'cloudCeiling',
+    'visibility',
+    'uvIndex',
+    'weatherCode',
+    'thunderstormProbability',
+  ].join(','));
+  url.searchParams.set('timesteps', '1m,1h,1d');
+  url.searchParams.set('units', 'metric');
+  url.searchParams.set('timezone', 'Asia/Manila');
+  url.searchParams.set('startTime', 'nowMinus6h');
+  url.searchParams.set('endTime', 'nowPlus5d');
+  url.searchParams.set('apikey', apiKey);
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 10000);
+
+  let data: TomorrowIoTimelineResponse;
+  try {
+    const response = await fetch(url.toString(), { signal: controller.signal });
+    clearTimeout(timeoutId);
+    if (!response.ok) {
+      const errText = await response.text().catch(() => '');
+      throw new Error(errText || `Tomorrow.io request failed with status ${response.status}.`);
+    }
+    data = (await response.json()) as TomorrowIoTimelineResponse;
+  } catch (error: unknown) {
+    clearTimeout(timeoutId);
+    if (error instanceof Error && error.name === 'AbortError') {
+      throw new Error('Tomorrow.io API request timed out.');
+    }
+    throw error;
+  }
+
+  const timelines = data.data?.timelines ?? [];
+  const minuteTimeline = timelines.find((t) => t.timestep === '1m');
+  const hourlyTimeline = timelines.find((t) => t.timestep === '1h');
+  const dailyTimeline = timelines.find((t) => t.timestep === '1d');
+
+  const nowInterval = minuteTimeline?.intervals?.[0] ?? hourlyTimeline?.intervals?.[0];
+  const nowValues = nowInterval?.values ?? {};
+  const hourlyIntervals = hourlyTimeline?.intervals ?? [];
+  const dailyIntervals = dailyTimeline?.intervals ?? [];
+
+  // Minutely precipitation peak (next 60 minutes)
+  const minutelyIntervals = minuteTimeline?.intervals?.slice(0, 60) ?? [];
+  const nextHourPrecipPeak = minutelyIntervals.length > 0
+    ? roundTo(Math.max(...minutelyIntervals.map((i) => i.values.precipitationIntensity ?? 0)), 2)
+    : null;
+
+  const precipType = tomorrowPrecipType(nowValues.precipitationType);
+  const weatherCode = typeof nowValues.weatherCode === 'number' ? nowValues.weatherCode : null;
+
+  const current = {
+    time: nowInterval?.startTime ?? new Date().toISOString(),
+    temperature: roundTo(parseNumber(nowValues.temperature), 1),
+    feelsLike: roundTo(parseNumber(nowValues.temperatureApparent), 1),
+    dewPoint: roundTo(parseNumber(nowValues.dewPoint), 1),
+    humidity: roundTo(parseNumber(nowValues.humidity), 0),
+    windSpeed: roundTo(parseNumber(nowValues.windSpeed), 1),
+    windDirection: roundTo(parseNumber(nowValues.windDirection), 0),
+    windDirectionCardinal: toCardinal(parseNumber(nowValues.windDirection)),
+    windGust: roundTo(parseNumber(nowValues.windGust), 1),
+    pressureSurfaceLevel: roundTo(parseNumber(nowValues.pressureSurfaceLevel), 0),
+    pressureSeaLevel: null,
+    rainChance: roundTo(parseNumber(nowValues.precipitationProbability), 0),
+    rainIntensity: roundTo(parseNumber(nowValues.precipitationIntensity), 2),
+    nextHourPrecipitationPeak: nextHourPrecipPeak,
+    precipitationType: precipType,
+    precipitationLabel: precipitationLabel(precipType),
+    visibility: roundTo(parseNumber(nowValues.visibility), 1),
+    cloudCover: roundTo(parseNumber(nowValues.cloudCover), 0),
+    cloudBase: roundTo(parseNumber(nowValues.cloudBase), 1),
+    cloudCeiling: roundTo(parseNumber(nowValues.cloudCeiling), 1),
+    uvIndex: roundTo(parseNumber(nowValues.uvIndex), 0),
+    weatherCode,
+    weatherLabel: tomorrowWeatherLabel(weatherCode ?? undefined),
+    thunderstormProbability: roundTo(parseNumber(nowValues.thunderstormProbability), 0),
+    heatStressIndex: null,
+  };
+
+  // Hourly (next 8 hours)
+  const hourly: FieldResponseWeatherHour[] = hourlyIntervals.slice(0, 8).map((interval) => {
+    const v = interval.values;
+    const wCode = typeof v.weatherCode === 'number' ? v.weatherCode : null;
+    const wDir = roundTo(parseNumber(v.windDirection), 0);
+    return {
+      time: interval.startTime,
+      temperature: roundTo(parseNumber(v.temperature), 1),
+      feelsLike: roundTo(parseNumber(v.temperatureApparent), 1),
+      rainChance: roundTo(parseNumber(v.precipitationProbability), 0),
+      rainIntensity: roundTo(parseNumber(v.precipitationIntensity), 2),
+      weatherCode: wCode,
+      weatherLabel: tomorrowWeatherLabel(wCode ?? undefined),
+      windSpeed: roundTo(parseNumber(v.windSpeed), 1),
+      windDirection: wDir,
+      windDirectionCardinal: toCardinal(wDir),
+      windGust: roundTo(parseNumber(v.windGust), 1),
+      visibility: roundTo(parseNumber(v.visibility), 1),
+      humidity: roundTo(parseNumber(v.humidity), 0),
+      cloudCover: roundTo(parseNumber(v.cloudCover), 0),
+      pressureSeaLevel: roundTo(parseNumber(v.pressureSurfaceLevel), 0),
+    };
+  });
+
+  // Daily outlook (next 3 days)
+  const dailyOutlook: FieldResponseWeatherDaily[] = dailyIntervals.slice(0, 3).map((interval, index) => {
+    const v = interval.values;
+    const wCode = typeof v.weatherCode === 'number' ? v.weatherCode : null;
+    return {
+      time: interval.startTime,
+      label: index === 0 ? 'Today' : index === 1 ? 'Tomorrow' : new Intl.DateTimeFormat('en-PH', { weekday: 'short' }).format(new Date(interval.startTime)),
+      summary: tomorrowWeatherLabel(wCode ?? undefined),
+      high: roundTo(parseNumber(v.temperature), 1),
+      low: roundTo(parseNumber(v.temperature), 1),
+      dayTemperature: roundTo(parseNumber(v.temperature), 1),
+      rainChance: roundTo(parseNumber(v.precipitationProbability), 0),
+      windSpeed: roundTo(parseNumber(v.windSpeed), 1),
+      humidity: roundTo(parseNumber(v.humidity), 0),
+    };
+  });
+
+  const derivedAlerts = buildDerivedAlerts(current);
+
+  return {
+    source: 'openweather',
+    provider: {
+      mode: 'onecall',
+      label: 'Tomorrow.io hyperlocal forecast (1 km grid · Asia/Manila timezone)',
+      cadenceMinutes: 5,
+    },
+    generatedAt: new Date().toISOString(),
+    location: {
+      lat,
+      lng,
+      name: resolveWeatherLocationLabel(lat, lng, null),
+      rounded: false,
+    },
+    current,
+    today: {
+      high: roundTo(parseNumber(dailyIntervals[0]?.values?.temperature), 1),
+      low: roundTo(parseNumber(dailyIntervals[0]?.values?.temperature), 1),
+      sunrise: null,
+      sunset: null,
+    },
+    hourly,
+    next24Hours: hourlyIntervals.slice(0, 24).map((interval) => {
+      const v = interval.values;
+      const wCode = typeof v.weatherCode === 'number' ? v.weatherCode : null;
+      const wDir = roundTo(parseNumber(v.windDirection), 0);
+      return {
+        time: interval.startTime,
+        temperature: roundTo(parseNumber(v.temperature), 1),
+        feelsLike: roundTo(parseNumber(v.temperatureApparent), 1),
+        rainChance: roundTo(parseNumber(v.precipitationProbability), 0),
+        rainIntensity: roundTo(parseNumber(v.precipitationIntensity), 2),
+        weatherCode: wCode,
+        weatherLabel: tomorrowWeatherLabel(wCode ?? undefined),
+        windSpeed: roundTo(parseNumber(v.windSpeed), 1),
+        windDirection: wDir,
+        windDirectionCardinal: toCardinal(wDir),
+        windGust: roundTo(parseNumber(v.windGust), 1),
+        visibility: roundTo(parseNumber(v.visibility), 1),
+        humidity: roundTo(parseNumber(v.humidity), 0),
+        cloudCover: roundTo(parseNumber(v.cloudCover), 0),
+        pressureSeaLevel: roundTo(parseNumber(v.pressureSurfaceLevel), 0),
+      };
+    }),
+    dailyOutlook,
+    alerts: derivedAlerts,
+    summary: buildSummary(current),
+  };
 }

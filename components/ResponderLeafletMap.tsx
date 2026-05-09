@@ -8,6 +8,7 @@ import {
   HOUSEHOLD_PIN_COLOR,
   hasHouseholdPin,
 } from '@/lib/map-pins';
+import { MABINI_BOUNDARY_PATHS, MABINI_MAP_BOUNDS, MABINI_MEDICAL_FACILITIES } from '@/lib/mabini';
 import ResponderWindFieldOverlay from '@/components/ResponderWindFieldOverlay';
 import type { OpenWeatherTileLayerId } from '@/lib/openweather-map-layers';
 import {
@@ -57,6 +58,7 @@ interface LeafletTileLayer extends LeafletLayer {
 }
 
 interface LeafletMarker extends LeafletLayer {
+  bindTooltip(content: string, options?: Record<string, unknown>): this;
   on(event: string, handler: (event: { latlng?: { lat: number; lng: number } }) => void): this;
 }
 
@@ -126,6 +128,7 @@ interface LeafletRuntime {
   latLngBounds(points: [number, number][]): unknown;
   map(element: HTMLElement, options?: Record<string, unknown>): LeafletMap;
   marker(latlng: [number, number], options?: Record<string, unknown>): LeafletMarker;
+  polygon(latlngs: unknown, options?: Record<string, unknown>): LeafletLayer;
   tileLayer(urlTemplate: string, options?: Record<string, unknown>): LeafletTileLayer;
 }
 
@@ -640,8 +643,10 @@ export default function ResponderLeafletMap({
   const selectedHouseholdControlledRef = useRef(selectedHousehold !== undefined);
   const selectedIncidentControlledRef = useRef(selectedIncident !== undefined);
   const zoneLayerRef = useRef<LeafletLayerGroup | null>(null);
+  const boundaryLayerRef = useRef<LeafletLayerGroup | null>(null);
   const householdLayerRef = useRef<LeafletLayerGroup | null>(null);
   const incidentLayerRef = useRef<LeafletLayerGroup | null>(null);
+  const facilityLayerRef = useRef<LeafletLayerGroup | null>(null);
   const baseTileRefs = useRef<Partial<Record<ResponderBaseMapLayerId, LeafletTileLayer>>>({});
   const weatherTileRefs = useRef<Partial<Record<OpenWeatherTileLayerId, LeafletTileLayer>>>({});
   const activeBaseLayerRef = useRef<{
@@ -728,8 +733,10 @@ export default function ResponderLeafletMap({
     map.setView([DEFAULT_BARANGAY_CENTER.lat, DEFAULT_BARANGAY_CENTER.lng], 14);
 
     zoneLayerRef.current = runtime.layerGroup().addTo(map);
+    boundaryLayerRef.current = runtime.layerGroup().addTo(map);
     householdLayerRef.current = runtime.layerGroup().addTo(map);
     incidentLayerRef.current = runtime.layerGroup().addTo(map);
+    facilityLayerRef.current = runtime.layerGroup().addTo(map);
 
     Object.keys(WEATHER_LAYER_Z_INDEX).forEach((layerId) => {
       const paneName = getWeatherPaneName(layerId as OpenWeatherTileLayerId);
@@ -805,8 +812,10 @@ export default function ResponderLeafletMap({
       map.remove();
       mapRef.current = null;
       zoneLayerRef.current = null;
+      boundaryLayerRef.current = null;
       householdLayerRef.current = null;
       incidentLayerRef.current = null;
+      facilityLayerRef.current = null;
       baseTileRefs.current = {};
       weatherTileRefs.current = {};
       activeBaseLayerRef.current = null;
@@ -954,7 +963,13 @@ export default function ResponderLeafletMap({
         : zoneFocusPoints;
 
     if (preferredFocusPoints.length === 0) {
-      map.setView([DEFAULT_BARANGAY_CENTER.lat, DEFAULT_BARANGAY_CENTER.lng], 14);
+      map.fitBounds(
+        runtime.latLngBounds([
+          [MABINI_MAP_BOUNDS.south, MABINI_MAP_BOUNDS.west],
+          [MABINI_MAP_BOUNDS.north, MABINI_MAP_BOUNDS.east],
+        ]),
+        { padding: [28, 28], maxZoom: 13 },
+      );
       queueMapRefresh(map);
       return;
     }
@@ -974,11 +989,28 @@ export default function ResponderLeafletMap({
 
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !runtime || !zoneLayerRef.current || !householdLayerRef.current || !incidentLayerRef.current) return;
+    if (!map || !runtime || !zoneLayerRef.current || !boundaryLayerRef.current || !householdLayerRef.current || !incidentLayerRef.current || !facilityLayerRef.current) return;
 
     zoneLayerRef.current.clearLayers();
+    boundaryLayerRef.current.clearLayers();
     householdLayerRef.current.clearLayers();
     incidentLayerRef.current.clearLayers();
+    facilityLayerRef.current.clearLayers();
+
+    MABINI_BOUNDARY_PATHS.forEach((path) => {
+      const boundary = runtime.polygon(
+        path.map((point) => [point.lat, point.lng]),
+        {
+          color: '#ef4444',
+          weight: 3,
+          opacity: 0.95,
+          fill: false,
+          interactive: false,
+        },
+      );
+
+      boundaryLayerRef.current?.addLayer(boundary);
+    });
 
     zoneMarkers.forEach((marker) => {
       const zoneMarker = runtime.marker([marker.lat, marker.lng], {
@@ -1039,6 +1071,33 @@ export default function ResponderLeafletMap({
       });
 
       incidentLayerRef.current?.addLayer(marker);
+    });
+
+    MABINI_MEDICAL_FACILITIES.forEach((facility) => {
+      const kindLabel = facility.kind === 'hospital'
+        ? 'Hospital'
+        : facility.kind === 'infirmary'
+          ? 'Infirmary'
+          : 'Rural Health Unit';
+      const marker = runtime.marker([facility.lat, facility.lng], {
+        title: `${facility.name} (${kindLabel})`,
+        icon: runtime.divIcon({
+          className: 'responder-marker responder-facility-marker',
+          html: `
+            <div style="width:20px;height:20px;border-radius:999px;background:#ecfeff;border:3px solid #0f766e;display:flex;align-items:center;justify-content:center;box-shadow:0 10px 22px rgba(15,23,42,0.18);color:#0f766e;font-size:11px;font-weight:900;">+</div>
+          `,
+          iconSize: [20, 20],
+          iconAnchor: [10, 10],
+        }),
+      });
+
+      marker.bindTooltip(`${facility.name}<br/>${kindLabel} · ${facility.barangay}`, {
+        direction: 'top',
+        offset: [0, -10],
+        opacity: 0.96,
+      });
+
+      facilityLayerRef.current?.addLayer(marker);
     });
 
     map.closePopup();

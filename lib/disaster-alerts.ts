@@ -1,9 +1,11 @@
 import type {
+  DisasterAlert,
   DisasterAlertNotificationPayload,
   DisasterAlertSeverity,
   DisasterAlertTriggerSource,
   DisasterRiskLevel,
   HazardType,
+  PurokRiskProfile,
   PurokFloodControlStatus,
   UserNotification,
 } from '@/lib/db/schema';
@@ -75,6 +77,38 @@ export function parseHazardTags(value: unknown): HazardType[] {
   return Array.from(new Set(
     value.filter((entry): entry is HazardType => isHazardType(entry)),
   ));
+}
+
+export function buildDisasterAlertNotificationPayloadFromAlert(input: {
+  alert: DisasterAlert;
+  purokRiskProfile?: Pick<
+    PurokRiskProfile,
+    'flood_control_status' | 'flood_control_notes' | 'default_evacuation_site' | 'warning_notes'
+  > | null;
+}): DisasterAlertNotificationPayload {
+  const { alert, purokRiskProfile } = input;
+
+  return {
+    alert_id: alert.id,
+    rule_id: alert.rule_id,
+    municipality: alert.municipality,
+    barangay_id: alert.barangay_id,
+    purok_sitio: alert.purok_sitio,
+    hazard: alert.hazard,
+    severity: alert.severity,
+    title: alert.title,
+    message: alert.message,
+    trigger_source: alert.trigger_source,
+    trigger_reason: alert.trigger_reason,
+    weather_summary: alert.weather_snapshot?.summary ?? undefined,
+    evacuation_site: alert.evacuation_site,
+    special_assistance_notes: alert.special_assistance_notes,
+    flood_control_status: purokRiskProfile?.flood_control_status,
+    flood_control_notes: purokRiskProfile?.flood_control_notes,
+    default_evacuation_site: purokRiskProfile?.default_evacuation_site,
+    warning_notes: purokRiskProfile?.warning_notes,
+    issued_at: alert.issued_at.toISOString(),
+  };
 }
 
 export function getBarangayLabelForAlert(barangayId?: string | null) {

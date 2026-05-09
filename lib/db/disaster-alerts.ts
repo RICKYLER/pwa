@@ -88,6 +88,16 @@ export async function updateDisasterAlertRule(
   return payload.rule;
 }
 
+export async function deleteDisasterAlertRule(ruleId: string) {
+  const payload = await runServerMutation<{ ok: boolean; deleted_id: string }>({
+    action: 'delete_disaster_alert_rule',
+    ruleId,
+  });
+
+  await bootstrapCurrentPathData(true);
+  return payload;
+}
+
 export async function runDisasterAlertEvaluationNow() {
   const response = await fetch('/api/disaster-alerts/evaluate', {
     method: 'POST',

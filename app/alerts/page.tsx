@@ -12,6 +12,7 @@ import {
   RefreshCw,
   Save,
   ShieldAlert,
+  Trash2,
   Wind,
 } from 'lucide-react';
 import {
@@ -39,6 +40,7 @@ import {
 import { getHouseholds } from '@/lib/db/households';
 import {
   createDisasterAlertRule,
+  deleteDisasterAlertRule,
   getDisasterAlertRules,
   getDisasterAlerts,
   runDisasterAlertEvaluationNow,
@@ -219,6 +221,8 @@ export default function AlertsPage() {
   const [isSavingRule, setIsSavingRule] = useState(false);
   const [isRunningEvaluation, setIsRunningEvaluation] = useState(false);
   const [markingNotificationId, setMarkingNotificationId] = useState<string | null>(null);
+  const [confirmDeleteRule, setConfirmDeleteRule] = useState<DisasterAlertRule | null>(null);
+  const [isDeletingRule, setIsDeletingRule] = useState(false);
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const [purokOptions, setPurokOptions] = useState<string[]>([]);
   const [lastRunSummary, setLastRunSummary] = useState<{
@@ -512,6 +516,27 @@ export default function AlertsPage() {
     }
   }
 
+  async function handleDeleteRule(rule: DisasterAlertRule) {
+    try {
+      setIsDeletingRule(true);
+      setFeedback(null);
+      await deleteDisasterAlertRule(rule.id);
+      setConfirmDeleteRule(null);
+      if (editingRuleId === rule.id) {
+        resetRuleForm();
+      }
+      setFeedback({ type: 'success', message: 'Alert rule deleted.' });
+      await refreshData();
+    } catch (error) {
+      setFeedback({
+        type: 'error',
+        message: error instanceof Error ? error.message : 'Failed to delete the alert rule.',
+      });
+    } finally {
+      setIsDeletingRule(false);
+    }
+  }
+
   if (!user || !['admin', 'responder'].includes(user.role)) {
     return null;
   }
@@ -585,68 +610,83 @@ export default function AlertsPage() {
               ) : null}
 
               <form onSubmit={handleRuleSubmit} className="mt-6 space-y-5">
-                <div className="grid gap-4 md:grid-cols-2">
-                  <div>
-                    <label className="mb-2 block text-sm font-medium text-slate-700">Municipality</label>
-                    <input
-                      value={MABINI_MUNICIPALITY}
-                      readOnly
-                      className="h-11 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 text-sm text-slate-600"
-                    />
-                  </div>
 
-                  <div>
-                    <label className="mb-2 block text-sm font-medium text-slate-700">Barangay</label>
-                    <select
-                      value={ruleForm.barangay_id}
-                      onChange={(event) => setRuleForm((current) => ({ ...current, barangay_id: event.target.value }))}
-                      className="h-11 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm text-slate-700 outline-none focus:border-cyan-900"
-                    >
-                      {BARANGAY_OPTIONS.map((barangay) => (
-                        <option key={barangay.id} value={barangay.id}>{barangay.label}</option>
-                      ))}
-                    </select>
-                  </div>
+                {/* Section 1: Where? */}
+                <div className="rounded-[22px] border border-slate-200 bg-slate-50 p-4">
+                  <p className="mb-3 text-xs font-bold uppercase tracking-[0.14em] text-slate-500">① Where?</p>
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <div>
+                      <label className="mb-2 block text-sm font-medium text-slate-700">Municipality</label>
+                      <input
+                        value={MABINI_MUNICIPALITY}
+                        readOnly
+                        className="h-11 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm text-slate-400"
+                      />
+                    </div>
 
-                  <div>
-                    <label className="mb-2 block text-sm font-medium text-slate-700">Purok / Sitio</label>
-                    <input
-                      list="alert-rule-purok-options"
-                      value={ruleForm.purok_sitio}
-                      onChange={(event) => setRuleForm((current) => ({ ...current, purok_sitio: event.target.value }))}
-                      className="h-11 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm text-slate-700 outline-none focus:border-cyan-900"
-                      placeholder="Optional scoped purok"
-                    />
-                    <datalist id="alert-rule-purok-options">
-                      {purokOptions.map((purok) => (
-                        <option key={purok} value={purok} />
-                      ))}
-                    </datalist>
-                  </div>
+                    <div>
+                      <label className="mb-2 block text-sm font-medium text-slate-700">Barangay</label>
+                      <select
+                        value={ruleForm.barangay_id}
+                        onChange={(event) => setRuleForm((current) => ({ ...current, barangay_id: event.target.value }))}
+                        className="h-11 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm text-slate-700 outline-none focus:border-cyan-900"
+                      >
+                        {BARANGAY_OPTIONS.map((barangay) => (
+                          <option key={barangay.id} value={barangay.id}>{barangay.label}</option>
+                        ))}
+                      </select>
+                    </div>
 
-                  <div>
-                    <label className="mb-2 block text-sm font-medium text-slate-700">Hazard</label>
-                    <select
-                      value={ruleForm.hazard}
-                      onChange={(event) => setRuleForm((current) => ({ ...current, hazard: event.target.value as HazardType }))}
-                      className="h-11 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm text-slate-700 outline-none focus:border-cyan-900"
-                    >
-                      {AUTOMATIC_RULE_HAZARDS.map((hazard) => (
-                        <option key={hazard} value={hazard}>{HAZARD_LABELS[hazard]}</option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div className="md:col-span-2">
-                    <label className="mb-2 block text-sm font-medium text-slate-700">Official alert keywords</label>
-                    <input
-                      value={ruleForm.official_keywords}
-                      onChange={(event) => setRuleForm((current) => ({ ...current, official_keywords: event.target.value }))}
-                      className="h-11 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm text-slate-700 outline-none focus:border-cyan-900"
-                      placeholder="Comma-separated keywords, e.g. flood, heavy rain, gale"
-                    />
+                    <div className="md:col-span-2">
+                      <label className="mb-2 block text-sm font-medium text-slate-700">Purok / Sitio <span className="font-normal text-slate-400">(optional)</span></label>
+                      <input
+                        list="alert-rule-purok-options"
+                        value={ruleForm.purok_sitio}
+                        onChange={(event) => setRuleForm((current) => ({ ...current, purok_sitio: event.target.value }))}
+                        className="h-11 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm text-slate-700 outline-none focus:border-cyan-900"
+                        placeholder="Leave blank to cover the whole barangay"
+                      />
+                      <datalist id="alert-rule-purok-options">
+                        {purokOptions.map((purok) => (
+                          <option key={purok} value={purok} />
+                        ))}
+                      </datalist>
+                    </div>
                   </div>
                 </div>
+
+                {/* Section 2: Hazard type */}
+                <div className="rounded-[22px] border border-slate-200 bg-slate-50 p-4">
+                  <p className="mb-3 text-xs font-bold uppercase tracking-[0.14em] text-slate-500">② Hazard Type</p>
+                  <div className="flex flex-wrap gap-2">
+                    {AUTOMATIC_RULE_HAZARDS.map((hazard) => (
+                      <button
+                        key={hazard}
+                        type="button"
+                        onClick={() => setRuleForm((current) => ({ ...current, hazard }))}
+                        className={`inline-flex h-10 items-center justify-center rounded-full border px-4 text-sm font-semibold transition ${
+                          ruleForm.hazard === hazard
+                            ? 'border-cyan-900 bg-cyan-950 text-white'
+                            : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300'
+                        }`}
+                      >
+                        {HAZARD_LABELS[hazard]}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Section 3: Keywords */}
+                <div className="rounded-[22px] border border-slate-200 bg-slate-50 p-4">
+                  <p className="mb-3 text-xs font-bold uppercase tracking-[0.14em] text-slate-500">③ Official Alert Keywords <span className="font-normal normal-case text-slate-400">(optional)</span></p>
+                  <input
+                    value={ruleForm.official_keywords}
+                    onChange={(event) => setRuleForm((current) => ({ ...current, official_keywords: event.target.value }))}
+                    className="h-11 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm text-slate-700 outline-none focus:border-cyan-900"
+                    placeholder="e.g. flood, heavy rain, gale — separate with commas"
+                  />
+                </div>
+
 
                 <div className="rounded-[24px] border border-cyan-200 bg-cyan-50 p-4">
                   <div className="flex flex-wrap items-start justify-between gap-3">
@@ -863,41 +903,61 @@ export default function AlertsPage() {
               ) : rules.length > 0 ? (
                 <div className="mt-6 space-y-3">
                   {rules.map((rule) => (
-                    <button
+                    <div
                       key={rule.id}
-                      type="button"
-                      onClick={() => {
-                        setEditingRuleId(rule.id);
-                        setRuleForm(mapRuleToForm(rule));
-                        setFeedback(null);
-                      }}
-                      className={`w-full rounded-[24px] border px-4 py-4 text-left transition ${
+                      className={`rounded-[24px] border px-4 py-4 transition ${
                         editingRuleId === rule.id
                           ? 'border-cyan-300 bg-cyan-50'
-                          : 'border-slate-200 bg-white hover:border-slate-300'
+                          : 'border-slate-200 bg-white'
                       }`}
                     >
+                      {/* Top row: hazard + status badges */}
                       <div className="flex flex-wrap items-center gap-2">
-                        <p className="text-sm font-semibold text-slate-900">
-                          {HAZARD_LABELS[rule.hazard]} · {BARANGAY_OPTIONS.find((barangay) => barangay.id === rule.barangay_id)?.label ?? rule.barangay_id}
-                          {rule.purok_sitio ? ` · ${rule.purok_sitio}` : ''}
-                        </p>
+                        <CivicBadge label={HAZARD_LABELS[rule.hazard]} tone="teal" />
                         <CivicBadge label={rule.enabled ? 'Enabled' : 'Disabled'} tone={rule.enabled ? 'emerald' : 'slate'} />
                         <CivicBadge label={rule.notify_responders ? 'Responder copy on' : 'Responder copy off'} tone={rule.notify_responders ? 'amber' : 'slate'} />
                       </div>
-                      <p className="mt-2 text-xs text-slate-500">
-                        Trigger point {rule.trigger_lat.toFixed(5)}, {rule.trigger_lng.toFixed(5)} · Cooldown {rule.cooldown_minutes} minutes
+
+                      {/* Location */}
+                      <p className="mt-2 text-sm font-semibold text-slate-900">
+                        {BARANGAY_OPTIONS.find((b) => b.id === rule.barangay_id)?.label ?? rule.barangay_id}
+                        {rule.purok_sitio ? (
+                          <span className="font-normal text-slate-500"> · {rule.purok_sitio}</span>
+                        ) : null}
                       </p>
+
+                      {/* Meta info */}
+                      <p className="mt-1 text-xs text-slate-400">
+                        Cooldown {rule.cooldown_minutes} min · Last triggered {rule.last_triggered_at ? formatDateTime(rule.last_triggered_at) : 'Never'}
+                      </p>
+
+                      {/* Action buttons */}
                       <div className="mt-3 flex flex-wrap gap-2">
-                        <CivicBadge label="Automatic field response feed" tone="teal" />
-                        {buildAutomaticThresholdLabels(rule.hazard).map((label) => (
-                          <CivicBadge key={`${rule.id}-${label}`} label={label} tone="slate" />
-                        ))}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditingRuleId(rule.id);
+                            setRuleForm(mapRuleToForm(rule));
+                            setFeedback(null);
+                          }}
+                          className={`inline-flex h-9 items-center justify-center gap-1.5 rounded-full border px-3 text-xs font-semibold transition ${
+                            editingRuleId === rule.id
+                              ? 'border-cyan-300 bg-cyan-100 text-cyan-900'
+                              : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                          }`}
+                        >
+                          {editingRuleId === rule.id ? '✓ Editing' : 'Edit'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setConfirmDeleteRule(rule)}
+                          className="inline-flex h-9 items-center justify-center gap-1.5 rounded-full border border-rose-200 bg-white px-3 text-xs font-semibold text-rose-600 hover:bg-rose-50 transition"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                          Delete
+                        </button>
                       </div>
-                      <p className="mt-2 text-xs text-slate-500">
-                        Last triggered {rule.last_triggered_at ? formatDateTime(rule.last_triggered_at) : 'Never'}
-                      </p>
-                    </button>
+                    </div>
                   ))}
                 </div>
               ) : (
@@ -910,6 +970,7 @@ export default function AlertsPage() {
                 </div>
               )}
             </CivicPanel>
+
           </div>
         ) : null}
 
@@ -1077,6 +1138,42 @@ export default function AlertsPage() {
         </CivicPanel>
 
       </CivicPage>
+
+      {/* Delete confirmation dialog */}
+      <Dialog open={confirmDeleteRule !== null} onOpenChange={(open) => { if (!open) setConfirmDeleteRule(null); }}>
+        <DialogContent>
+          <DialogTitle>Delete alert rule?</DialogTitle>
+          <DialogDescription>
+            {confirmDeleteRule ? (
+              <>
+                This will permanently delete the <strong>{HAZARD_LABELS[confirmDeleteRule.hazard]}</strong> rule for{' '}
+                <strong>{BARANGAY_OPTIONS.find((b) => b.id === confirmDeleteRule.barangay_id)?.label ?? confirmDeleteRule.barangay_id}</strong>
+                {confirmDeleteRule.purok_sitio ? ` · ${confirmDeleteRule.purok_sitio}` : ''}.
+                It will no longer be evaluated. Past alert history will be kept.
+              </>
+            ) : null}
+          </DialogDescription>
+          <DialogFooter>
+            <button
+              type="button"
+              onClick={() => setConfirmDeleteRule(null)}
+              disabled={isDeletingRule}
+              className="inline-flex h-10 items-center justify-center rounded-full border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 hover:bg-slate-100 disabled:opacity-60"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={() => { if (confirmDeleteRule) void handleDeleteRule(confirmDeleteRule); }}
+              disabled={isDeletingRule}
+              className="inline-flex h-10 items-center justify-center gap-2 rounded-full bg-rose-600 px-4 text-sm font-semibold text-white hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {isDeletingRule ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+              {isDeletingRule ? 'Deleting...' : 'Delete rule'}
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </AppShell>
   );
 }

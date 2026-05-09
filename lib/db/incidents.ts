@@ -59,7 +59,7 @@ const DEMO_INCIDENT_SEEDS: DemoIncidentSeed[] = [
         severity: 'high',
         status: 'verified',
         minutesAgo: 45,
-        description: 'Elderly resident with chest pain. Family unable to transport to hospital.',
+        description: 'Elderly resident with chest pain. Family requests transport to Mabini Health Infirmary.',
     },
     {
         id: 'demo_incident_fire_barangay_hall',
@@ -78,7 +78,7 @@ const DEMO_INCIDENT_SEEDS: DemoIncidentSeed[] = [
         severity: 'medium',
         status: 'verified',
         minutesAgo: 180,
-        description: 'Pre-emptive evacuation advisory. 8 families in low-lying areas.',
+        description: 'Pre-emptive typhoon evacuation advisory for low-lying coastal households in Mabini.',
     },
     {
         id: 'demo_incident_power_outage_central',
@@ -92,18 +92,58 @@ const DEMO_INCIDENT_SEEDS: DemoIncidentSeed[] = [
 ];
 
 const ACTIVE_DEMO_INCIDENT_SEEDS = DEMO_INCIDENT_SEEDS.filter((seed) => !seed.archived);
-const DEMO_INCIDENT_SEEDING_ENABLED = process.env.NEXT_PUBLIC_ENABLE_RESPONDER_DEMO_INCIDENTS === 'true';
+const DEMO_INCIDENT_SEEDING_ENABLED = false;
+
+const DEMO_INCIDENT_DESCRIPTION_VARIANTS: Record<string, string[]> = {
+    demo_incident_flood_purok_3: [
+        'Floodwater rising — 12 families need immediate evacuation. Road impassable.',
+    ],
+    demo_incident_medical_zone_a: [
+        'Elderly resident with chest pain. Family unable to transport to hospital.',
+        'Elderly resident with chest pain. Family requests transport to Mabini Health Infirmary.',
+    ],
+    demo_incident_fire_barangay_hall: [
+        'Cooking fire spread to adjacent structure. BFP en-route. 3 families displaced.',
+    ],
+    demo_incident_typhoon_coastal: [
+        'Pre-emptive evacuation advisory. 8 families in low-lying areas.',
+        'Pre-emptive typhoon evacuation advisory for low-lying coastal households in Mabini.',
+    ],
+    demo_incident_power_outage_central: [
+        'Power outage affecting 22 households. VECO notified — ETA 2 hours.',
+    ],
+};
+
+function normalizeIncidentText(value: string) {
+    return value.trim().toLowerCase().replace(/\s+/g, ' ');
+}
 
 function resolveIncidentCoordinates(location: string) {
     return DEMO_INCIDENT_COORDINATES[location] ?? null;
 }
 
-function resolveDemoSeed(incident: Pick<Incident, 'type' | 'location' | 'description'>) {
+type DemoIncidentSeedMatch = Pick<Incident, 'id' | 'type' | 'location' | 'description'>;
+
+function resolveDemoSeed(incident: DemoIncidentSeedMatch) {
+    const directSeed = DEMO_INCIDENT_SEEDS.find((seed) => seed.id === incident.id);
+    if (directSeed) {
+        return directSeed;
+    }
+
+    const normalizedLocation = normalizeIncidentText(incident.location);
+    const normalizedDescription = normalizeIncidentText(incident.description);
+
     return DEMO_INCIDENT_SEEDS.find((seed) => (
         seed.type === incident.type
-        && seed.location === incident.location
-        && seed.description === incident.description
+        && normalizeIncidentText(seed.location) === normalizedLocation
+        && (DEMO_INCIDENT_DESCRIPTION_VARIANTS[seed.id] ?? [seed.description])
+            .map(normalizeIncidentText)
+            .includes(normalizedDescription)
     )) ?? null;
+}
+
+export function isKnownDemoIncident(incident: DemoIncidentSeedMatch) {
+    return Boolean(resolveDemoSeed(incident));
 }
 
 function choosePreferredDuplicateIncident(current: Incident, candidate: Incident) {
@@ -128,6 +168,10 @@ function collapseDemoIncidents(incidents: Incident[]) {
 
         if (!demoSeed) {
             liveIncidents.push(incident);
+            return;
+        }
+
+        if (!DEMO_INCIDENT_SEEDING_ENABLED) {
             return;
         }
 
@@ -175,8 +219,19 @@ export async function getIncidents(filters?: {
     status?: IncidentStatus;
 }): Promise<Incident[]> {
     try {
+        const storedIncidents = await db.getAll<Incident>(STORE_NAMES.incidents);
+        const knownDemoIncidentIds = storedIncidents
+            .filter((incident) => isKnownDemoIncident(incident))
+            .map((incident) => incident.id);
+
+        await Promise.all(
+            knownDemoIncidentIds.map((incidentId) => db.deleteSilently(STORE_NAMES.incidents, incidentId)),
+        );
+
         const all = collapseDemoIncidents(
-            (await db.getAll<Incident>(STORE_NAMES.incidents)).map(withResolvedIncidentCoordinates),
+            storedIncidents
+                .filter((incident) => !knownDemoIncidentIds.includes(incident.id))
+                .map(withResolvedIncidentCoordinates),
         );
         let result = all;
         if (filters?.status) result = result.filter(i => i.status === filters.status);
@@ -197,7 +252,16 @@ export async function getIncidents(filters?: {
 export async function getIncident(id: string): Promise<Incident | undefined> {
     try {
         const incident = await db.get<Incident>(STORE_NAMES.incidents, id);
-        return incident ? withResolvedIncidentCoordinates(incident) : undefined;
+        if (!incident) {
+            return undefined;
+        }
+
+        if (isKnownDemoIncident(incident)) {
+            await db.deleteSilently(STORE_NAMES.incidents, incident.id);
+            return undefined;
+        }
+
+        return withResolvedIncidentCoordinates(incident);
     } catch (error) {
         console.error('Error fetching incident:', error);
         throw error;
@@ -272,10 +336,10 @@ export async function updateIncidentStatus(
 }
 
 /**
- * Seed a few demo incidents so the Responder view always has data to show
+ * Demo incident seeding is retired for this real-time deployment.
  */
 export async function seedDemoIncidents(reporterId: string): Promise<void> {
-    // Keep demo seeding opt-in so opening `/responder` never mutates live deployments.
+    void reporterId;
     if (!DEMO_INCIDENT_SEEDING_ENABLED) {
         return;
     }
