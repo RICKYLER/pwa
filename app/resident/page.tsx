@@ -13,7 +13,11 @@ import { getDisasterAlertRules } from '@/lib/db/disaster-alerts';
 import { getUserNotifications } from '@/lib/db/user-notifications';
 import type { DisasterAlertRule, DistributionStatus, Household, PurokRiskProfile, UserNotification } from '@/lib/db/schema';
 import { buildRegistrationTimeline, formatRegistrationStatusLabel, getHouseholdRegistrationStatus } from '@/lib/household-registration';
-import { PUROK_FLOOD_CONTROL_STATUS_LABELS } from '@/lib/purok-risk-profiles';
+import {
+  matchesHouseholdAlertScope,
+  mergePurokRiskProfileWithAlertFallback,
+  PUROK_FLOOD_CONTROL_STATUS_LABELS,
+} from '@/lib/purok-risk-profiles';
 import { fetchJsonWithCache } from '@/lib/client-fetch-cache';
 import type { FieldResponseWeatherPayload } from '@/lib/weather';
 import WeatherWidget from '@/components/WeatherWidget';
@@ -143,8 +147,37 @@ export default function ResidentPortalPage() {
   const activeRule = useMemo(() => {
     return alertRules
       .filter((rule) => rule.enabled && (!activeHousehold || rule.barangay_id === activeHousehold.barangay_id))
-      .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())[0] ?? null;
+      .sort((left, right) => {
+        const leftExact = activeHousehold && left.purok_sitio && matchesHouseholdAlertScope(activeHousehold, left) ? 1 : 0;
+        const rightExact = activeHousehold && right.purok_sitio && matchesHouseholdAlertScope(activeHousehold, right) ? 1 : 0;
+        return rightExact - leftExact || new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime();
+      })[0] ?? null;
   }, [alertRules, activeHousehold]);
+
+  const latestHouseholdAlert = useMemo(() => {
+    if (!activeHousehold) {
+      return null;
+    }
+
+    return notifications
+      .map((notification) => parseDisasterAlertNotification(notification))
+      .filter((payload): payload is NonNullable<ReturnType<typeof parseDisasterAlertNotification>> => Boolean(payload))
+      .filter((payload) => matchesHouseholdAlertScope(activeHousehold, payload))
+      .sort((left, right) => new Date(right.issued_at).getTime() - new Date(left.issued_at).getTime())[0] ?? null;
+  }, [activeHousehold, notifications]);
+
+  const resolvedPurokRiskProfile = useMemo(
+    () => (
+      activeHousehold
+        ? mergePurokRiskProfileWithAlertFallback({
+          household: activeHousehold,
+          profile: purokRiskProfile,
+          notification: latestHouseholdAlert,
+        })
+        : null
+    ),
+    [activeHousehold, purokRiskProfile, latestHouseholdAlert],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -226,12 +259,12 @@ export default function ResidentPortalPage() {
         </div>
       ) : null}
 
-      {activeHousehold && purokRiskProfile ? (() => {
+      {activeHousehold && resolvedPurokRiskProfile ? (() => {
         const isAtRisk = liveWeather && (
           (activeRule?.min_rain_chance !== undefined && (liveWeather.current.rainChance ?? 0) >= activeRule.min_rain_chance) ||
           (activeRule?.min_wind_gust_kph !== undefined && (liveWeather.current.windGust ?? 0) >= activeRule.min_wind_gust_kph)
         );
-        const hasWarning = liveWeather?.alerts.some(a => a.severity === 'warning');
+        const hasWarning = liveWeather?.alerts.some(a => a.severity === 'warning') || latestHouseholdAlert?.severity === 'warning';
 
         return (
           <div className="mt-6 space-y-4">
@@ -253,11 +286,11 @@ export default function ResidentPortalPage() {
                 <div className="mt-4 rounded-[20px] bg-white/10 p-4">
                   <p className="text-[11px] font-bold uppercase tracking-widest text-white/70">Responder Status Update</p>
                   <p className="mt-1 text-sm font-semibold text-white">
-                    Flood Control: {PUROK_FLOOD_CONTROL_STATUS_LABELS[purokRiskProfile.flood_control_status] || 'Unknown'}
+                    Flood Control: {PUROK_FLOOD_CONTROL_STATUS_LABELS[resolvedPurokRiskProfile.flood_control_status] || 'Unknown'}
                   </p>
-                  {purokRiskProfile.warning_notes && (
+                  {resolvedPurokRiskProfile.warning_notes && (
                     <p className="mt-2 text-xs leading-relaxed text-white/90">
-                      &quot;{purokRiskProfile.warning_notes}&quot;
+                      &quot;{resolvedPurokRiskProfile.warning_notes}&quot;
                     </p>
                   )}
                 </div>
@@ -272,15 +305,15 @@ export default function ResidentPortalPage() {
                         <h4 className="text-sm font-bold text-rose-900">Immediate Risk Detected</h4>
                         <p className="mt-1 text-xs leading-5 text-rose-700">
                           Weather thresholds for your area have been met. Your purok ({activeHousehold.purok_sitio}) is highly susceptible to flooding.
-                          {purokRiskProfile.default_evacuation_site && (
+                          {resolvedPurokRiskProfile.default_evacuation_site && (
                             <span className="block mt-2 font-bold bg-white/50 px-2 py-1 rounded inline-block">
-                              Evacuation Site: {purokRiskProfile.default_evacuation_site}
+                              Evacuation Site: {resolvedPurokRiskProfile.default_evacuation_site}
                             </span>
                           )}
                         </p>
-                        {purokRiskProfile.warning_notes && (
+                        {resolvedPurokRiskProfile.warning_notes && (
                           <p className="mt-2 text-[11px] font-semibold text-rose-800 uppercase tracking-wide">
-                            Note: {purokRiskProfile.warning_notes}
+                            Note: {resolvedPurokRiskProfile.warning_notes}
                           </p>
                         )}
                       </div>

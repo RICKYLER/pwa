@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   CheckCircle2,
@@ -24,6 +24,7 @@ import {
 import { getCurrentUser, getDefaultRouteForUser, isResidentUser } from '@/lib/auth';
 import { getHouseholds } from '@/lib/db/households';
 import { getPurokRiskProfile } from '@/lib/db/purok-risk-profiles';
+import { getUserNotifications } from '@/lib/db/user-notifications';
 import {
   createResident,
   getResidentsInHousehold,
@@ -37,10 +38,13 @@ import type {
   PWDType,
   Resident,
   PurokRiskProfile,
+  UserNotification,
   VulnerabilityFlags,
 } from '@/lib/db/schema';
 import { formatRegistrationStatusLabel, getHouseholdRegistrationStatus } from '@/lib/household-registration';
 import { resolveResidentActiveApprovedHousehold } from '@/lib/resident-households';
+import { parseDisasterAlertNotification } from '@/lib/disaster-alerts';
+import { matchesHouseholdAlertScope, mergePurokRiskProfileWithAlertFallback } from '@/lib/purok-risk-profiles';
 import {
   calculateAge,
   getCurrentVulnerabilityFlagsMapForResidents,
@@ -174,14 +178,18 @@ export default function ResidentHouseholdPage() {
   const [members, setMembers] = useState<Resident[]>([]);
   const [memberFlagsByResidentId, setMemberFlagsByResidentId] = useState<Map<string, VulnerabilityFlags>>(new Map());
   const [purokRiskProfile, setPurokRiskProfile] = useState<PurokRiskProfile | null>(null);
+  const [notifications, setNotifications] = useState<UserNotification[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [showAddMember, setShowAddMember] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [memberError, setMemberError] = useState('');
   const [form, setForm] = useState<MemberFormState>(EMPTY_MEMBER_FORM);
 
-  async function loadData(currentUser: NonNullable<typeof user>) {
-    const households = await getHouseholds({ applicant_user_id: currentUser.id });
+  const loadData = useCallback(async (currentUser: NonNullable<typeof user>) => {
+    const [households, inboxItems] = await Promise.all([
+      getHouseholds({ applicant_user_id: currentUser.id }),
+      getUserNotifications(),
+    ]);
     const activeHousehold = resolveResidentActiveApprovedHousehold(households);
 
     if (!activeHousehold) {
@@ -189,6 +197,7 @@ export default function ResidentHouseholdPage() {
       setMembers([]);
       setMemberFlagsByResidentId(new Map());
       setPurokRiskProfile(null);
+      setNotifications(inboxItems);
       router.replace('/households/register');
       return;
     }
@@ -201,7 +210,8 @@ export default function ResidentHouseholdPage() {
     setMembers(activeResidents);
     setMemberFlagsByResidentId(flagsMap);
     setPurokRiskProfile(profile ?? null);
-  }
+    setNotifications(inboxItems);
+  }, [router]);
 
   useEffect(() => {
     if (!user) {
@@ -238,6 +248,7 @@ export default function ResidentHouseholdPage() {
         && event.detail.table !== 'residents'
         && event.detail.table !== 'vulnerability_flags'
         && event.detail.table !== 'purok_risk_profiles'
+        && event.detail.table !== 'user_notifications'
       ) {
         return;
       }
@@ -251,7 +262,7 @@ export default function ResidentHouseholdPage() {
       cancelled = true;
       window.removeEventListener('mswdo-data-changed', handleDataChanged);
     };
-  }, [router, user]);
+  }, [loadData, router, user]);
 
   const memberSummary = useMemo(() => {
     return {
@@ -260,6 +271,31 @@ export default function ResidentHouseholdPage() {
       seniors: members.filter((member) => calculateAge(member.birthdate) >= 60).length,
     };
   }, [members]);
+
+  const latestHouseholdAlert = useMemo(() => {
+    if (!household) {
+      return null;
+    }
+
+    return notifications
+      .map((notification) => parseDisasterAlertNotification(notification))
+      .filter((payload): payload is NonNullable<ReturnType<typeof parseDisasterAlertNotification>> => Boolean(payload))
+      .filter((payload) => matchesHouseholdAlertScope(household, payload))
+      .sort((left, right) => new Date(right.issued_at).getTime() - new Date(left.issued_at).getTime())[0] ?? null;
+  }, [household, notifications]);
+
+  const resolvedPurokRiskProfile = useMemo(
+    () => (
+      household
+        ? mergePurokRiskProfileWithAlertFallback({
+          household,
+          profile: purokRiskProfile,
+          notification: latestHouseholdAlert,
+        })
+        : null
+    ),
+    [household, purokRiskProfile, latestHouseholdAlert],
+  );
 
   const draftBadges = useMemo(() => {
     const labels: Array<{ label: string; tone: MemberBadgeTone }> = [];
@@ -436,7 +472,7 @@ export default function ResidentHouseholdPage() {
             </div>
 
             <div className="mt-5">
-              <PurokFloodProfileCard household={household} profile={purokRiskProfile} />
+              <PurokFloodProfileCard household={household} profile={resolvedPurokRiskProfile} />
             </div>
           </CivicPanel>
 

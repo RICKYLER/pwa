@@ -1,4 +1,5 @@
 import type {
+  DisasterAlertNotificationPayload,
   DisasterAlertRule,
   HazardType,
   Household,
@@ -139,6 +140,48 @@ export function buildHouseholdPurokRiskSummary(
     warningNotes: normalizedProfile?.warning_notes,
     updatedAt: normalizedProfile?.updatedAt,
   };
+}
+
+export function matchesHouseholdAlertScope(
+  household: Pick<Household, 'barangay_id' | 'purok_sitio'>,
+  notification?: Pick<DisasterAlertNotificationPayload, 'barangay_id' | 'purok_sitio'> | null,
+) {
+  if (!notification || household.barangay_id !== notification.barangay_id) {
+    return false;
+  }
+
+  if (!notification.purok_sitio?.trim()) {
+    return true;
+  }
+
+  return normalizePurokSitio(household.purok_sitio) === normalizePurokSitio(notification.purok_sitio);
+}
+
+export function mergePurokRiskProfileWithAlertFallback(input: {
+  household: Pick<Household, 'barangay_id' | 'purok_sitio'>;
+  profile?: PurokRiskProfile | null;
+  notification?: DisasterAlertNotificationPayload | null;
+}) {
+  const { household, notification } = input;
+  const normalizedProfile = input.profile ? normalizePurokRiskProfile(input.profile) : null;
+  const scopedNotification = matchesHouseholdAlertScope(household, notification) ? notification : null;
+
+  if (!normalizedProfile && !scopedNotification) {
+    return null;
+  }
+
+  const fallbackProfile = normalizedProfile ?? createDefaultPurokRiskProfile({
+    barangay_id: household.barangay_id,
+    purok_sitio: household.purok_sitio,
+  });
+
+  return normalizePurokRiskProfile({
+    ...fallbackProfile,
+    flood_control_status: scopedNotification?.flood_control_status ?? fallbackProfile.flood_control_status,
+    flood_control_notes: scopedNotification?.flood_control_notes ?? fallbackProfile.flood_control_notes,
+    default_evacuation_site: scopedNotification?.default_evacuation_site ?? fallbackProfile.default_evacuation_site,
+    warning_notes: scopedNotification?.warning_notes ?? fallbackProfile.warning_notes,
+  });
 }
 
 export interface FloodProneZoneMarker {

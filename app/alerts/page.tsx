@@ -144,6 +144,14 @@ function formatMetricOrFallback(value: number | null | undefined, suffix: string
   return formatMetric(value, suffix) ?? 'No data';
 }
 
+function formatRoundedMetricOrFallback(value: number | null | undefined, suffix: string) {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return 'No data';
+  }
+
+  return `${Math.round(value)}${suffix}`;
+}
+
 function buildAutomaticThresholdLabels(hazard: HazardType) {
   const thresholds = getAutomaticDisasterAlertThresholds(hazard);
 
@@ -378,7 +386,7 @@ export default function AlertsPage() {
           | null;
 
         if (!response.ok) {
-          throw new Error(payload?.error || `Failed to sample field response weather (${response.status}).`);
+          throw new Error(payload?.error || `Failed to refresh field response weather (${response.status}).`);
         }
 
         if (!cancelled) {
@@ -393,7 +401,7 @@ export default function AlertsPage() {
         setWeatherPreviewError(
           error instanceof Error
             ? error.message
-            : 'Failed to load the field response weather sample.',
+            : 'Failed to load live field response weather.',
         );
       } finally {
         if (!cancelled) {
@@ -595,16 +603,16 @@ export default function AlertsPage() {
                     className="inline-flex h-11 items-center justify-center gap-2 rounded-full bg-cyan-950 px-4 text-sm font-semibold text-white hover:bg-cyan-900 disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     {isRunningEvaluation ? <Loader2 className="h-4 w-4 animate-spin" /> : <PlayCircle className="h-4 w-4" />}
-                    {isRunningEvaluation ? 'Running...' : 'Run evaluation now'}
+                    {isRunningEvaluation ? 'Checking...' : 'Check alerts now'}
                   </button>
                 </div>
               </div>
 
               {lastRunSummary ? (
                 <div className="mt-5 rounded-[24px] border border-cyan-200 bg-cyan-50 px-4 py-3 text-sm text-cyan-950">
-                  <p className="font-semibold">Latest test run</p>
+                  <p className="font-semibold">Latest live evaluation</p>
                   <p className="mt-1">
-                    {lastRunSummary.emitted_count ?? 0} emitted, {lastRunSummary.suppressed_count ?? 0} suppressed across {lastRunSummary.rule_count ?? 0} rule(s) at {formatDateTime(lastRunSummary.evaluated_at)}.
+                    {lastRunSummary.emitted_count ?? 0} alerts emitted, {lastRunSummary.suppressed_count ?? 0} suppressed across {lastRunSummary.rule_count ?? 0} rule(s) at {formatDateTime(lastRunSummary.evaluated_at)}.
                   </p>
                 </div>
               ) : null}
@@ -704,7 +712,7 @@ export default function AlertsPage() {
                       className="inline-flex h-10 items-center justify-center gap-2 rounded-full border border-cyan-200 bg-white px-4 text-sm font-semibold text-cyan-950 hover:bg-cyan-100 disabled:cursor-not-allowed disabled:opacity-60"
                     >
                       <RefreshCw className={`h-4 w-4 ${isWeatherPreviewLoading ? 'animate-spin' : ''}`} />
-                      Refresh sample
+                      Refresh
                     </button>
                   </div>
 
@@ -715,7 +723,7 @@ export default function AlertsPage() {
                     ))}
                   </div>
 
-                  <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+                  <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-6">
                     <div>
                       <label className="mb-2 block text-sm font-medium text-slate-700">Cooldown minutes</label>
                       <input
@@ -761,28 +769,33 @@ export default function AlertsPage() {
                     <div className="rounded-[22px] border border-cyan-100 bg-white px-4 py-3">
                       <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
                         <Wind className="h-4 w-4 text-cyan-900" />
-                        Wind gust
+                        Wind
                       </div>
                       <p className="mt-3 text-lg font-black tracking-tight text-slate-950">
-                        {weatherPreview ? formatMetricOrFallback(weatherPreview.current.windGust, ' kph') : 'No data'}
+                        {weatherPreview ? formatRoundedMetricOrFallback(weatherPreview.current.windSpeed, ' kph') : 'No data'}
                       </p>
+                      {weatherPreview?.current?.windGust !== null && weatherPreview?.current?.windGust !== undefined ? (
+                        <p className="mt-1 text-xs text-slate-500">
+                          Gusts {formatRoundedMetricOrFallback(weatherPreview.current.windGust, ' kph')}
+                        </p>
+                      ) : null}
                     </div>
                   </div>
 
                   <div className="mt-4 rounded-[22px] border border-cyan-100 bg-white px-4 py-3 text-sm text-slate-700">
                     {isWeatherPreviewLoading ? (
-                      <p>Loading live Field Response weather sample...</p>
+                      <p>Loading live Field Response weather...</p>
                     ) : weatherPreviewError ? (
                       <p className="text-rose-700">{weatherPreviewError}</p>
                     ) : weatherPreview ? (
                       <>
-                        <p className="font-semibold text-slate-950">{weatherPreview.summary || 'Live field response sample loaded.'}</p>
+                        <p className="font-semibold text-slate-950">{weatherPreview.summary || 'Live field response weather loaded.'}</p>
                         <p className="mt-1 text-xs text-slate-500">
                           Sample updated {formatDateTime(weatherPreview.generatedAt)} for {weatherPreview.location.name || (hasTriggerPoint ? 'selected trigger point' : 'the shared Field Response point')}.
                         </p>
                         {!hasTriggerPoint ? (
                           <p className="mt-2 text-xs text-cyan-900">
-                            Showing the shared Field Response weather sample. Pick a trigger map point below to lock this rule to a specific barangay location.
+                            Showing the shared live Field Response weather. Pick a trigger map point below to lock this rule to a specific barangay location.
                           </p>
                         ) : null}
                         {weatherPreview.alerts.length > 0 ? (
@@ -798,7 +811,7 @@ export default function AlertsPage() {
                         ) : null}
                       </>
                     ) : (
-                      <p>No field response sample loaded yet.</p>
+                      <p>No live field response weather loaded yet.</p>
                     )}
                   </div>
                 </div>
