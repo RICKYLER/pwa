@@ -137,10 +137,12 @@ export async function POST(request: NextRequest) {
           residentId,
           updates as {
             is_pregnant?: boolean;
-            is_pwd?: boolean;
+              is_pwd?: boolean;
             pwd_type?: string;
             has_chronic_illness?: boolean;
             chronic_conditions?: string[];
+            follow_up_status?: string;
+            medical_notes?: string;
           },
         );
 

@@ -1,5 +1,5 @@
 import { db, STORE_NAMES } from './indexeddb';
-import type { PWDType, Resident, ResidentStatus, VulnerabilityFlags } from './schema';
+import type { FollowUpStatus, PWDType, Resident, ResidentStatus, VulnerabilityFlags } from './schema';
 import {
   getCurrentVulnerabilityFlagsMapForResidents,
 } from './vulnerability';
@@ -214,6 +214,8 @@ export async function updateHealthFlags(
     pwd_type?: PWDType;
     has_chronic_illness?: boolean;
     chronic_conditions?: string[];
+    follow_up_status?: FollowUpStatus;
+    medical_notes?: string;
   }
 ): Promise<VulnerabilityFlags | undefined> {
   try {

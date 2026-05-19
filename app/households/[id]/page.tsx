@@ -9,10 +9,10 @@ import { getAllPuroks, getHousehold, updateHousehold } from '@/lib/db/households
 import { getPurokRiskProfile } from '@/lib/db/purok-risk-profiles';
 import {
   getResidentsInHousehold, createResident, updateResident,
-  deleteResident, getResidentVulnerabilityFlags, verifyResident,
+  deleteResident, getResidentVulnerabilityFlags, verifyResident, updateHealthFlags,
 } from '@/lib/db/residents';
 import { calculateAge } from '@/lib/db/vulnerability';
-import { type DisasterRiskLevel, type HazardType, Household, PurokRiskProfile, Resident, VulnerabilityFlags } from '@/lib/db/schema';
+import { type DisasterRiskLevel, type FollowUpStatus, type HazardType, type PWDType, Household, PurokRiskProfile, Resident, VulnerabilityFlags } from '@/lib/db/schema';
 import { mergePurokOptions, normalizePurokSitio } from '@/lib/geocoding';
 import {
   DISASTER_RISK_LEVEL_LABELS,
@@ -39,11 +39,35 @@ const HOUSEHOLD_HAZARD_OPTIONS: HazardType[] = [
   'earthquake',
 ];
 const DISASTER_RISK_OPTIONS: DisasterRiskLevel[] = ['low', 'medium', 'high'];
+const FOLLOW_UP_STATUS_OPTIONS: Array<{ value: FollowUpStatus; label: string }> = [
+  { value: 'none', label: 'No follow-up' },
+  { value: 'needs_visit', label: 'Needs visit' },
+  { value: 'visited', label: 'Visited' },
+  { value: 'referred', label: 'Referred' },
+  { value: 'resolved', label: 'Resolved' },
+];
+const PWD_TYPE_OPTIONS: Array<{ value: PWDType; label: string }> = [
+  { value: 'physical', label: 'Physical' },
+  { value: 'visual', label: 'Visual' },
+  { value: 'hearing', label: 'Hearing' },
+  { value: 'intellectual', label: 'Intellectual' },
+  { value: 'psychosocial', label: 'Psychosocial' },
+];
 type HHStatus = typeof HOUSEHOLD_STATUSES[number];
 
 const emptyResidentForm = {
   full_name: '', birthdate: '', gender: 'M' as 'M' | 'F',
   relationship_to_head: '', civil_status: 'single' as const, occupation: '',
+};
+
+const emptyHealthForm = {
+  is_pregnant: false,
+  is_pwd: false,
+  pwd_type: '' as PWDType | '',
+  has_chronic_illness: false,
+  chronic_conditions: '',
+  follow_up_status: 'none' as FollowUpStatus,
+  medical_notes: '',
 };
 
 export default function HouseholdDetailsPage() {
@@ -81,6 +105,9 @@ export default function HouseholdDetailsPage() {
   const [editingResidentId, setEditingResidentId] = useState<string | null>(null);
   const [residentForm, setResidentForm] = useState(emptyResidentForm);
   const [isSavingResident, setIsSavingResident] = useState(false);
+  const [editingHealthResidentId, setEditingHealthResidentId] = useState<string | null>(null);
+  const [healthForm, setHealthForm] = useState(emptyHealthForm);
+  const [isSavingHealth, setIsSavingHealth] = useState(false);
 
   // Delete confirmation
   const [deletingResidentId, setDeletingResidentId] = useState<string | null>(null);
@@ -94,10 +121,12 @@ export default function HouseholdDetailsPage() {
     setTimeout(() => setToast(null), 3200);
   }
 
+  const canViewHouseholdDetails = hasPermission('view_households') || hasPermission('view_residents');
+
   useEffect(() => {
-    if (!user || !hasPermission('view_households')) { router.push('/households'); return; }
+    if (!user || !canViewHouseholdDetails) { router.push('/dashboard'); return; }
     loadData();
-  }, [user, router, householdId]);
+  }, [user, router, householdId, canViewHouseholdDetails]);
 
   async function loadData() {
     try {
@@ -220,12 +249,29 @@ export default function HouseholdDetailsPage() {
       occupation: r.occupation ?? '',
     });
     setShowAddResident(false);
+    setEditingHealthResidentId(null);
   }
 
   function openAddResident() {
     setEditingResidentId(null);
+    setEditingHealthResidentId(null);
     setResidentForm(emptyResidentForm);
     setShowAddResident(true);
+  }
+
+  function openEditHealth(resident: Resident, flags?: VulnerabilityFlags) {
+    setEditingHealthResidentId(resident.id);
+    setEditingResidentId(null);
+    setShowAddResident(false);
+    setHealthForm({
+      is_pregnant: Boolean(flags?.is_pregnant),
+      is_pwd: Boolean(flags?.is_pwd),
+      pwd_type: flags?.pwd_type ?? '',
+      has_chronic_illness: Boolean(flags?.has_chronic_illness),
+      chronic_conditions: flags?.chronic_conditions?.join(', ') ?? '',
+      follow_up_status: flags?.follow_up_status ?? 'none',
+      medical_notes: flags?.medical_notes ?? '',
+    });
   }
 
   async function handleSaveResident(e: React.FormEvent) {
@@ -258,6 +304,46 @@ export default function HouseholdDetailsPage() {
       }
       setResidentForm(emptyResidentForm);
     } catch { showToast('Failed to save member.', 'error'); } finally { setIsSavingResident(false); }
+  }
+
+  async function handleSaveHealthFlags(e: React.FormEvent, resident: Resident) {
+    e.preventDefault();
+    if (healthForm.is_pregnant && resident.gender !== 'F') {
+      showToast('Pregnancy flag can only be set for female members.', 'error');
+      return;
+    }
+
+    if (healthForm.is_pwd && !healthForm.pwd_type) {
+      showToast('Select the PWD type before saving.', 'error');
+      return;
+    }
+
+    setIsSavingHealth(true);
+    try {
+      const updatedFlags = await updateHealthFlags(resident.id, {
+        is_pregnant: healthForm.is_pregnant,
+        is_pwd: healthForm.is_pwd,
+        pwd_type: healthForm.is_pwd && healthForm.pwd_type ? healthForm.pwd_type : undefined,
+        has_chronic_illness: healthForm.has_chronic_illness,
+        chronic_conditions: healthForm.chronic_conditions
+          .split(',')
+          .map((condition) => condition.trim())
+          .filter(Boolean),
+        follow_up_status: healthForm.follow_up_status,
+        medical_notes: healthForm.medical_notes.trim(),
+      });
+
+      setResidents(prev => prev.map(rw =>
+        rw.resident.id === resident.id ? { ...rw, flags: updatedFlags ?? rw.flags } : rw
+      ));
+      setEditingHealthResidentId(null);
+      setHealthForm(emptyHealthForm);
+      showToast('Health monitoring updated.');
+    } catch {
+      showToast('Failed to update health monitoring.', 'error');
+    } finally {
+      setIsSavingHealth(false);
+    }
   }
 
   // ── Resident delete ─────────────────────────────────────────────────────────
@@ -301,6 +387,9 @@ export default function HouseholdDetailsPage() {
   );
 
   const canEdit = hasPermission('update_resident');
+  const canEditHealth = hasPermission('update_health_flags');
+  const backHref = hasPermission('view_households') ? '/households' : '/vulnerability';
+  const backLabel = hasPermission('view_households') ? 'Back to Households' : 'Back to Vulnerability';
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-indigo-50/20">
@@ -348,8 +437,8 @@ export default function HouseholdDetailsPage() {
       {/* Header */}
       <header className="sticky top-0 z-30 border-b border-slate-200/60 bg-white/80 backdrop-blur-xl">
         <div className="max-w-5xl mx-auto px-4 sm:px-6 py-4 flex items-center justify-between gap-4">
-          <Link href="/households" className="flex items-center gap-2 text-slate-500 hover:text-slate-800 transition-colors text-sm">
-            <ArrowLeft className="w-4 h-4" /> Back to Households
+          <Link href={backHref} className="flex items-center gap-2 text-slate-500 hover:text-slate-800 transition-colors text-sm">
+            <ArrowLeft className="w-4 h-4" /> {backLabel}
           </Link>
           {canEdit && !isEditingHH && (
             <button onClick={() => setIsEditingHH(true)}
@@ -879,15 +968,18 @@ export default function HouseholdDetailsPage() {
                 if (flags?.is_low_income) vuln.push('Low-Income');
 
                 const isBeingEdited = editingResidentId === resident.id;
+                const isHealthBeingEdited = editingHealthResidentId === resident.id;
+                const followUpLabel = FOLLOW_UP_STATUS_OPTIONS.find((option) => option.value === (flags?.follow_up_status ?? 'none'))?.label ?? 'No follow-up';
                 return (
                   <div key={resident.id}
-                    className={`flex items-start justify-between p-4 border rounded-2xl transition-all ${isBeingEdited ? 'border-indigo-300 bg-indigo-50/30' : 'border-slate-200/60 hover:border-slate-300 hover:bg-slate-50/50'}`}>
-                    <div className="flex items-start gap-3">
-                      {/* Avatar */}
-                      <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-sm font-bold flex-shrink-0 ${resident.gender === 'F' ? 'bg-pink-100 text-pink-700' : 'bg-blue-100 text-blue-700'}`}>
-                        {resident.full_name.charAt(0).toUpperCase()}
-                      </div>
-                      <div>
+                    className={`p-4 border rounded-2xl transition-all ${isBeingEdited || isHealthBeingEdited ? 'border-indigo-300 bg-indigo-50/30' : 'border-slate-200/60 hover:border-slate-300 hover:bg-slate-50/50'}`}>
+                    <div className="flex items-start justify-between">
+                      <div className="flex items-start gap-3">
+                        {/* Avatar */}
+                        <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-sm font-bold flex-shrink-0 ${resident.gender === 'F' ? 'bg-pink-100 text-pink-700' : 'bg-blue-100 text-blue-700'}`}>
+                          {resident.full_name.charAt(0).toUpperCase()}
+                        </div>
+                        <div>
                         <div className="flex items-center gap-2 flex-wrap">
                           <span className="font-semibold text-slate-900">{resident.full_name}</span>
                           <span className="text-xs text-slate-400">({age} yrs)</span>
@@ -907,28 +999,154 @@ export default function HouseholdDetailsPage() {
                             ))}
                           </div>
                         )}
+                        {(flags?.follow_up_status && flags.follow_up_status !== 'none') || flags?.medical_notes ? (
+                          <div className="mt-2 space-y-1 text-xs text-slate-500">
+                            {flags?.follow_up_status && flags.follow_up_status !== 'none' ? (
+                              <p><span className="font-semibold text-slate-600">Follow-up:</span> {followUpLabel}</p>
+                            ) : null}
+                            {flags?.medical_notes ? (
+                              <p><span className="font-semibold text-slate-600">Medical notes:</span> {flags.medical_notes}</p>
+                            ) : null}
+                          </div>
+                        ) : null}
                       </div>
                     </div>
-                    {canEdit && (
+                    {(canEdit || canEditHealth) && (
                       <div className="flex gap-1 flex-shrink-0 ml-2">
-                        {resident.verification_status === 'pending' && (
+                        {canEdit && resident.verification_status === 'pending' && (
                           <button onClick={() => handleVerifyResident(resident.id)}
                             title="Verify"
                             className="p-2 rounded-xl bg-emerald-50 text-emerald-600 hover:bg-emerald-100 transition-all mr-1">
                             <CheckCircle2 className="w-4 h-4" />
                           </button>
                         )}
-                        <button onClick={() => openEditResident(resident)}
-                          title="Edit"
-                          className={`p-2 rounded-xl transition-all ${isBeingEdited ? 'bg-indigo-100 text-indigo-600' : 'hover:bg-indigo-50 text-slate-400 hover:text-indigo-600'}`}>
-                          <Edit2 className="w-4 h-4" />
-                        </button>
-                        <button onClick={() => setDeletingResidentId(resident.id)}
-                          title="Remove"
-                          className="p-2 rounded-xl hover:bg-red-50 text-slate-400 hover:text-red-600 transition-all">
-                          <Trash2 className="w-4 h-4" />
-                        </button>
+                        {canEditHealth && (
+                          <button onClick={() => openEditHealth(resident, flags)}
+                            title="Update health monitoring"
+                            className={`px-3 py-2 rounded-xl text-xs font-semibold transition-all ${isHealthBeingEdited ? 'bg-emerald-100 text-emerald-700' : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100'}`}>
+                            Health
+                          </button>
+                        )}
+                        {canEdit && (
+                          <>
+                            <button onClick={() => openEditResident(resident)}
+                              title="Edit"
+                              className={`p-2 rounded-xl transition-all ${isBeingEdited ? 'bg-indigo-100 text-indigo-600' : 'hover:bg-indigo-50 text-slate-400 hover:text-indigo-600'}`}>
+                              <Edit2 className="w-4 h-4" />
+                            </button>
+                            <button onClick={() => setDeletingResidentId(resident.id)}
+                              title="Remove"
+                              className="p-2 rounded-xl hover:bg-red-50 text-slate-400 hover:text-red-600 transition-all">
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </>
+                        )}
                       </div>
+                    )}
+                    </div>
+                    {isHealthBeingEdited && (
+                      <form onSubmit={(event) => handleSaveHealthFlags(event, resident)}
+                        className="mt-4 border-t border-indigo-100 pt-4">
+                        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                          <label className="flex items-start gap-3 rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm">
+                            <input
+                              type="checkbox"
+                              checked={healthForm.is_pregnant}
+                              onChange={(event) => setHealthForm((current) => ({ ...current, is_pregnant: event.target.checked }))}
+                              className="mt-1"
+                            />
+                            <span>
+                              <span className="block font-semibold text-slate-800">Pregnant</span>
+                              <span className="block text-xs text-slate-500">Include in maternal health monitoring.</span>
+                            </span>
+                          </label>
+                          <label className="flex items-start gap-3 rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm">
+                            <input
+                              type="checkbox"
+                              checked={healthForm.has_chronic_illness}
+                              onChange={(event) => setHealthForm((current) => ({ ...current, has_chronic_illness: event.target.checked }))}
+                              className="mt-1"
+                            />
+                            <span>
+                              <span className="block font-semibold text-slate-800">Chronic illness</span>
+                              <span className="block text-xs text-slate-500">Track maintenance or special care needs.</span>
+                            </span>
+                          </label>
+                          <div className="rounded-xl border border-slate-200 bg-white px-3 py-3">
+                            <label className="flex items-start gap-3 text-sm">
+                              <input
+                                type="checkbox"
+                                checked={healthForm.is_pwd}
+                                onChange={(event) => setHealthForm((current) => ({
+                                  ...current,
+                                  is_pwd: event.target.checked,
+                                  pwd_type: event.target.checked ? current.pwd_type : '',
+                                }))}
+                                className="mt-1"
+                              />
+                              <span>
+                                <span className="block font-semibold text-slate-800">PWD</span>
+                                <span className="block text-xs text-slate-500">Mark disability status for reports and aid targeting.</span>
+                              </span>
+                            </label>
+                            {healthForm.is_pwd && (
+                              <select
+                                value={healthForm.pwd_type}
+                                onChange={(event) => setHealthForm((current) => ({ ...current, pwd_type: event.target.value as PWDType | '' }))}
+                                className="mt-3 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-indigo-400"
+                              >
+                                <option value="">Select PWD type</option>
+                                {PWD_TYPE_OPTIONS.map((option) => (
+                                  <option key={option.value} value={option.value}>{option.label}</option>
+                                ))}
+                              </select>
+                            )}
+                          </div>
+                          <div>
+                            <label className="block text-xs font-semibold uppercase tracking-wide text-slate-500">Follow-up Status</label>
+                            <select
+                              value={healthForm.follow_up_status}
+                              onChange={(event) => setHealthForm((current) => ({ ...current, follow_up_status: event.target.value as FollowUpStatus }))}
+                              className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-indigo-400"
+                            >
+                              {FOLLOW_UP_STATUS_OPTIONS.map((option) => (
+                                <option key={option.value} value={option.value}>{option.label}</option>
+                              ))}
+                            </select>
+                          </div>
+                          <div>
+                            <label className="block text-xs font-semibold uppercase tracking-wide text-slate-500">Chronic Conditions</label>
+                            <input
+                              type="text"
+                              value={healthForm.chronic_conditions}
+                              onChange={(event) => setHealthForm((current) => ({ ...current, chronic_conditions: event.target.value }))}
+                              placeholder="e.g. Hypertension, asthma"
+                              className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-indigo-400"
+                            />
+                          </div>
+                          <div className="sm:col-span-2">
+                            <label className="block text-xs font-semibold uppercase tracking-wide text-slate-500">Medical Notes</label>
+                            <textarea
+                              value={healthForm.medical_notes}
+                              onChange={(event) => setHealthForm((current) => ({ ...current, medical_notes: event.target.value }))}
+                              placeholder="Add visit notes, referral details, or care reminders."
+                              rows={3}
+                              className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-indigo-400"
+                            />
+                          </div>
+                        </div>
+                        <div className="mt-4 flex gap-2">
+                          <button type="submit" disabled={isSavingHealth}
+                            className="flex items-center gap-2 px-5 py-2.5 bg-emerald-700 text-white rounded-xl text-sm font-semibold hover:bg-emerald-800 disabled:opacity-60 transition-all">
+                            {isSavingHealth ? <><span className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />Saving...</> : <><Save className="w-4 h-4" />Save Health Monitoring</>}
+                          </button>
+                          <button type="button"
+                            onClick={() => { setEditingHealthResidentId(null); setHealthForm(emptyHealthForm); }}
+                            className="flex items-center gap-1.5 px-5 py-2.5 border border-slate-200 text-slate-600 rounded-xl text-sm font-medium hover:bg-slate-50 transition-colors">
+                            <X className="w-4 h-4" />Cancel
+                          </button>
+                        </div>
+                      </form>
                     )}
                   </div>
                 );

@@ -9,6 +9,7 @@ export type CivilStatus = 'single' | 'married' | 'widowed' | 'separated';
 export type IncomeLevel = 'low' | 'middle' | 'high';
 export type Gender = 'M' | 'F';
 export type PWDType = 'physical' | 'visual' | 'hearing' | 'intellectual' | 'psychosocial';
+export type FollowUpStatus = 'none' | 'needs_visit' | 'visited' | 'referred' | 'resolved';
 export type SyncStatus = 'pending' | 'synced';
 export type DistributionType = 'regular' | 'emergency' | 'disaster_relief';
 export type DistributionStatus = 'planned' | 'ongoing' | 'completed';
@@ -146,6 +147,8 @@ export interface VulnerabilityFlags {
   has_chronic_illness: boolean;
   chronic_conditions?: string[];
   is_low_income: boolean;
+  follow_up_status?: FollowUpStatus;
+  medical_notes?: string;
   notes?: string;
   updatedAt: Date;
   syncStatus: SyncStatus;

@@ -313,9 +313,12 @@ create table if not exists public.vulnerability_flags (
   pwd_type text
     check (pwd_type in ('physical', 'visual', 'hearing', 'intellectual', 'psychosocial')),
   has_chronic_illness boolean not null default false,
-  chronic_conditions text[] not null default '{}'::text[],
-  is_low_income boolean not null default false,
-  notes text,
+    chronic_conditions text[] not null default '{}'::text[],
+    is_low_income boolean not null default false,
+    follow_up_status text not null default 'none'
+      check (follow_up_status in ('none', 'needs_visit', 'visited', 'referred', 'resolved')),
+    medical_notes text,
+    notes text,
   updated_at timestamptz not null default timezone('utc', now()),
   sync_status text not null default 'pending'
     check (sync_status in ('pending', 'synced'))

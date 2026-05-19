@@ -296,6 +296,8 @@ async function mapQueueItemToSupabaseRow(item: SyncQueueItem, syncActorId: strin
         has_chronic_illness: toBooleanValue(data.has_chronic_illness),
         chronic_conditions: toTextArray(data.chronic_conditions),
         is_low_income: toBooleanValue(data.is_low_income),
+        follow_up_status: toOptionalString(data.follow_up_status),
+        medical_notes: toOptionalString(data.medical_notes),
         notes: toOptionalString(data.notes),
         updated_at: toTimestamp(data.updatedAt),
         sync_status: syncStatus,

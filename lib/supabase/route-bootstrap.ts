@@ -22,7 +22,7 @@ const ROUTE_TABLES: Array<{
   },
   {
     prefix: '/households',
-    tables: ['households', 'residents', 'location_master_lists', 'purok_risk_profiles'],
+    tables: ['households', 'residents', 'vulnerability_flags', 'location_master_lists', 'purok_risk_profiles'],
   },
   {
     prefix: '/vulnerability',

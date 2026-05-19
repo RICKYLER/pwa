@@ -35,6 +35,8 @@ type HouseholdMemberDraft = {
   pwd_type?: string;
   has_chronic_illness?: boolean;
   chronic_conditions?: string[];
+  follow_up_status?: string;
+  medical_notes?: string;
 };
 
 type InventoryTransactionParams = {
@@ -154,6 +156,8 @@ function buildVulnerabilityFlagsPayload(residentId: string, member: HouseholdMem
     has_chronic_illness: Boolean(member.has_chronic_illness),
     chronic_conditions: toTextArray(member.chronic_conditions),
     is_low_income: member.income_level === 'low',
+    follow_up_status: toOptionalString(member.follow_up_status) ?? 'none',
+    medical_notes: toOptionalString(member.medical_notes),
     notes: `Auto-categorized as ${category} (age ${age}) on ${new Date().toISOString().slice(0, 10)}`,
     sync_status: 'synced',
   };
@@ -1032,6 +1036,8 @@ export async function updateResidentOnServer(
     pwd_type?: string;
     has_chronic_illness?: boolean;
     chronic_conditions?: string[];
+    follow_up_status?: string;
+    medical_notes?: string;
   },
 ) {
   if (!['admin', 'encoder'].includes(user.role)) {
@@ -1070,6 +1076,8 @@ export async function updateResidentHealthFlagsOnServer(
     pwd_type?: string;
     has_chronic_illness?: boolean;
     chronic_conditions?: string[];
+    follow_up_status?: string;
+    medical_notes?: string;
   },
 ) {
   if (!['admin', 'encoder', 'health_worker'].includes(user.role)) {
@@ -1131,6 +1139,8 @@ export async function updateResidentHealthFlagsOnServer(
     chronic_conditions: Array.isArray(updates.chronic_conditions)
       ? updates.chronic_conditions
       : undefined,
+    follow_up_status: updates.follow_up_status === undefined ? undefined : toOptionalString(updates.follow_up_status) ?? 'none',
+    medical_notes: updates.medical_notes === undefined ? undefined : toOptionalString(updates.medical_notes),
     sync_status: 'synced',
   });
 
