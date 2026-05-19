@@ -25,6 +25,24 @@ import {
 
 type InstallOutcome = 'accepted' | 'dismissed' | 'unavailable';
 
+const INSTALL_PROMPT_OPEN_TIMEOUT_MS = 3500;
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string) {
+  let timeoutId: number | null = null;
+
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeoutId = window.setTimeout(() => {
+      reject(new Error(message));
+    }, timeoutMs);
+  });
+
+  return Promise.race([promise, timeoutPromise]).finally(() => {
+    if (timeoutId) {
+      window.clearTimeout(timeoutId);
+    }
+  });
+}
+
 type PwaInstallContextValue = {
   platform: InstallPlatform;
   manualSteps: string[];
@@ -215,10 +233,18 @@ export function PwaInstallProvider({ children }: { children: ReactNode }) {
     setIsInstalling(true);
     setInstallFeedbackStatus('opening_prompt');
     try {
-      await deferredPrompt.prompt();
-      setInstallFeedbackStatus('awaiting_browser_action');
-      const choice = await deferredPrompt.userChoice;
+      const prompt = deferredPrompt;
       setDeferredPrompt(null);
+      setInstallFeedbackStatus('awaiting_browser_action');
+
+      await withTimeout(
+        Promise.resolve(prompt.prompt()),
+        INSTALL_PROMPT_OPEN_TIMEOUT_MS,
+        'The browser did not open the install prompt.',
+      );
+
+      setInstallFeedbackStatus('awaiting_browser_action');
+      const choice = await prompt.userChoice;
 
       if (choice.outcome === 'accepted') {
         clearDismissal();
@@ -235,6 +261,10 @@ export function PwaInstallProvider({ children }: { children: ReactNode }) {
       setInstallFeedbackStatus('dismissed');
       setIsDismissed(true);
       return 'dismissed';
+    } catch {
+      setInstallFeedbackStatus('manual_steps_required');
+      setIsDialogOpen(true);
+      return 'unavailable';
     } finally {
       setIsInstalling(false);
     }
