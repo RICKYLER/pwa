@@ -553,7 +553,7 @@ async function emitDisasterAlertForRule(params: {
 
   const { data: households, error: householdError } = await supabase
     .from('households')
-    .select('id,barangay_id,barangay_name,municipality,purok_sitio,applicant_user_id,applicant_email,hazard_tags,evacuation_site,special_assistance_notes,status,registration_status,updated_at,disaster_profile_updated_at')
+    .select('id,barangay_id,barangay_name,municipality,purok_sitio,applicant_user_id,applicant_email,hazard_tags,evacuation_site,special_assistance_notes,status,registration_status,gps_lat,gps_long,updated_at,disaster_profile_updated_at')
     .eq('barangay_id', barangayId)
     .eq('status', 'active')
     .eq('registration_status', 'approved');
@@ -576,6 +576,8 @@ async function emitDisasterAlertForRule(params: {
     hazard,
     purokSitio,
     purokRiskProfiles: (purokRiskProfiles ?? []) as AlertTargetProfile[],
+    triggerLat: toOptionalNumber(rule.trigger_lat),
+    triggerLng: toOptionalNumber(rule.trigger_lng),
   }).households;
 
   if (scopedHouseholds.length === 0) {
@@ -597,6 +599,8 @@ async function emitDisasterAlertForRule(params: {
     : undefined;
   const scopedDefaultEvacuationSite = toOptionalString(scopedPurokProfile?.default_evacuation_site);
   const scopedWarningNotes = toOptionalString(scopedPurokProfile?.warning_notes);
+  const triggerLat = toOptionalNumber(rule.trigger_lat);
+  const triggerLng = toOptionalNumber(rule.trigger_lng);
   const title = `${HAZARD_LABELS[hazard]} ${params.evaluation.severity === 'warning' ? 'Warning' : 'Watch'}`;
   const baseMessage = buildGeneratedDisasterAlertMessage({
     hazard,
@@ -635,9 +639,11 @@ async function emitDisasterAlertForRule(params: {
   }
 
   const residentNotificationRows = Array.from(residentRecipients.notificationsByUserId.entries()).map(([userId, household]) => {
+    const householdPurokSitio = toOptionalString(household.purok_sitio);
+    const notificationPurokSitio = purokSitio ?? householdPurokSitio;
     const evacuationSite = toOptionalString(household.evacuation_site);
     const specialAssistanceNotes = toOptionalString(household.special_assistance_notes);
-    const purokProfile = purokProfilesByPurok.get(typeof household.purok_sitio === 'string' ? household.purok_sitio : '');
+    const purokProfile = purokProfilesByPurok.get(householdPurokSitio ?? '');
     const floodControlStatus = isPurokFloodControlStatus(purokProfile?.flood_control_status)
       ? purokProfile.flood_control_status
       : undefined;
@@ -649,7 +655,9 @@ async function emitDisasterAlertForRule(params: {
       rule_id: String(rule.id),
       municipality: MABINI_MUNICIPALITY,
       barangay_id: barangayId,
-      purok_sitio: purokSitio ?? undefined,
+      purok_sitio: notificationPurokSitio ?? undefined,
+      trigger_lat: triggerLat ?? undefined,
+      trigger_lng: triggerLng ?? undefined,
       hazard,
       severity: params.evaluation.severity,
       title,
@@ -676,7 +684,7 @@ async function emitDisasterAlertForRule(params: {
         hazard,
         severity: params.evaluation.severity!,
         barangay_id: barangayId,
-        purok_sitio: purokSitio,
+        purok_sitio: notificationPurokSitio,
         municipality: MABINI_MUNICIPALITY,
         trigger_reason: params.evaluation.triggerReason,
         weather_summary: params.evaluation.weatherSummary,
@@ -717,6 +725,8 @@ async function emitDisasterAlertForRule(params: {
         municipality: MABINI_MUNICIPALITY,
         barangay_id: barangayId,
         purok_sitio: purokSitio ?? undefined,
+        trigger_lat: triggerLat ?? undefined,
+        trigger_lng: triggerLng ?? undefined,
         hazard,
         severity: params.evaluation.severity,
         title,

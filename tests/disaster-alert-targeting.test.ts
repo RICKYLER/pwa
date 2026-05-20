@@ -20,9 +20,9 @@ function makeHousehold(overrides?: Partial<Household>): Household {
 }
 
 const households = [
-  makeHousehold({ id: 'h1', purok_sitio: 'Purok 1', hazard_tags: [] }),
-  makeHousehold({ id: 'h2', purok_sitio: 'Purok 2', hazard_tags: ['flood'] }),
-  makeHousehold({ id: 'h3', purok_sitio: 'Purok 3', hazard_tags: ['typhoon'] }),
+  makeHousehold({ id: 'h1', purok_sitio: 'Purok 1', hazard_tags: [], gps_lat: 7.3079, gps_long: 125.8551 }),
+  makeHousehold({ id: 'h2', purok_sitio: 'Purok 2', hazard_tags: ['flood'], gps_lat: 7.31, gps_long: 125.857 }),
+  makeHousehold({ id: 'h3', purok_sitio: 'Purok 3', hazard_tags: ['typhoon'], gps_lat: 7.38, gps_long: 125.91 }),
 ];
 
 test('selectAlertTargetHouseholds sends scoped flood alerts to every household in the purok', () => {
@@ -53,6 +53,24 @@ test('selectAlertTargetHouseholds prefers flood-prone purok profiles for baranga
 
   assert.equal(result.strategy, 'purok_profiles');
   assert.deepEqual(result.households.map((household) => household.id), ['h2']);
+});
+
+test('selectAlertTargetHouseholds uses the trigger map point before broad flood-prone purok fallback', () => {
+  const result = selectAlertTargetHouseholds({
+    households,
+    hazard: 'flood',
+    triggerLat: 7.30796,
+    triggerLng: 125.85512,
+    mapTriggerRadiusMeters: 500,
+    purokRiskProfiles: [
+      { purok_sitio: 'Purok 1', flood_prone: false },
+      { purok_sitio: 'Purok 2', flood_prone: true },
+      { purok_sitio: 'Purok 3', flood_prone: true },
+    ],
+  });
+
+  assert.equal(result.strategy, 'map_trigger_radius');
+  assert.deepEqual(result.households.map((household) => household.id), ['h1', 'h2']);
 });
 
 test('selectAlertTargetHouseholds falls back to household flood hazard tags when no purok profiles exist', () => {

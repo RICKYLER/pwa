@@ -1,6 +1,7 @@
 import type {
   DisasterAlert,
   DisasterAlertNotificationPayload,
+  DisasterAlertRule,
   DisasterAlertSeverity,
   DisasterAlertTriggerSource,
   DisasterRiskLevel,
@@ -79,14 +80,28 @@ export function parseHazardTags(value: unknown): HazardType[] {
   ));
 }
 
+function toOptionalFiniteNumber(value: unknown) {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value;
+  }
+
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : undefined;
+  }
+
+  return undefined;
+}
+
 export function buildDisasterAlertNotificationPayloadFromAlert(input: {
   alert: DisasterAlert;
+  alertRule?: Pick<DisasterAlertRule, 'trigger_lat' | 'trigger_lng'> | null;
   purokRiskProfile?: Pick<
     PurokRiskProfile,
     'flood_control_status' | 'flood_control_notes' | 'default_evacuation_site' | 'warning_notes'
   > | null;
 }): DisasterAlertNotificationPayload {
-  const { alert, purokRiskProfile } = input;
+  const { alert, alertRule, purokRiskProfile } = input;
 
   return {
     alert_id: alert.id,
@@ -94,6 +109,8 @@ export function buildDisasterAlertNotificationPayloadFromAlert(input: {
     municipality: alert.municipality,
     barangay_id: alert.barangay_id,
     purok_sitio: alert.purok_sitio,
+    trigger_lat: toOptionalFiniteNumber(alertRule?.trigger_lat),
+    trigger_lng: toOptionalFiniteNumber(alertRule?.trigger_lng),
     hazard: alert.hazard,
     severity: alert.severity,
     title: alert.title,
@@ -127,6 +144,20 @@ export function buildAffectedAreaLabel(input: {
   ].filter(Boolean);
 
   return parts.join(', ');
+}
+
+export function formatDisasterAlertTriggerCoordinates(input?: {
+  trigger_lat?: number | null;
+  trigger_lng?: number | null;
+} | null) {
+  const lat = toOptionalFiniteNumber(input?.trigger_lat);
+  const lng = toOptionalFiniteNumber(input?.trigger_lng);
+
+  if (lat === undefined || lng === undefined) {
+    return '';
+  }
+
+  return `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
 }
 
 export function buildDisasterAlertNotificationBody(payload: {
@@ -178,6 +209,8 @@ export function parseDisasterAlertNotification(
   const municipality = typeof payloadRecord.municipality === 'string' ? payloadRecord.municipality : '';
   const barangayId = typeof payloadRecord.barangay_id === 'string' ? payloadRecord.barangay_id : '';
   const purokSitio = typeof payloadRecord.purok_sitio === 'string' ? payloadRecord.purok_sitio : undefined;
+  const triggerLat = toOptionalFiniteNumber(payloadRecord.trigger_lat);
+  const triggerLng = toOptionalFiniteNumber(payloadRecord.trigger_lng);
   const hazard = payloadRecord.hazard;
   const severity = payloadRecord.severity;
   const title = typeof payloadRecord.title === 'string' ? payloadRecord.title : '';
@@ -226,6 +259,8 @@ export function parseDisasterAlertNotification(
     municipality,
     barangay_id: barangayId,
     purok_sitio: purokSitio,
+    trigger_lat: triggerLat,
+    trigger_lng: triggerLng,
     hazard,
     severity,
     title,

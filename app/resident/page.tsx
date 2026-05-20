@@ -25,6 +25,7 @@ import { CivicBadge, CivicPanel, CivicSectionHeading } from '@/components/ui/civ
 import {
   buildAffectedAreaLabel,
   DISASTER_ALERT_SEVERITY_LABELS,
+  formatDisasterAlertTriggerCoordinates,
   HAZARD_LABELS,
   parseDisasterAlertNotification,
 } from '@/lib/disaster-alerts';
@@ -178,6 +179,34 @@ export default function ResidentPortalPage() {
     ),
     [activeHousehold, purokRiskProfile, latestHouseholdAlert],
   );
+  const latestAlertAreaLabel = useMemo(
+    () => (
+      latestHouseholdAlert
+        ? buildAffectedAreaLabel({
+          barangay_id: latestHouseholdAlert.barangay_id,
+          purok_sitio: latestHouseholdAlert.purok_sitio,
+          municipality: latestHouseholdAlert.municipality,
+        })
+        : ''
+    ),
+    [latestHouseholdAlert],
+  );
+  const latestAlertTriggerCoordinates = useMemo(
+    () => formatDisasterAlertTriggerCoordinates(latestHouseholdAlert),
+    [latestHouseholdAlert],
+  );
+  const householdMonitoringAreaLabel = useMemo(
+    () => (
+      [
+        activeHousehold?.purok_sitio,
+        activeHousehold?.barangay_name,
+        activeHousehold?.municipality,
+      ]
+        .filter((value): value is string => Boolean(value?.trim()))
+        .join(', ')
+    ),
+    [activeHousehold],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -285,6 +314,16 @@ export default function ResidentPortalPage() {
 
                 <div className="mt-4 rounded-[20px] bg-white/10 p-4">
                   <p className="text-[11px] font-bold uppercase tracking-widest text-white/70">Responder Status Update</p>
+                  <p className="mt-1 text-sm font-semibold text-white">
+                    {latestAlertAreaLabel
+                      ? `Alert Area: ${latestAlertAreaLabel}`
+                      : `Monitoring Area: ${householdMonitoringAreaLabel || activeHousehold.purok_sitio}`}
+                  </p>
+                  {latestAlertTriggerCoordinates ? (
+                    <p className="mt-1 text-xs text-white/80">
+                      Trigger Pin: {latestAlertTriggerCoordinates}
+                    </p>
+                  ) : null}
                   <p className="mt-1 text-sm font-semibold text-white">
                     Flood Control: {PUROK_FLOOD_CONTROL_STATUS_LABELS[resolvedPurokRiskProfile.flood_control_status] || 'Unknown'}
                   </p>

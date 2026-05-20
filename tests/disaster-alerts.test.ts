@@ -21,6 +21,8 @@ test('parseDisasterAlertNotification returns the validated alert payload', () =>
       municipality: 'Mabini',
       barangay_id: 'anitapan',
       purok_sitio: 'Purok 1',
+      trigger_lat: 7.41234,
+      trigger_lng: 125.81234,
       hazard: 'flood',
       severity: 'warning',
       title: 'Flood Warning',
@@ -46,6 +48,8 @@ test('parseDisasterAlertNotification returns the validated alert payload', () =>
   assert.equal(payload.alert_id, 'alert-1');
   assert.equal(payload.hazard, 'flood');
   assert.equal(payload.severity, 'warning');
+  assert.equal(payload.trigger_lat, 7.41234);
+  assert.equal(payload.trigger_lng, 125.81234);
   assert.equal(payload.evacuation_site, 'Barangay gymnasium');
   assert.equal(payload.flood_control_status, 'partial');
   assert.equal(payload.default_evacuation_site, 'Purok 1 covered court');

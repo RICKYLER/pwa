@@ -41,6 +41,7 @@ import {
   buildAffectedAreaLabel,
   DISASTER_ALERT_SEVERITY_LABELS,
   DISASTER_ALERT_TRIGGER_SOURCE_LABELS,
+  formatDisasterAlertTriggerCoordinates,
   HAZARD_LABELS,
   parseDisasterAlertNotification,
 } from '@/lib/disaster-alerts';
@@ -269,6 +270,9 @@ export default function ResidentNotificationsPage() {
                   municipality: disasterPayload.municipality,
                 })
                 : '';
+              const triggerCoordinates = disasterPayload
+                ? formatDisasterAlertTriggerCoordinates(disasterPayload)
+                : '';
 
               return (
                 <div
@@ -410,7 +414,7 @@ export default function ResidentNotificationsPage() {
                         <CivicBadge label={`Issued ${formatPayloadDateTime(disasterPayload.issued_at)}`} tone="slate" />
                       </div>
 
-                      <div className="grid gap-3 md:grid-cols-3">
+                      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
                         <div className="rounded-[22px] border border-slate-200 bg-slate-50 px-4 py-3">
                           <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
                             <ShieldAlert className="h-4 w-4" />
@@ -429,6 +433,16 @@ export default function ResidentNotificationsPage() {
                           </div>
                           <p className="mt-3 text-sm font-semibold text-slate-900">{affectedArea || 'Mabini, Davao de Oro'}</p>
                         </div>
+
+                        {triggerCoordinates ? (
+                          <div className="rounded-[22px] border border-slate-200 bg-slate-50 px-4 py-3">
+                            <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
+                              <MapPin className="h-4 w-4" />
+                              Trigger Pin
+                            </div>
+                            <p className="mt-3 text-sm font-semibold text-slate-900">{triggerCoordinates}</p>
+                          </div>
+                        ) : null}
 
                         <div className="rounded-[22px] border border-slate-200 bg-slate-50 px-4 py-3">
                           <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">

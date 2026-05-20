@@ -307,6 +307,8 @@ export interface DisasterAlertNotificationPayload {
   municipality: string;
   barangay_id: string;
   purok_sitio?: string;
+  trigger_lat?: number;
+  trigger_lng?: number;
   hazard: HazardType;
   severity: DisasterAlertSeverity;
   title: string;
