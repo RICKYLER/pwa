@@ -41,7 +41,7 @@ import {
   normalizeMunicipalityName,
   normalizePurokSitio,
 } from '@/lib/geocoding';
-import { calculateAge } from '@/lib/db/vulnerability';
+import { calculateAge, getPregnancyProgress } from '@/lib/db/vulnerability';
 import type { Household, LocationConfidence, LocationSource, PWDType } from '@/lib/db/schema';
 
 const MAX_DOCUMENT_BYTES = 2 * 1024 * 1024;
@@ -54,11 +54,39 @@ interface RegistrationWizardProps {
   onSubmit: (
     data: Omit<Household, 'id' | 'createdAt' | 'updatedAt' | 'syncStatus'>,
     members: MemberDraft[],
+    headProfile: HeadProfileDraft,
   ) => Promise<string>;
+}
+
+export interface HeadProfileDraft {
+  birthdate: string;
+  gender: 'M' | 'F';
+  civil_status: MemberDraft['civil_status'];
+  occupation: string;
+  income_level: MemberDraft['income_level'];
+  is_pregnant: boolean;
+  pregnancy_months?: number | '';
+  expected_delivery_date?: string;
+  is_pwd: boolean;
+  is_4ps: boolean;
+  is_indigent: boolean;
+  pwd_type?: PWDType | '';
 }
 
 interface RegistrationFormState {
   head_name: string;
+  head_birthdate: string;
+  head_gender: 'M' | 'F';
+  head_civil_status: MemberDraft['civil_status'];
+  head_occupation: string;
+  head_income_level: MemberDraft['income_level'];
+  head_is_pregnant: boolean;
+  head_pregnancy_months?: number | '';
+  head_expected_delivery_date?: string;
+  head_is_pwd: boolean;
+  head_is_4ps: boolean;
+  head_is_indigent: boolean;
+  head_pwd_type?: PWDType | '';
   contact_number: string;
   applicant_email: string;
   municipality: string;
@@ -90,6 +118,18 @@ const OFFICE_REQUIREMENTS = [
 
 const EMPTY_FORM: RegistrationFormState = {
   head_name: '',
+  head_birthdate: '',
+  head_gender: 'M',
+  head_civil_status: 'single',
+  head_occupation: '',
+  head_income_level: 'low',
+  head_is_pregnant: false,
+  head_pregnancy_months: '',
+  head_expected_delivery_date: '',
+  head_is_pwd: false,
+  head_is_4ps: false,
+  head_is_indigent: false,
+  head_pwd_type: '',
   contact_number: '',
   applicant_email: '',
   municipality: DEFAULT_MUNICIPALITY,
@@ -108,7 +148,11 @@ const EMPTY_MEMBER: MemberDraft = {
   occupation: '',
   income_level: 'low',
   is_pregnant: false,
+  pregnancy_months: '',
+  expected_delivery_date: '',
   is_pwd: false,
+  is_4ps: false,
+  is_indigent: false,
   pwd_type: '',
 };
 
@@ -166,6 +210,21 @@ function buildRegistrationFormState(
   return {
     ...EMPTY_FORM,
     head_name: safeText(initialValues?.head_name),
+    head_birthdate: safeText(initialValues?.head_birthdate),
+    head_gender: initialValues?.head_gender === 'F' ? 'F' : 'M',
+    head_civil_status: initialValues?.head_civil_status ?? EMPTY_FORM.head_civil_status,
+    head_occupation: safeText(initialValues?.head_occupation),
+    head_income_level: initialValues?.head_income_level ?? EMPTY_FORM.head_income_level,
+    head_is_pregnant: Boolean(initialValues?.head_is_pregnant),
+    head_pregnancy_months:
+      typeof initialValues?.head_pregnancy_months === 'number'
+        ? initialValues.head_pregnancy_months
+        : EMPTY_FORM.head_pregnancy_months,
+    head_expected_delivery_date: safeText(initialValues?.head_expected_delivery_date),
+    head_is_pwd: Boolean(initialValues?.head_is_pwd),
+    head_is_4ps: Boolean(initialValues?.head_is_4ps),
+    head_is_indigent: Boolean(initialValues?.head_is_indigent),
+    head_pwd_type: initialValues?.head_pwd_type ?? EMPTY_FORM.head_pwd_type,
     contact_number: safeText(initialValues?.contact_number),
     applicant_email: safeText(initialValues?.applicant_email),
     municipality: safeText(initialValues?.municipality) || EMPTY_FORM.municipality,
@@ -191,6 +250,12 @@ function getMemberAgeCategory(birthdate: string): 'child' | 'adult' | 'senior' |
   return 'adult';
 }
 
+function isInfantBirthdate(birthdate: string): boolean {
+  if (!birthdate) return false;
+  const age = calculateAge(birthdate);
+  return age >= 0 && age < 2;
+}
+
 function formatRelationshipLabel(value: string): string {
   return value
     .trim()
@@ -204,14 +269,54 @@ function getMemberTags(member: MemberDraft): string[] {
   const tags: string[] = [];
   const ageCategory = getMemberAgeCategory(member.birthdate);
 
+  if (isInfantBirthdate(member.birthdate)) tags.push('Infant');
   if (ageCategory === 'child') tags.push('Minor');
   if (ageCategory === 'senior') tags.push('Senior');
   if (member.is_pregnant) tags.push('Pregnant');
+  if (member.is_pregnant && typeof member.pregnancy_months === 'number') tags.push(`${member.pregnancy_months} months`);
   if (member.is_pwd) {
     tags.push(member.pwd_type ? `PWD - ${PWD_TYPE_LABELS[member.pwd_type]}` : 'PWD');
   }
+  if (member.is_4ps) tags.push('4Ps');
+  if (member.is_indigent) tags.push('Indigent');
 
   return tags;
+}
+
+function buildHeadProfileDraft(form: RegistrationFormState): HeadProfileDraft {
+  return {
+    birthdate: form.head_birthdate,
+    gender: form.head_gender,
+    civil_status: form.head_civil_status,
+    occupation: form.head_occupation,
+    income_level: form.head_income_level,
+    is_pregnant: form.head_is_pregnant,
+    pregnancy_months: form.head_pregnancy_months,
+    expected_delivery_date: form.head_expected_delivery_date,
+    is_pwd: form.head_is_pwd,
+    is_4ps: form.head_is_4ps,
+    is_indigent: form.head_is_indigent,
+    pwd_type: form.head_pwd_type,
+  };
+}
+
+function getHeadProfileTags(form: RegistrationFormState): string[] {
+  return getMemberTags({
+    full_name: form.head_name,
+    birthdate: form.head_birthdate,
+    gender: form.head_gender,
+    relationship_to_head: 'Self',
+    civil_status: form.head_civil_status,
+    occupation: form.head_occupation,
+    income_level: form.head_income_level,
+    is_pregnant: form.head_is_pregnant,
+    pregnancy_months: form.head_pregnancy_months,
+    expected_delivery_date: form.head_expected_delivery_date,
+    is_pwd: form.head_is_pwd,
+    is_4ps: form.head_is_4ps,
+    is_indigent: form.head_is_indigent,
+    pwd_type: form.head_pwd_type,
+  });
 }
 
 export function HouseholdRegistrationWizard({
@@ -286,9 +391,17 @@ export function HouseholdRegistrationWizard({
     ].filter(Boolean).join(', ');
   }, [form]);
 
+  const headDraftAge = form.head_birthdate ? calculateAge(form.head_birthdate) : null;
+  const headDraftAgeCategory = getMemberAgeCategory(form.head_birthdate);
+  const headDraftTags = useMemo(() => getHeadProfileTags(form), [form]);
+  const headPregnancyProgress = getPregnancyProgress(
+    typeof form.head_pregnancy_months === 'number' ? form.head_pregnancy_months : null,
+  );
+
   const canContinueFromStepOne = useMemo(() => {
     return Boolean(
       safeText(form.head_name).trim()
+      && form.head_birthdate
       && safeText(form.contact_number).trim()
       && safeText(form.applicant_email).trim()
       && isEmailValid(safeText(form.applicant_email))
@@ -309,21 +422,30 @@ export function HouseholdRegistrationWizard({
 
   const memberDraftAge = memberDraft.birthdate ? calculateAge(memberDraft.birthdate) : null;
   const memberDraftAgeCategory = getMemberAgeCategory(memberDraft.birthdate);
+  const memberPregnancyProgress = getPregnancyProgress(
+    typeof memberDraft.pregnancy_months === 'number' ? memberDraft.pregnancy_months : null,
+  );
   const memberSummary = useMemo(() => (
     members.reduce(
       (summary, member) => {
         const ageCategory = getMemberAgeCategory(member.birthdate);
+        if (isInfantBirthdate(member.birthdate)) summary.infants++;
         if (ageCategory === 'child') summary.children++;
         if (ageCategory === 'senior') summary.seniors++;
         if (member.is_pregnant) summary.pregnant++;
         if (member.is_pwd) summary.pwd++;
+        if (member.is_4ps) summary.fourPs++;
+        if (member.is_indigent) summary.indigent++;
         return summary;
       },
       {
+        infants: 0,
         children: 0,
         seniors: 0,
         pregnant: 0,
         pwd: 0,
+        fourPs: 0,
+        indigent: 0,
       },
     )
   ), [members]);
@@ -451,6 +573,18 @@ export function HouseholdRegistrationWizard({
       return;
     }
 
+    if (memberDraft.is_pregnant) {
+      const months = Number(memberDraft.pregnancy_months);
+      if (!Number.isFinite(months) || months < 1 || months > 9) {
+        setMemberError('Enter the pregnancy month from 1 to 9.');
+        return;
+      }
+      if (!memberDraft.expected_delivery_date) {
+        setMemberError('Enter the expected date of delivery (EDD) for pregnant members.');
+        return;
+      }
+    }
+
     if (memberDraft.is_pwd && !memberDraft.pwd_type) {
       setMemberError('Select the PWD type so the member is counted correctly.');
       return;
@@ -475,6 +609,28 @@ export function HouseholdRegistrationWizard({
 
   function goNext() {
     setError('');
+
+    if (step === 1 && form.head_is_pregnant && form.head_gender !== 'F') {
+      setError('Pregnant household heads must use Female gender for reporting accuracy.');
+      return;
+    }
+
+    if (step === 1 && form.head_is_pregnant) {
+      const months = Number(form.head_pregnancy_months);
+      if (!Number.isFinite(months) || months < 1 || months > 9) {
+        setError('Enter the household head pregnancy month from 1 to 9.');
+        return;
+      }
+      if (!form.head_expected_delivery_date) {
+        setError('Enter the household head expected date of delivery (EDD).');
+        return;
+      }
+    }
+
+    if (step === 1 && form.head_is_pwd && !form.head_pwd_type) {
+      setError('Select the household head PWD type so the record is counted correctly.');
+      return;
+    }
 
     if (step === 1 && !canContinueFromStepOne) {
       setError('Complete the required personal information and address fields first.');
@@ -537,7 +693,7 @@ export function HouseholdRegistrationWizard({
         registration_review_notes: '',
         pin_qa_status: 'needs_verification',
         pin_qa_notes: '',
-      }, members);
+      }, members, buildHeadProfileDraft(form));
 
       setShowRequirementsDialog(false);
       router.push(`/households/register/status?id=${recordId}`);
@@ -675,6 +831,239 @@ export function HouseholdRegistrationWizard({
             </div>
 
             <div>
+              <label className="mb-2 block text-sm font-medium text-slate-700">Birthdate *</label>
+              <input
+                type="date"
+                value={form.head_birthdate}
+                onChange={(event) => updateForm('head_birthdate', event.target.value)}
+                className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
+              />
+              <div className="mt-2 flex flex-wrap gap-2">
+                {headDraftAge !== null && (
+                  <span className="rounded-full bg-indigo-50 px-2.5 py-1 text-[11px] font-semibold text-indigo-700">
+                    Age {headDraftAge}
+                  </span>
+                )}
+                {isInfantBirthdate(form.head_birthdate) && (
+                  <span className="rounded-full bg-pink-50 px-2.5 py-1 text-[11px] font-semibold text-pink-700">
+                    Infant
+                  </span>
+                )}
+                {headDraftAgeCategory === 'child' && (
+                  <span className="rounded-full bg-amber-50 px-2.5 py-1 text-[11px] font-semibold text-amber-700">
+                    Minor
+                  </span>
+                )}
+                {headDraftAgeCategory === 'senior' && (
+                  <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-700">
+                    Senior
+                  </span>
+                )}
+              </div>
+            </div>
+
+            <div>
+              <label className="mb-2 block text-sm font-medium text-slate-700">Gender</label>
+              <select
+                value={form.head_gender}
+                onChange={(event) => updateForm('head_gender', event.target.value as 'M' | 'F')}
+                className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
+              >
+                <option value="M">Male</option>
+                <option value="F">Female</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="mb-2 block text-sm font-medium text-slate-700">Civil status</label>
+              <select
+                value={form.head_civil_status}
+                onChange={(event) => updateForm('head_civil_status', event.target.value as MemberDraft['civil_status'])}
+                className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
+              >
+                <option value="single">Single</option>
+                <option value="married">Married</option>
+                <option value="widowed">Widowed</option>
+                <option value="separated">Separated</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="mb-2 block text-sm font-medium text-slate-700">Occupation</label>
+              <input
+                type="text"
+                value={form.head_occupation}
+                onChange={(event) => updateForm('head_occupation', event.target.value)}
+                className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
+                placeholder="Farmer, vendor, student"
+              />
+            </div>
+
+            <div>
+              <label className="mb-2 block text-sm font-medium text-slate-700">Income level</label>
+              <select
+                value={form.head_income_level}
+                onChange={(event) => updateForm('head_income_level', event.target.value as MemberDraft['income_level'])}
+                className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
+              >
+                <option value="low">Low</option>
+                <option value="middle">Middle</option>
+                <option value="high">High</option>
+              </select>
+            </div>
+
+            <div className="md:col-span-2 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Household head profile</p>
+                  <p className="mt-1 text-xs text-slate-500">
+                    The household head also becomes the main resident record automatically after approval.
+                  </p>
+                </div>
+                {headDraftTags.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5">
+                    {headDraftTags.map((label) => (
+                      <span
+                        key={label}
+                        className="rounded-full border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-[11px] font-medium text-indigo-700"
+                      >
+                        {label}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="mt-3 grid gap-3 md:grid-cols-2">
+                <label className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">
+                  <input
+                    type="checkbox"
+                    checked={form.head_is_pregnant}
+                    onChange={(event) => {
+                      updateForm('head_is_pregnant', event.target.checked);
+                      if (!event.target.checked) {
+                        updateForm('head_pregnancy_months', '');
+                        updateForm('head_expected_delivery_date', '');
+                      }
+                    }}
+                    className="mt-0.5 h-4 w-4 rounded border-slate-300"
+                  />
+                  <span>
+                    <span className="block font-semibold text-slate-900">Pregnant household head</span>
+                    <span className="mt-1 block text-xs text-slate-500">Include the household head in maternal health and priority response reports.</span>
+                  </span>
+                </label>
+
+                {form.head_is_pregnant && (
+                  <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3 md:col-span-2">
+                    <div className="grid gap-3 md:grid-cols-2">
+                      <div>
+                        <label className="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-500">Pregnancy month *</label>
+                        <input
+                          type="number"
+                          min={1}
+                          max={9}
+                          value={form.head_pregnancy_months ?? ''}
+                          onChange={(event) => updateForm('head_pregnancy_months', event.target.value ? Number(event.target.value) : '')}
+                          className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
+                          placeholder="e.g. 6"
+                        />
+                      </div>
+                      <div>
+                        <label className="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-500">Expected date of delivery (EDD) *</label>
+                        <input
+                          type="date"
+                          value={form.head_expected_delivery_date || ''}
+                          onChange={(event) => updateForm('head_expected_delivery_date', event.target.value)}
+                          className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {form.head_is_pregnant && headPregnancyProgress && (
+                  <div className="rounded-2xl border border-rose-200 bg-rose-50/80 px-4 py-3 text-sm text-rose-900 md:col-span-2">
+                    <p className="font-semibold">
+                      {form.head_pregnancy_months} month{form.head_pregnancy_months === 1 ? '' : 's'} pregnant
+                    </p>
+                    <p className="mt-1 text-xs text-rose-700">
+                      {headPregnancyProgress.trimesterLabel}
+                      {' · '}
+                      {headPregnancyProgress.monthsRemaining === 0
+                        ? 'Full-term month reached, monitor closely for delivery and maternal care.'
+                        : `About ${headPregnancyProgress.monthsRemaining} month${headPregnancyProgress.monthsRemaining === 1 ? '' : 's'} left before the usual 9-month full term.`}
+                    </p>
+                    {form.head_expected_delivery_date ? (
+                      <p className="mt-1 text-xs text-rose-700">
+                        Expected date of delivery (EDD): {form.head_expected_delivery_date}
+                      </p>
+                    ) : null}
+                  </div>
+                )}
+
+                <label className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">
+                  <input
+                    type="checkbox"
+                    checked={form.head_is_4ps}
+                    onChange={(event) => updateForm('head_is_4ps', event.target.checked)}
+                    className="mt-0.5 h-4 w-4 rounded border-slate-300"
+                  />
+                  <span>
+                    <span className="block font-semibold text-slate-900">4Ps beneficiary</span>
+                    <span className="mt-1 block text-xs text-slate-500">Mark if the household head is covered by the Pantawid Pamilyang Pilipino Program.</span>
+                  </span>
+                </label>
+
+                <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
+                  <label className="flex items-start gap-3 text-sm text-slate-700">
+                    <input
+                      type="checkbox"
+                      checked={form.head_is_pwd}
+                      onChange={(event) => updateForm('head_is_pwd', event.target.checked)}
+                      className="mt-0.5 h-4 w-4 rounded border-slate-300"
+                    />
+                    <span>
+                      <span className="block font-semibold text-slate-900">PWD household head</span>
+                      <span className="mt-1 block text-xs text-slate-500">Mark persons with disability so the main household record is counted correctly.</span>
+                    </span>
+                  </label>
+
+                  {form.head_is_pwd && (
+                    <div className="mt-3">
+                      <label className="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-500">PWD type *</label>
+                      <select
+                        value={form.head_pwd_type || ''}
+                        onChange={(event) => updateForm('head_pwd_type', event.target.value as PWDType | '')}
+                        className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
+                      >
+                        <option value="">Select PWD type</option>
+                        {Object.entries(PWD_TYPE_LABELS).map(([value, label]) => (
+                          <option key={value} value={value}>
+                            {label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+                </div>
+
+                <label className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">
+                  <input
+                    type="checkbox"
+                    checked={form.head_is_indigent}
+                    onChange={(event) => updateForm('head_is_indigent', event.target.checked)}
+                    className="mt-0.5 h-4 w-4 rounded border-slate-300"
+                  />
+                  <span>
+                    <span className="block font-semibold text-slate-900">Indigent household head</span>
+                    <span className="mt-1 block text-xs text-slate-500">Use this for household heads needing financial assistance and welfare support.</span>
+                  </span>
+                </label>
+              </div>
+            </div>
+
+            <div>
               <label className="mb-2 block text-sm font-medium text-slate-700">Municipality / City *</label>
               <input
                 type="text"
@@ -784,12 +1173,14 @@ export function HouseholdRegistrationWizard({
 
                 {members.length > 0 && (
                   <div className="mt-4 space-y-4">
-                    <div className="grid gap-3 sm:grid-cols-4">
+                    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
                       {[
                         { label: 'Members', value: members.length },
+                        { label: 'Infants', value: memberSummary.infants },
                         { label: 'Children', value: memberSummary.children },
                         { label: 'Seniors', value: memberSummary.seniors },
                         { label: 'PWD / Pregnant', value: memberSummary.pwd + memberSummary.pregnant },
+                        { label: '4Ps / Indigent', value: memberSummary.fourPs + memberSummary.indigent },
                       ].map((item) => (
                         <div key={item.label} className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
                           <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">{item.label}</p>
@@ -886,6 +1277,11 @@ export function HouseholdRegistrationWizard({
                               Minor
                             </span>
                           )}
+                          {isInfantBirthdate(memberDraft.birthdate) && (
+                            <span className="rounded-full bg-pink-50 px-2.5 py-1 text-[11px] font-semibold text-pink-700">
+                              Infant
+                            </span>
+                          )}
                           {memberDraftAgeCategory === 'senior' && (
                             <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-700">
                               Senior
@@ -970,7 +1366,7 @@ export function HouseholdRegistrationWizard({
                       <div className="md:col-span-2 rounded-2xl border border-slate-200 bg-slate-50 p-4">
                         <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Vulnerability tracking</p>
                         <p className="mt-1 text-xs text-slate-500">
-                          Minor and Senior tags are automatic from the birthdate. Mark Pregnant and PWD so the review team sees them immediately.
+                          Infant, Minor, and Senior tags are automatic from the birthdate. Mark Pregnant, PWD, 4Ps, and Indigent so the review team sees them immediately.
                         </p>
 
                         <div className="mt-3 grid gap-3 md:grid-cols-2">
@@ -978,12 +1374,84 @@ export function HouseholdRegistrationWizard({
                             <input
                               type="checkbox"
                               checked={memberDraft.is_pregnant}
-                              onChange={(event) => setMemberDraft((current) => ({ ...current, is_pregnant: event.target.checked }))}
+                              onChange={(event) => setMemberDraft((current) => ({
+                                ...current,
+                                is_pregnant: event.target.checked,
+                                pregnancy_months: event.target.checked ? current.pregnancy_months : '',
+                                expected_delivery_date: event.target.checked ? current.expected_delivery_date : '',
+                              }))}
                               className="mt-0.5 h-4 w-4 rounded border-slate-300"
                             />
                             <span>
                               <span className="block font-semibold text-slate-900">Pregnant member</span>
                               <span className="mt-1 block text-xs text-slate-500">Include this member in maternal health and priority response reports.</span>
+                            </span>
+                          </label>
+
+                          {memberDraft.is_pregnant && (
+                            <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3 md:col-span-2">
+                              <div className="grid gap-3 md:grid-cols-2">
+                                <div>
+                                  <label className="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-500">Pregnancy month *</label>
+                                  <input
+                                    type="number"
+                                    min={1}
+                                    max={9}
+                                    value={memberDraft.pregnancy_months ?? ''}
+                                    onChange={(event) => setMemberDraft((current) => ({
+                                      ...current,
+                                      pregnancy_months: event.target.value ? Number(event.target.value) : '',
+                                    }))}
+                                    className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
+                                    placeholder="e.g. 6"
+                                  />
+                                </div>
+                                <div>
+                                  <label className="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-500">Expected date of delivery (EDD) *</label>
+                                  <input
+                                    type="date"
+                                    value={memberDraft.expected_delivery_date || ''}
+                                    onChange={(event) => setMemberDraft((current) => ({
+                                      ...current,
+                                      expected_delivery_date: event.target.value,
+                                    }))}
+                                    className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
+                                  />
+                                </div>
+                              </div>
+                            </div>
+                          )}
+
+                          {memberDraft.is_pregnant && memberPregnancyProgress && (
+                            <div className="rounded-2xl border border-rose-200 bg-rose-50/80 px-4 py-3 text-sm text-rose-900 md:col-span-2">
+                              <p className="font-semibold">
+                                {memberDraft.pregnancy_months} month{memberDraft.pregnancy_months === 1 ? '' : 's'} pregnant
+                              </p>
+                              <p className="mt-1 text-xs text-rose-700">
+                                {memberPregnancyProgress.trimesterLabel}
+                                {' · '}
+                                {memberPregnancyProgress.monthsRemaining === 0
+                                  ? 'Full-term month reached, monitor closely for delivery and maternal care.'
+                                  : `About ${memberPregnancyProgress.monthsRemaining} month${memberPregnancyProgress.monthsRemaining === 1 ? '' : 's'} left before the usual 9-month full term.`}
+                              </p>
+                              {memberDraft.expected_delivery_date ? (
+                                <p className="mt-1 text-xs text-rose-700">
+                                  Expected date of delivery (EDD): {memberDraft.expected_delivery_date}
+                                </p>
+                              ) : null}
+                            </div>
+                          )}
+
+                          <label className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">
+                            <input
+                              type="checkbox"
+                              checked={memberDraft.is_4ps}
+                              onChange={(event) => setMemberDraft((current) => ({ ...current, is_4ps: event.target.checked }))}
+                              className="mt-0.5 h-4 w-4 rounded border-slate-300"
+                            />
+                            <span>
+                              <span className="block font-semibold text-slate-900">4Ps beneficiary</span>
+                              <span className="mt-1 block text-xs text-slate-500">Mark members covered by the Pantawid Pamilyang Pilipino Program.</span>
                             </span>
                           </label>
 
@@ -1026,6 +1494,19 @@ export function HouseholdRegistrationWizard({
                               </div>
                             )}
                           </div>
+
+                          <label className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">
+                            <input
+                              type="checkbox"
+                              checked={memberDraft.is_indigent}
+                              onChange={(event) => setMemberDraft((current) => ({ ...current, is_indigent: event.target.checked }))}
+                              className="mt-0.5 h-4 w-4 rounded border-slate-300"
+                            />
+                            <span>
+                              <span className="block font-semibold text-slate-900">Indigent member</span>
+                              <span className="mt-1 block text-xs text-slate-500">Use this for members needing financial assistance and priority welfare support.</span>
+                            </span>
+                          </label>
                         </div>
                       </div>
                     </div>
@@ -1228,12 +1709,33 @@ export function HouseholdRegistrationWizard({
               <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Personal info summary</p>
               <div className="mt-4 space-y-3 text-sm text-slate-700">
                 <p><span className="font-semibold text-slate-900">Full name:</span> {form.head_name}</p>
+                <p><span className="font-semibold text-slate-900">Birthdate:</span> {form.head_birthdate || 'Not provided'}</p>
+                <p><span className="font-semibold text-slate-900">Gender:</span> {form.head_gender === 'F' ? 'Female' : 'Male'}</p>
+                <p><span className="font-semibold text-slate-900">Civil status:</span> {form.head_civil_status}</p>
+                <p><span className="font-semibold text-slate-900">Occupation:</span> {form.head_occupation || 'Not provided'}</p>
+                <p><span className="font-semibold text-slate-900">Income level:</span> {form.head_income_level}</p>
                 <p><span className="font-semibold text-slate-900">Contact:</span> {form.contact_number}</p>
                 <p><span className="font-semibold text-slate-900">Email:</span> {form.applicant_email}</p>
+                {form.head_is_pregnant && typeof form.head_pregnancy_months === 'number' && (
+                  <p>
+                    <span className="font-semibold text-slate-900">Pregnancy tracking:</span>{' '}
+                    {form.head_pregnancy_months} months pregnant
+                    {form.head_expected_delivery_date ? ` · EDD ${form.head_expected_delivery_date}` : ''}
+                  </p>
+                )}
                 {form.supporting_document_name && (
                   <p><span className="font-semibold text-slate-900">Document:</span> {form.supporting_document_name}</p>
                 )}
               </div>
+              {headDraftTags.length > 0 && (
+                <div className="mt-4 flex flex-wrap gap-2 text-xs">
+                  {headDraftTags.map((label) => (
+                    <span key={label} className="rounded-full bg-white px-3 py-1 font-medium text-slate-600">
+                      {label}
+                    </span>
+                  ))}
+                </div>
+              )}
             </div>
 
             <div className="rounded-3xl border border-slate-200 bg-slate-50 p-5">
@@ -1256,10 +1758,13 @@ export function HouseholdRegistrationWizard({
                 </div>
                 {members.length > 0 && (
                   <div className="flex flex-wrap gap-2 text-xs">
+                    <span className="rounded-full bg-white px-3 py-1 font-medium text-slate-600">Infants: {memberSummary.infants}</span>
                     <span className="rounded-full bg-white px-3 py-1 font-medium text-slate-600">Children: {memberSummary.children}</span>
                     <span className="rounded-full bg-white px-3 py-1 font-medium text-slate-600">Seniors: {memberSummary.seniors}</span>
                     <span className="rounded-full bg-white px-3 py-1 font-medium text-slate-600">Pregnant: {memberSummary.pregnant}</span>
                     <span className="rounded-full bg-white px-3 py-1 font-medium text-slate-600">PWD: {memberSummary.pwd}</span>
+                    <span className="rounded-full bg-white px-3 py-1 font-medium text-slate-600">4Ps: {memberSummary.fourPs}</span>
+                    <span className="rounded-full bg-white px-3 py-1 font-medium text-slate-600">Indigent: {memberSummary.indigent}</span>
                   </div>
                 )}
               </div>
@@ -1284,6 +1789,12 @@ export function HouseholdRegistrationWizard({
                         {' · '}
                         Income: {member.income_level}
                       </p>
+                      {member.is_pregnant && typeof member.pregnancy_months === 'number' ? (
+                        <p className="mt-2 text-xs text-rose-700">
+                          Pregnancy tracking: {member.pregnancy_months} months pregnant
+                          {member.expected_delivery_date ? ` · EDD ${member.expected_delivery_date}` : ''}
+                        </p>
+                      ) : null}
                       {getMemberTags(member).length > 0 && (
                         <div className="mt-3 flex flex-wrap gap-1.5">
                           {getMemberTags(member).map((label) => (

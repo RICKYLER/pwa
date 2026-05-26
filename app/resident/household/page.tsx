@@ -47,6 +47,7 @@ import { parseDisasterAlertNotification } from '@/lib/disaster-alerts';
 import { matchesHouseholdAlertScope, mergePurokRiskProfileWithAlertFallback } from '@/lib/purok-risk-profiles';
 import {
   calculateAge,
+  getPregnancyProgress,
   getCurrentVulnerabilityFlagsMapForResidents,
 } from '@/lib/db/vulnerability';
 
@@ -94,6 +95,8 @@ type MemberFormState = {
   income_level: IncomeLevel;
   contact_number: string;
   is_pregnant: boolean;
+  pregnancy_months: number | '';
+  expected_delivery_date: string;
   is_pwd: boolean;
   pwd_type: PWDType | '';
 };
@@ -108,6 +111,8 @@ const EMPTY_MEMBER_FORM: MemberFormState = {
   income_level: 'middle',
   contact_number: '',
   is_pregnant: false,
+  pregnancy_months: '',
+  expected_delivery_date: '',
   is_pwd: false,
   pwd_type: '',
 };
@@ -137,6 +142,9 @@ function buildMemberBadges(member: Resident, flags?: VulnerabilityFlags) {
   ];
 
   if (age < 18) {
+    if (age < 2) {
+      badges.push({ label: 'Infant', tone: 'rose' });
+    }
     badges.push({ label: 'Minor', tone: 'amber' });
   } else if (age >= 60) {
     badges.push({ label: 'Senior', tone: 'amber' });
@@ -144,6 +152,9 @@ function buildMemberBadges(member: Resident, flags?: VulnerabilityFlags) {
 
   if (flags?.is_pregnant) {
     badges.push({ label: 'Pregnant', tone: 'rose' });
+    if (typeof flags.pregnancy_months === 'number') {
+      badges.push({ label: `${flags.pregnancy_months} months`, tone: 'rose' });
+    }
   }
 
   if (flags?.is_pwd) {
@@ -155,6 +166,14 @@ function buildMemberBadges(member: Resident, flags?: VulnerabilityFlags) {
 
   if (flags?.is_low_income) {
     badges.push({ label: 'Low income', tone: 'emerald' });
+  }
+
+  if (flags?.is_4ps) {
+    badges.push({ label: '4Ps', tone: 'emerald' });
+  }
+
+  if (flags?.is_indigent) {
+    badges.push({ label: 'Indigent', tone: 'navy' });
   }
 
   return badges;
@@ -300,6 +319,9 @@ export default function ResidentHouseholdPage() {
   const draftBadges = useMemo(() => {
     const labels: Array<{ label: string; tone: MemberBadgeTone }> = [];
     const age = form.birthdate ? calculateAge(form.birthdate) : null;
+    const pregnancyProgress = getPregnancyProgress(
+      typeof form.pregnancy_months === 'number' ? form.pregnancy_months : null,
+    );
 
     if (age !== null) {
       if (age < 18) {
@@ -311,6 +333,12 @@ export default function ResidentHouseholdPage() {
 
     if (form.is_pregnant) {
       labels.push({ label: 'Pregnant', tone: 'rose' });
+      if (typeof form.pregnancy_months === 'number') {
+        labels.push({ label: `${form.pregnancy_months} months`, tone: 'rose' });
+        if (pregnancyProgress) {
+          labels.push({ label: pregnancyProgress.trimesterLabel, tone: 'rose' });
+        }
+      }
     }
 
     if (form.is_pwd) {
@@ -325,7 +353,11 @@ export default function ResidentHouseholdPage() {
     }
 
     return labels;
-  }, [form.birthdate, form.income_level, form.is_pregnant, form.is_pwd, form.pwd_type]);
+  }, [form.birthdate, form.income_level, form.is_pregnant, form.pregnancy_months, form.is_pwd, form.pwd_type]);
+
+  const memberPregnancyProgress = getPregnancyProgress(
+    typeof form.pregnancy_months === 'number' ? form.pregnancy_months : null,
+  );
 
   async function handleAddMember(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -341,6 +373,18 @@ export default function ResidentHouseholdPage() {
     if (form.is_pregnant && form.gender !== 'F') {
       setMemberError('Pregnant members must use Female gender for reporting accuracy.');
       return;
+    }
+
+    if (form.is_pregnant) {
+      const months = Number(form.pregnancy_months);
+      if (!Number.isFinite(months) || months < 1 || months > 9) {
+        setMemberError('Enter the pregnancy month from 1 to 9.');
+        return;
+      }
+      if (!form.expected_delivery_date) {
+        setMemberError('Enter the expected date of delivery (EDD) for pregnant members.');
+        return;
+      }
     }
 
     if (form.is_pwd && !form.pwd_type) {
@@ -368,6 +412,8 @@ export default function ResidentHouseholdPage() {
       if (form.is_pregnant || form.is_pwd) {
         await updateHealthFlags(createdResident.id, {
           is_pregnant: form.is_pregnant,
+          pregnancy_months: form.is_pregnant && typeof form.pregnancy_months === 'number' ? form.pregnancy_months : undefined,
+          expected_delivery_date: form.is_pregnant ? form.expected_delivery_date || undefined : undefined,
           is_pwd: form.is_pwd,
           pwd_type: form.is_pwd && form.pwd_type ? form.pwd_type : undefined,
         });
@@ -617,7 +663,12 @@ export default function ResidentHouseholdPage() {
                         <input
                           type="checkbox"
                           checked={form.is_pregnant}
-                          onChange={(event) => setForm((current) => ({ ...current, is_pregnant: event.target.checked }))}
+                          onChange={(event) => setForm((current) => ({
+                            ...current,
+                            is_pregnant: event.target.checked,
+                            pregnancy_months: event.target.checked ? current.pregnancy_months : '',
+                            expected_delivery_date: event.target.checked ? current.expected_delivery_date : '',
+                          }))}
                           className="mt-1 h-4 w-4 rounded border-slate-300"
                         />
                         <span>
@@ -627,6 +678,59 @@ export default function ResidentHouseholdPage() {
                           </span>
                         </span>
                       </label>
+
+                      {form.is_pregnant ? (
+                        <div className="rounded-[20px] border border-slate-200 bg-slate-50 px-4 py-3 md:col-span-2">
+                          <div className="grid gap-3 md:grid-cols-2">
+                            <div>
+                              <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">Pregnancy Month</label>
+                              <input
+                                type="number"
+                                min={1}
+                                max={9}
+                                value={form.pregnancy_months}
+                                onChange={(event) => setForm((current) => ({
+                                  ...current,
+                                  pregnancy_months: event.target.value ? Number(event.target.value) : '',
+                                }))}
+                                className="mt-1 h-11 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm text-slate-800 outline-none transition focus:border-cyan-800 focus:ring-4 focus:ring-cyan-900/10"
+                                placeholder="e.g. 6"
+                              />
+                            </div>
+                            <div>
+                              <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">Expected Date of Delivery (EDD)</label>
+                              <input
+                                type="date"
+                                value={form.expected_delivery_date}
+                                onChange={(event) => setForm((current) => ({
+                                  ...current,
+                                  expected_delivery_date: event.target.value,
+                                }))}
+                                className="mt-1 h-11 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm text-slate-800 outline-none transition focus:border-cyan-800 focus:ring-4 focus:ring-cyan-900/10"
+                              />
+                            </div>
+                          </div>
+                          {memberPregnancyProgress && typeof form.pregnancy_months === 'number' ? (
+                            <div className="mt-3 rounded-2xl border border-rose-200 bg-rose-50/80 px-4 py-3 text-sm text-rose-900">
+                              <p className="font-semibold">
+                                {form.pregnancy_months} month{form.pregnancy_months === 1 ? '' : 's'} pregnant
+                              </p>
+                              <p className="mt-1 text-xs text-rose-700">
+                                {memberPregnancyProgress.trimesterLabel}
+                                {' · '}
+                                {memberPregnancyProgress.monthsRemaining === 0
+                                  ? 'Full-term month reached, monitor closely for delivery and maternal care.'
+                                  : `About ${memberPregnancyProgress.monthsRemaining} month${memberPregnancyProgress.monthsRemaining === 1 ? '' : 's'} left before the usual 9-month full term.`}
+                              </p>
+                              {form.expected_delivery_date ? (
+                                <p className="mt-1 text-xs text-rose-700">
+                                  Expected date of delivery (EDD): {form.expected_delivery_date}
+                                </p>
+                              ) : null}
+                            </div>
+                          ) : null}
+                        </div>
+                      ) : null}
 
                       <div className="rounded-[20px] border border-slate-200 bg-slate-50 px-4 py-3">
                         <label className="flex items-start gap-3">

@@ -48,7 +48,7 @@ const ROUTE_TABLES: Array<{
   },
   {
     prefix: '/distribution',
-    tables: ['households', 'residents', 'vulnerability_flags', 'distribution_events', 'distribution_records', 'inventory_items'],
+    tables: ['households', 'residents', 'vulnerability_flags', 'distribution_events', 'distribution_records', 'inventory_items', 'location_master_lists'],
   },
   {
     prefix: '/resident/household',

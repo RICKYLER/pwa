@@ -213,6 +213,44 @@ create table if not exists public.location_master_lists (
   updated_by uuid references public.users (id) on delete set null
 );
 
+with seeded_barangays (barangay_id, barangay_name) as (
+  values
+    ('anitapan', 'Anitapan'),
+    ('cabuyuan', 'Cabuyuan'),
+    ('cadunan', 'Cadunan'),
+    ('cuambog', 'Cuambog'),
+    ('del-pilar', 'Del Pilar'),
+    ('golden-valley', 'Golden Valley'),
+    ('libodon', 'Libodon'),
+    ('pangibiran', 'Pangibiran'),
+    ('pindasan', 'Pindasan'),
+    ('san-antonio', 'San Antonio'),
+    ('tagnanan', 'Tagnanan')
+)
+insert into public.location_master_lists (
+  id,
+  barangay_id,
+  municipality,
+  barangay_name,
+  puroks,
+  updated_at,
+  updated_by
+)
+select
+  seeded_barangays.barangay_id,
+  seeded_barangays.barangay_id,
+  'Mabini',
+  seeded_barangays.barangay_name,
+  '{}'::text[],
+  timezone('utc', now()),
+  null
+from seeded_barangays
+where not exists (
+  select 1
+  from public.location_master_lists existing
+  where existing.barangay_id = seeded_barangays.barangay_id
+);
+
 create table if not exists public.purok_risk_profiles (
   id text primary key default gen_random_uuid()::text,
   barangay_id text not null,
@@ -305,11 +343,17 @@ alter table public.households
 create table if not exists public.vulnerability_flags (
   id text primary key default gen_random_uuid()::text,
   resident_id text not null unique references public.residents (id) on delete cascade,
+  is_infant boolean not null default false,
   is_child boolean not null default false,
   is_adult boolean not null default false,
   is_senior boolean not null default false,
   is_pregnant boolean not null default false,
+  pregnancy_months integer
+    check (pregnancy_months between 1 and 9),
+  expected_delivery_date date,
   is_pwd boolean not null default false,
+  is_4ps boolean not null default false,
+  is_indigent boolean not null default false,
   pwd_type text
     check (pwd_type in ('physical', 'visual', 'hearing', 'intellectual', 'psychosocial')),
   has_chronic_illness boolean not null default false,
@@ -321,10 +365,27 @@ create table if not exists public.vulnerability_flags (
     notes text,
   updated_at timestamptz not null default timezone('utc', now()),
   sync_status text not null default 'pending'
-    check (sync_status in ('pending', 'synced'))
+    check (sync_status in ('pending', 'synced')),
+  check (
+    (
+      not is_pregnant
+      and pregnancy_months is null
+      and expected_delivery_date is null
+    )
+    or (
+      is_pregnant
+      and pregnancy_months between 1 and 9
+      and expected_delivery_date is not null
+    )
+  )
 );
 
 alter table public.vulnerability_flags
+  add column if not exists is_infant boolean not null default false,
+  add column if not exists is_4ps boolean not null default false,
+  add column if not exists is_indigent boolean not null default false,
+  add column if not exists pregnancy_months integer,
+  add column if not exists expected_delivery_date date,
   add column if not exists follow_up_status text not null default 'none',
   add column if not exists medical_notes text;
 
@@ -339,6 +400,45 @@ begin
     alter table public.vulnerability_flags
       add constraint vulnerability_flags_follow_up_status_check
       check (follow_up_status in ('none', 'needs_visit', 'visited', 'referred', 'resolved'));
+  end if;
+end $$;
+
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'vulnerability_flags_pregnancy_months_check'
+      and conrelid = 'public.vulnerability_flags'::regclass
+  ) then
+    alter table public.vulnerability_flags
+      add constraint vulnerability_flags_pregnancy_months_check
+      check (pregnancy_months is null or pregnancy_months between 1 and 9);
+  end if;
+end $$;
+
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'vulnerability_flags_pregnancy_tracking_check'
+      and conrelid = 'public.vulnerability_flags'::regclass
+  ) then
+    alter table public.vulnerability_flags
+      add constraint vulnerability_flags_pregnancy_tracking_check
+      check (
+        (
+          not is_pregnant
+          and pregnancy_months is null
+          and expected_delivery_date is null
+        )
+        or (
+          is_pregnant
+          and pregnancy_months between 1 and 9
+          and expected_delivery_date is not null
+        )
+      );
   end if;
 end $$;
 

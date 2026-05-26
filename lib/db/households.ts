@@ -41,13 +41,33 @@ type HouseholdMemberBundleDraft = {
   occupation: string;
   income_level: 'low' | 'middle' | 'high';
   is_pregnant: boolean;
+  pregnancy_months?: number | null | '';
+  expected_delivery_date?: string;
   is_pwd: boolean;
+  is_4ps: boolean;
+  is_indigent: boolean;
+  pwd_type?: string;
+};
+
+type HouseholdHeadProfileDraft = {
+  birthdate: string;
+  gender: 'M' | 'F';
+  civil_status: 'single' | 'married' | 'widowed' | 'separated';
+  occupation: string;
+  income_level: 'low' | 'middle' | 'high';
+  is_pregnant: boolean;
+  pregnancy_months?: number | null | '';
+  expected_delivery_date?: string;
+  is_pwd: boolean;
+  is_4ps: boolean;
+  is_indigent: boolean;
   pwd_type?: string;
 };
 
 type CreateHouseholdBundleMutationPayload = {
   household?: Record<string, unknown>;
   household_id?: string;
+  head_profile?: Record<string, unknown>;
   residents?: Record<string, unknown>[];
   vulnerability_flags?: Record<string, unknown>[];
 };
@@ -211,6 +231,7 @@ export async function createHousehold(data: Omit<Household, 'id' | 'createdAt' |
 export async function createHouseholdBundle(
   data: Omit<Household, 'id' | 'createdAt' | 'updatedAt' | 'syncStatus'>,
   members: HouseholdMemberBundleDraft[],
+  headProfile?: HouseholdHeadProfileDraft,
 ): Promise<Household> {
   try {
     const householdId = generateId();
@@ -231,6 +252,24 @@ export async function createHouseholdBundle(
         updatedAt: undefined,
         syncStatus: undefined,
       },
+      head_profile: headProfile
+        ? {
+          birthdate: headProfile.birthdate,
+          gender: headProfile.gender,
+          civil_status: headProfile.civil_status,
+          occupation: headProfile.occupation.trim() || undefined,
+          income_level: headProfile.income_level,
+          is_pregnant: Boolean(headProfile.is_pregnant),
+          pregnancy_months: headProfile.is_pregnant
+            ? (typeof headProfile.pregnancy_months === 'number' ? headProfile.pregnancy_months : undefined)
+            : undefined,
+          expected_delivery_date: headProfile.is_pregnant ? headProfile.expected_delivery_date || undefined : undefined,
+          is_pwd: Boolean(headProfile.is_pwd),
+          is_4ps: Boolean(headProfile.is_4ps),
+          is_indigent: Boolean(headProfile.is_indigent),
+          pwd_type: headProfile.is_pwd ? headProfile.pwd_type || undefined : undefined,
+        }
+        : undefined,
       members: members.map((member) => ({
         id: generateResidentBundleId(),
         household_id: householdId,
@@ -243,7 +282,13 @@ export async function createHouseholdBundle(
         income_level: member.income_level,
         status: 'active',
         is_pregnant: Boolean(member.is_pregnant),
+        pregnancy_months: member.is_pregnant
+          ? (typeof member.pregnancy_months === 'number' ? member.pregnancy_months : undefined)
+          : undefined,
+        expected_delivery_date: member.is_pregnant ? member.expected_delivery_date || undefined : undefined,
         is_pwd: Boolean(member.is_pwd),
+        is_4ps: Boolean(member.is_4ps),
+        is_indigent: Boolean(member.is_indigent),
         pwd_type: member.is_pwd ? member.pwd_type || undefined : undefined,
       })),
     });

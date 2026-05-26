@@ -37,6 +37,13 @@ export async function getLocationMasterList(
   return record ? normalizeMasterList(record) : undefined;
 }
 
+export async function getLocationMasterLists(): Promise<LocationMasterList[]> {
+  const records = await db.getAll<LocationMasterList>(STORE_NAMES.location_master_lists);
+  return records
+    .map(normalizeMasterList)
+    .sort((left, right) => left.barangay_name.localeCompare(right.barangay_name));
+}
+
 export async function saveLocationMasterList(input: {
   barangay_id: string;
   municipality: string;

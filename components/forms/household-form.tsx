@@ -54,7 +54,11 @@ export interface MemberDraft {
   occupation: string;
   income_level: 'low' | 'middle' | 'high';
   is_pregnant: boolean;
+  pregnancy_months?: number | '';
+  expected_delivery_date?: string;
   is_pwd: boolean;
+  is_4ps: boolean;
+  is_indigent: boolean;
   pwd_type?: PWDType | '';
 }
 
@@ -76,7 +80,11 @@ const EMPTY_MEMBER: MemberDraft = {
   occupation: '',
   income_level: 'low',
   is_pregnant: false,
+  pregnancy_months: '',
+  expected_delivery_date: '',
   is_pwd: false,
+  is_4ps: false,
+  is_indigent: false,
   pwd_type: '',
 };
 
@@ -143,16 +151,40 @@ function getAgeCategory(birthdate: string): 'child' | 'adult' | 'senior' | null 
   return 'adult';
 }
 
+function isInfantBirthdate(birthdate: string): boolean {
+  if (!birthdate) return false;
+  const age = calculateAge(birthdate);
+  return age >= 0 && age < 2;
+}
+
+function getPregnancyProgress(pregnancyMonths?: number | '' | null): {
+  trimesterLabel: '1st trimester' | '2nd trimester' | '3rd trimester';
+  monthsRemaining: number;
+} | null {
+  const months = typeof pregnancyMonths === 'number' ? Math.trunc(pregnancyMonths) : Number.NaN;
+  if (!Number.isFinite(months) || months < 1 || months > 9) return null;
+  return {
+    trimesterLabel: months <= 3 ? '1st trimester' : months <= 6 ? '2nd trimester' : '3rd trimester',
+    monthsRemaining: Math.max(0, 9 - months),
+  };
+}
+
 function getMemberVulnerabilityLabels(member: MemberDraft): string[] {
   const labels: string[] = [];
   const ageCategory = getAgeCategory(member.birthdate);
 
+  if (isInfantBirthdate(member.birthdate)) labels.push('Infant');
   if (ageCategory === 'child') labels.push('Minor');
   if (ageCategory === 'senior') labels.push('Senior');
   if (member.is_pregnant) labels.push('Pregnant');
+  if (member.is_pregnant && typeof member.pregnancy_months === 'number') {
+    labels.push(`${member.pregnancy_months} months`);
+  }
   if (member.is_pwd) {
     labels.push(member.pwd_type ? `PWD - ${PWD_TYPE_LABELS[member.pwd_type]}` : 'PWD');
   }
+  if (member.is_4ps) labels.push('4Ps');
+  if (member.is_indigent) labels.push('Indigent');
 
   return labels;
 }
@@ -278,6 +310,7 @@ export function HouseholdForm({ initialData, onSubmit, isLoading = false }: Hous
   const requiresManualVerification = pinSource === 'manual_pin';
   const memberDraftAge = memberDraft.birthdate ? calculateAge(memberDraft.birthdate) : null;
   const memberDraftAgeCategory = getAgeCategory(memberDraft.birthdate);
+  const memberPregnancyProgress = getPregnancyProgress(memberDraft.pregnancy_months);
   const memberSummary = members.reduce(
     (summary, member) => {
       const ageCategory = getAgeCategory(member.birthdate);
@@ -666,6 +699,17 @@ export function HouseholdForm({ initialData, onSubmit, isLoading = false }: Hous
     if (memberDraft.is_pregnant && memberDraft.gender !== 'F') {
       setMemberError('Pregnant members must use Female gender for reporting accuracy.');
       return;
+    }
+    if (memberDraft.is_pregnant) {
+      const months = Number(memberDraft.pregnancy_months);
+      if (!Number.isFinite(months) || months < 1 || months > 9) {
+        setMemberError('Enter the pregnancy month from 1 to 9.');
+        return;
+      }
+      if (!memberDraft.expected_delivery_date) {
+        setMemberError('Enter the expected date of delivery (EDD) for pregnant members.');
+        return;
+      }
     }
     if (memberDraft.is_pwd && !memberDraft.pwd_type) {
       setMemberError('Select the PWD type so this member is counted correctly in reports.');
@@ -1534,7 +1578,12 @@ export function HouseholdForm({ initialData, onSubmit, isLoading = false }: Hous
                     <input
                       type="checkbox"
                       checked={memberDraft.is_pregnant}
-                      onChange={(e) => setMemberDraft((prev) => ({ ...prev, is_pregnant: e.target.checked }))}
+                      onChange={(e) => setMemberDraft((prev) => ({
+                        ...prev,
+                        is_pregnant: e.target.checked,
+                        pregnancy_months: e.target.checked ? prev.pregnancy_months : '',
+                        expected_delivery_date: e.target.checked ? prev.expected_delivery_date : '',
+                      }))}
                       className="mt-0.5 h-4 w-4 rounded border-input"
                     />
                     <span>
@@ -1544,6 +1593,60 @@ export function HouseholdForm({ initialData, onSubmit, isLoading = false }: Hous
                       </span>
                     </span>
                   </label>
+
+                  {memberDraft.is_pregnant && (
+                    <div className="rounded-md border border-border bg-card px-3 py-3 md:col-span-2">
+                      <div className="grid gap-3 md:grid-cols-2">
+                        <div>
+                          <label className="mb-1 block text-xs font-medium text-muted-foreground">Pregnancy month *</label>
+                          <input
+                            type="number"
+                            min={1}
+                            max={9}
+                            value={memberDraft.pregnancy_months ?? ''}
+                            onChange={(e) => setMemberDraft((prev) => ({
+                              ...prev,
+                              pregnancy_months: e.target.value ? Number(e.target.value) : '',
+                            }))}
+                            className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                            placeholder="e.g. 6"
+                          />
+                        </div>
+                        <div>
+                          <label className="mb-1 block text-xs font-medium text-muted-foreground">Expected date of delivery (EDD) *</label>
+                          <input
+                            type="date"
+                            value={memberDraft.expected_delivery_date || ''}
+                            onChange={(e) => setMemberDraft((prev) => ({
+                              ...prev,
+                              expected_delivery_date: e.target.value,
+                            }))}
+                            className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {memberDraft.is_pregnant && memberPregnancyProgress && (
+                    <div className="rounded-md border border-rose-200 bg-rose-50/80 px-3 py-3 text-sm text-rose-900 md:col-span-2">
+                      <p className="font-medium">
+                        {memberDraft.pregnancy_months} month{memberDraft.pregnancy_months === 1 ? '' : 's'} pregnant
+                      </p>
+                      <p className="mt-1 text-xs text-rose-700">
+                        {memberPregnancyProgress.trimesterLabel}
+                        {' · '}
+                        {memberPregnancyProgress.monthsRemaining === 0
+                          ? 'Full-term month reached, monitor closely for delivery and maternal care.'
+                          : `About ${memberPregnancyProgress.monthsRemaining} month${memberPregnancyProgress.monthsRemaining === 1 ? '' : 's'} left before the usual 9-month full term.`}
+                      </p>
+                      {memberDraft.expected_delivery_date ? (
+                        <p className="mt-1 text-xs text-rose-700">
+                          Expected date of delivery (EDD): {memberDraft.expected_delivery_date}
+                        </p>
+                      ) : null}
+                    </div>
+                  )}
 
                   <div className="rounded-md border border-border bg-card px-3 py-3">
                     <label className="flex items-start gap-3">
@@ -1657,7 +1760,7 @@ export function HouseholdForm({ initialData, onSubmit, isLoading = false }: Hous
             <div className="text-center py-8 border border-dashed border-border rounded-lg">
               <User className="w-8 h-8 text-muted-foreground mx-auto mb-2 opacity-40" />
               <p className="text-sm text-muted-foreground">No members added yet</p>
-              <p className="text-xs text-muted-foreground mt-1">Click "Add Member" to add household members</p>
+              <p className="text-xs text-muted-foreground mt-1">Click &quot;Add Member&quot; to add household members</p>
             </div>
           )
         )}

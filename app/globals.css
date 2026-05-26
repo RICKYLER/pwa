@@ -332,3 +332,86 @@
   margin: 0;
   padding: 0.85rem 0.95rem;
 }
+
+.responder-leaflet-map .responder-hover-tooltip {
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+}
+
+.responder-leaflet-map .responder-hover-tooltip .leaflet-tooltip-content {
+  margin: 0;
+  padding: 0;
+}
+
+.responder-leaflet-map .responder-hover-tooltip::before {
+  display: none;
+}
+
+.responder-hover-card {
+  min-width: 220px;
+  max-width: 280px;
+  border-radius: 18px;
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  background: rgba(15, 23, 42, 0.96);
+  box-shadow: 0 22px 52px -24px rgba(15, 23, 42, 0.55);
+  color: #f8fafc;
+  padding: 0.8rem 0.9rem;
+  backdrop-filter: blur(12px);
+}
+
+.responder-hover-card--incident {
+  background: rgba(124, 45, 18, 0.96);
+}
+
+.responder-hover-card__eyebrow {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: rgba(125, 211, 252, 0.92);
+}
+
+.responder-hover-card__title {
+  margin-top: 0.2rem;
+  font-size: 15px;
+  font-weight: 800;
+  line-height: 1.25;
+  color: #ffffff;
+}
+
+.responder-hover-card__line {
+  margin-top: 0.28rem;
+  font-size: 12px;
+  line-height: 1.4;
+  color: rgba(226, 232, 240, 0.96);
+}
+
+.responder-hover-card__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.38rem;
+  margin-top: 0.58rem;
+}
+
+.responder-hover-card__meta span,
+.responder-hover-card__contact {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 0.2rem 0.52rem;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.responder-hover-card__meta span {
+  background: rgba(255, 255, 255, 0.12);
+  color: #e0f2fe;
+}
+
+.responder-hover-card__contact {
+  margin-top: 0.58rem;
+  background: rgba(20, 184, 166, 0.16);
+  color: #ccfbf1;
+}

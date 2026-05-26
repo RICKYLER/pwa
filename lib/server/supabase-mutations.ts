@@ -31,13 +31,22 @@ type HouseholdMemberDraft = {
   occupation?: string;
   income_level?: string;
   is_pregnant?: boolean;
+  pregnancy_months?: number | null;
+  expected_delivery_date?: string;
   is_pwd?: boolean;
+  is_4ps?: boolean;
+  is_indigent?: boolean;
   pwd_type?: string;
   has_chronic_illness?: boolean;
   chronic_conditions?: string[];
   follow_up_status?: string;
   medical_notes?: string;
 };
+
+type HouseholdHeadProfileDraft = Omit<
+  HouseholdMemberDraft,
+  'full_name' | 'relationship_to_head'
+>;
 
 type InventoryTransactionParams = {
   item_id: string;
@@ -147,11 +156,23 @@ function buildVulnerabilityFlagsPayload(residentId: string, member: HouseholdMem
 
   return {
     resident_id: residentId,
+    is_infant: age < 2,
     is_child: age < 18,
     is_adult: age >= 18 && age < 60,
     is_senior: age >= 60,
     is_pregnant: Boolean(member.is_pregnant),
+    pregnancy_months: Boolean(member.is_pregnant)
+      ? (() => {
+        const parsed = Number(member.pregnancy_months);
+        return Number.isFinite(parsed) && parsed >= 1 && parsed <= 9 ? parsed : null;
+      })()
+      : null,
+    expected_delivery_date: Boolean(member.is_pregnant)
+      ? toDateOnlyString(member.expected_delivery_date)
+      : null,
     is_pwd: Boolean(member.is_pwd),
+    is_4ps: Boolean(member.is_4ps),
+    is_indigent: Boolean(member.is_indigent),
     pwd_type: member.is_pwd ? toOptionalString(member.pwd_type) : null,
     has_chronic_illness: Boolean(member.has_chronic_illness),
     chronic_conditions: toTextArray(member.chronic_conditions),
@@ -300,6 +321,7 @@ async function createDistributionEventViaLegacyInsert(
     .from('distribution_events')
     .insert({
       id: event.id,
+      barangay_id: event.barangay_id?.trim() || '',
       event_name: event.event_name.trim(),
       type: event.type,
       incident_id: toOptionalString(event.incident_id),
@@ -622,6 +644,7 @@ async function createHouseholdBundleWithoutRpc(
   user: User,
   household: RemoteHouseholdBundleInput,
   members: HouseholdMemberDraft[],
+  headProfile: HouseholdHeadProfileDraft | undefined,
   remoteActorId: string,
 ) {
   if (!['admin', 'encoder', 'resident'].includes(user.role)) {
@@ -697,8 +720,114 @@ async function createHouseholdBundleWithoutRpc(
 
   const createdResidents: Array<Record<string, unknown>> = [];
   const createdFlags: Array<Record<string, unknown>> = [];
+  let updatedHousehold: Record<string, unknown> | null = null;
 
   try {
+    if (headProfile) {
+      const normalizedHeadProfile: HouseholdHeadProfileDraft = {
+        birthdate: headProfile.birthdate,
+        gender: headProfile.gender === 'F' ? 'F' : 'M',
+        civil_status: headProfile.civil_status ?? 'single',
+        occupation: headProfile.occupation ?? '',
+        income_level: headProfile.income_level ?? 'low',
+      is_pregnant: Boolean(headProfile.is_pregnant),
+      pregnancy_months: headProfile.is_pregnant ? headProfile.pregnancy_months ?? null : null,
+      expected_delivery_date: headProfile.is_pregnant ? headProfile.expected_delivery_date : undefined,
+      is_pwd: Boolean(headProfile.is_pwd),
+        is_4ps: Boolean(headProfile.is_4ps),
+        is_indigent: Boolean(headProfile.is_indigent),
+        pwd_type: headProfile.pwd_type,
+        has_chronic_illness: Boolean(headProfile.has_chronic_illness),
+        chronic_conditions: toTextArray(headProfile.chronic_conditions),
+        follow_up_status: headProfile.follow_up_status,
+        medical_notes: headProfile.medical_notes,
+      };
+
+      const headResidentInput: HouseholdMemberDraft = {
+        full_name: toOptionalString(createdHousehold.head_name) ?? '',
+        birthdate: toDateOnlyString(normalizedHeadProfile.birthdate) ?? new Date().toISOString().slice(0, 10),
+        gender: normalizedHeadProfile.gender === 'F' ? 'F' : 'M',
+        relationship_to_head: 'Self',
+        civil_status: normalizedHeadProfile.civil_status,
+        occupation: normalizedHeadProfile.occupation,
+        income_level: normalizedHeadProfile.income_level,
+      is_pregnant: Boolean(normalizedHeadProfile.is_pregnant),
+      pregnancy_months: normalizedHeadProfile.is_pregnant ? normalizedHeadProfile.pregnancy_months ?? null : null,
+      expected_delivery_date: normalizedHeadProfile.is_pregnant ? normalizedHeadProfile.expected_delivery_date : undefined,
+      is_pwd: Boolean(normalizedHeadProfile.is_pwd),
+        is_4ps: Boolean(normalizedHeadProfile.is_4ps),
+        is_indigent: Boolean(normalizedHeadProfile.is_indigent),
+        pwd_type: normalizedHeadProfile.pwd_type,
+        has_chronic_illness: Boolean(normalizedHeadProfile.has_chronic_illness),
+        chronic_conditions: toTextArray(normalizedHeadProfile.chronic_conditions),
+        follow_up_status: normalizedHeadProfile.follow_up_status,
+        medical_notes: normalizedHeadProfile.medical_notes,
+      };
+
+      const headResidentPayload = stripUndefined({
+        household_id: createdHousehold.id,
+        full_name: headResidentInput.full_name,
+        birthdate: headResidentInput.birthdate,
+        gender: headResidentInput.gender,
+        relationship_to_head: 'Self',
+        status: 'active',
+        civil_status: toOptionalString(headResidentInput.civil_status),
+        occupation: toOptionalString(headResidentInput.occupation),
+        income_level: toOptionalString(headResidentInput.income_level),
+        contact_number: toOptionalString(createdHousehold.contact_number),
+        verification_status: user.role === 'admin' ? 'verified' : 'pending',
+        sync_status: 'synced',
+      });
+
+      const { data: createdHeadResident, error: headResidentError } = await supabase
+        .from('residents')
+        .insert(headResidentPayload)
+        .select('*')
+        .single();
+
+      if (headResidentError) {
+        throw new Error(headResidentError.message);
+      }
+
+      if (!createdHeadResident) {
+        throw new Error('Household head resident could not be created.');
+      }
+
+      createdResidents.push(createdHeadResident);
+
+      const { data: createdHeadFlag, error: headFlagsError } = await supabase
+        .from('vulnerability_flags')
+        .upsert(buildVulnerabilityFlagsPayload(createdHeadResident.id, headResidentInput), {
+          onConflict: 'resident_id',
+        })
+        .select('*')
+        .single();
+
+      if (headFlagsError) {
+        throw new Error(headFlagsError.message);
+      }
+
+      if (createdHeadFlag) {
+        createdFlags.push(createdHeadFlag);
+      }
+
+      const { data: householdWithHead, error: householdHeadUpdateError } = await supabase
+        .from('households')
+        .update({
+          head_id: createdHeadResident.id,
+          sync_status: 'synced',
+        })
+        .eq('id', createdHousehold.id)
+        .select('*')
+        .single();
+
+      if (householdHeadUpdateError) {
+        throw new Error(householdHeadUpdateError.message);
+      }
+
+      updatedHousehold = householdWithHead ?? null;
+    }
+
     for (const member of members) {
       const residentPayload = stripUndefined({
         household_id: createdHousehold.id,
@@ -756,8 +885,8 @@ async function createHouseholdBundleWithoutRpc(
   }
 
   return {
-    household: createdHousehold,
-    household_id: createdHousehold.id,
+    household: updatedHousehold ?? createdHousehold,
+    household_id: (updatedHousehold ?? createdHousehold).id,
     residents: createdResidents,
     vulnerability_flags: createdFlags,
   };
@@ -900,7 +1029,11 @@ async function createResidentWithoutRpc(
       occupation: toOptionalString(insertedResident.occupation) ?? undefined,
       income_level: toOptionalString(insertedResident.income_level) ?? undefined,
       is_pregnant: false,
+      pregnancy_months: null,
+      expected_delivery_date: undefined,
       is_pwd: false,
+      is_4ps: false,
+      is_indigent: false,
       has_chronic_illness: false,
     };
 
@@ -956,6 +1089,7 @@ export async function createHouseholdBundleOnServer(
   user: User,
   household: Omit<Household, 'createdAt' | 'updatedAt' | 'syncStatus'> & { id: string },
   members: HouseholdMemberDraft[],
+  headProfile?: HouseholdHeadProfileDraft,
 ) {
   const remoteActorId = await getRemoteActorId(user);
   const remoteHousehold = {
@@ -967,7 +1101,7 @@ export async function createHouseholdBundleOnServer(
     location_verified_by: await resolveRemoteUserId(household.location_verified_by),
     registration_reviewed_by: await resolveRemoteUserId(household.registration_reviewed_by),
   };
-  const data = await createHouseholdBundleWithoutRpc(user, remoteHousehold, members, remoteActorId);
+  const data = await createHouseholdBundleWithoutRpc(user, remoteHousehold, members, headProfile, remoteActorId);
 
   await createAuditLogEntry({
     user,
@@ -977,7 +1111,7 @@ export async function createHouseholdBundleOnServer(
     changes: {
       household_name: household.head_name,
       purok: household.purok_sitio,
-      members_count: members.length,
+      members_count: members.length + (headProfile ? 1 : 0),
     },
   });
 
@@ -1072,6 +1206,8 @@ export async function updateResidentHealthFlagsOnServer(
   residentId: string,
   updates: {
     is_pregnant?: boolean;
+    pregnancy_months?: number;
+    expected_delivery_date?: string;
     is_pwd?: boolean;
     pwd_type?: string;
     has_chronic_illness?: boolean;
@@ -1132,6 +1268,16 @@ export async function updateResidentHealthFlagsOnServer(
 
   const payload = stripUndefined({
     is_pregnant: typeof updates.is_pregnant === 'boolean' ? updates.is_pregnant : undefined,
+    pregnancy_months: updates.is_pregnant === false
+      ? null
+      : updates.pregnancy_months === undefined
+        ? undefined
+        : Math.min(Math.max(Math.trunc(updates.pregnancy_months), 1), 9),
+    expected_delivery_date: updates.is_pregnant === false
+      ? null
+      : updates.expected_delivery_date === undefined
+        ? undefined
+        : toDateOnlyString(updates.expected_delivery_date),
     is_pwd: typeof updates.is_pwd === 'boolean' ? updates.is_pwd : undefined,
     pwd_type: updates.pwd_type === undefined ? undefined : toOptionalString(updates.pwd_type),
     has_chronic_illness:
@@ -1699,6 +1845,15 @@ export async function createDistributionEventOnServer(
     throw new Error('You are not allowed to create distribution events.');
   }
 
+  const selectedBarangayId = toOptionalString(event.barangay_id);
+  if (!selectedBarangayId) {
+    throw new Error('Barangay selection is required.');
+  }
+
+  if (user.role === 'encoder' && selectedBarangayId !== user.barangay_id) {
+    throw new Error('Encoders may only create events for their assigned barangay.');
+  }
+
   const supabase = getSupabaseAdminClient();
   const remoteActorId = await getRemoteActorId(user);
   const scheduledDate = toDateOnlyString(event.scheduled_date);
@@ -1708,6 +1863,7 @@ export async function createDistributionEventOnServer(
 
   const { data, error } = await supabase.rpc('create_distribution_event_bundle', {
     p_id: event.id,
+    p_barangay_id: selectedBarangayId,
     p_event_name: event.event_name.trim(),
     p_type: event.type,
     p_incident_id: toOptionalString(event.incident_id),
@@ -1739,7 +1895,7 @@ export async function createDistributionEventOnServer(
       changes: {
         event_name: event.event_name,
         type: event.type,
-        barangay_id: user.barangay_id,
+        barangay_id: selectedBarangayId,
         location: event.location,
         target_scope: event.target_scope,
         target_group: event.target_group,
@@ -1768,7 +1924,7 @@ export async function createDistributionEventOnServer(
     changes: {
       event_name: event.event_name,
       type: event.type,
-      barangay_id: user.barangay_id,
+      barangay_id: selectedBarangayId,
       location: event.location,
       target_scope: event.target_scope,
       target_group: event.target_group,

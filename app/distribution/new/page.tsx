@@ -16,7 +16,7 @@ import {
   Trash2,
   Users,
 } from 'lucide-react';
-import { getAnalyticsBarangayScope, getAnalyticsScopeLabel } from '@/lib/analytics-scope';
+import { getAnalyticsScopeLabel } from '@/lib/analytics-scope';
 import { getCurrentUser, hasPermission } from '@/lib/auth';
 import MapLocationPicker from '@/components/MapLocationPicker';
 import { buildDistributionInventorySummary } from '@/lib/distribution-insights';
@@ -25,13 +25,16 @@ import {
   getDistributionAudienceStats,
   type DistributionAudienceStats,
 } from '@/lib/db/distribution';
+import { BARANGAY_OPTIONS, MABINI_MUNICIPALITY } from '@/lib/barangays';
 import { getInventoryItems, getPackageTemplates } from '@/lib/db/inventory';
+import { getLocationMasterLists } from '@/lib/db/location-master';
 import type {
   DistributedItem,
   DistributionTargetGroup,
   DistributionTargetScope,
   DistributionType,
   InventoryItem,
+  LocationMasterList,
   PackageTemplate,
 } from '@/lib/db/schema';
 
@@ -85,6 +88,33 @@ const TARGET_GROUPS: { value: DistributionTargetGroup; label: string; desc: stri
   { value: 'low_income', label: 'Low Income', desc: 'Income-priority support' },
 ];
 
+const TARGET_GROUP_PROGRAMS: Record<DistributionTargetGroup, { sector: string; program: string }> = {
+  all: {
+    sector: 'General community sector',
+    program: 'General relief distribution for all eligible beneficiaries in scope.',
+  },
+  senior: {
+    sector: 'Senior citizens sector',
+    program: 'Senior citizen assistance and age-priority relief support.',
+  },
+  pwd: {
+    sector: 'Persons with disability sector',
+    program: 'PWD support assistance and accessibility-priority relief.',
+  },
+  pregnant: {
+    sector: 'Maternal care sector',
+    program: 'Pregnancy and maternal support assistance.',
+  },
+  minor: {
+    sector: 'Children and minors sector',
+    program: 'Child-focused assistance for residents ages 0 to 17.',
+  },
+  low_income: {
+    sector: 'Low-income households sector',
+    program: 'Income-priority household assistance.',
+  },
+};
+
 const DISTRIBUTION_NAMES = [
   'Food Pack Distribution',
   'General Relief Distribution',
@@ -105,11 +135,24 @@ export default function NewDistributionPage() {
   const [isLoadingInventory, setIsLoadingInventory] = useState(true);
   const [success, setSuccess] = useState(false);
   const [error, setError] = useState('');
+  const [barangayOptions, setBarangayOptions] = useState<LocationMasterList[]>([]);
   const [packageItemId, setPackageItemId] = useState('');
   const [selectedTemplateId, setSelectedTemplateId] = useState('');
   const [packageQuantity, setPackageQuantity] = useState('1');
   const [audienceStats, setAudienceStats] = useState<DistributionAudienceStats | null>(null);
   const [isLoadingAudience, setIsLoadingAudience] = useState(false);
+
+  const fallbackBarangayOptions = useMemo<LocationMasterList[]>(
+    () => BARANGAY_OPTIONS.map((barangay) => ({
+      id: barangay.id,
+      barangay_id: barangay.id,
+      barangay_name: barangay.label,
+      municipality: MABINI_MUNICIPALITY,
+      puroks: [],
+      updatedAt: new Date(0),
+    })),
+    [],
+  );
 
   const [form, setForm] = useState({
     event_name: '',
@@ -117,6 +160,7 @@ export default function NewDistributionPage() {
     target_scope: 'household' as DistributionTargetScope,
     target_group: 'all' as DistributionTargetGroup,
     package_items: [] as DistributedItem[],
+    barangay_id: '',
     location: '',
     gps_lat: null as number | null,
     gps_lng: null as number | null,
@@ -128,6 +172,17 @@ export default function NewDistributionPage() {
     () => getAnalyticsScopeLabel(user),
     [user],
   );
+  const selectedBarangay = useMemo(
+    () => barangayOptions.find((barangay) => barangay.barangay_id === form.barangay_id) ?? null,
+    [barangayOptions, form.barangay_id],
+  );
+  const selectedAudienceScopeLabel = useMemo(() => {
+    if (selectedBarangay?.barangay_name) {
+      return selectedBarangay.barangay_name;
+    }
+
+    return form.barangay_id || audienceScopeLabel;
+  }, [selectedBarangay, form.barangay_id, audienceScopeLabel]);
   const packageInventorySummary = useMemo(
     () => buildDistributionInventorySummary(form.package_items, inventoryItems),
     [form.package_items, inventoryItems],
@@ -139,19 +194,24 @@ export default function NewDistributionPage() {
       return;
     }
 
+    if (!form.barangay_id) {
+      setAudienceStats(null);
+      return;
+    }
+
     try {
       setIsLoadingAudience(true);
       const stats = await getDistributionAudienceStats({
-        barangay_id: getAnalyticsBarangayScope(user),
+        barangay_id: form.barangay_id,
         target_group: form.target_group,
         target_scope: form.target_scope,
-        scope_label: audienceScopeLabel,
+        scope_label: selectedAudienceScopeLabel,
       });
       setAudienceStats(stats);
     } finally {
       setIsLoadingAudience(false);
     }
-  }, [audienceScopeLabel, form.target_group, form.target_scope, user]);
+  }, [form.barangay_id, form.target_group, form.target_scope, selectedAudienceScopeLabel, user]);
 
   useEffect(() => {
     if (!user || !hasPermission('manage_inventory')) {
@@ -166,9 +226,19 @@ export default function NewDistributionPage() {
           getInventoryItems(),
           getPackageTemplates(),
         ]);
+        const masterLists = await getLocationMasterLists();
+        const nextBarangayOptions = masterLists.length > 0 ? masterLists : fallbackBarangayOptions;
         const activeItems = items.filter((item) => item.quantity_available > 0);
         setInventoryItems(activeItems);
         setPackageTemplates(templates);
+        setBarangayOptions(nextBarangayOptions);
+        setForm((current) => {
+          const encoderBarangayId = user.role !== 'admin' ? user.barangay_id : '';
+          const defaultBarangayId = encoderBarangayId || current.barangay_id || nextBarangayOptions[0]?.barangay_id || '';
+          return defaultBarangayId === current.barangay_id
+            ? current
+            : { ...current, barangay_id: defaultBarangayId };
+        });
         if (activeItems[0]) {
           setPackageItemId(activeItems[0].id);
         }
@@ -181,7 +251,7 @@ export default function NewDistributionPage() {
     }
 
     loadInventory();
-  }, [user, router]);
+  }, [fallbackBarangayOptions, user, router]);
 
   useEffect(() => {
     if (!user || !hasPermission('manage_inventory')) {
@@ -220,6 +290,10 @@ export default function NewDistributionPage() {
   );
   const selectedTargetGroupLabel = useMemo(
     () => TARGET_GROUPS.find((group) => group.value === form.target_group)?.label ?? 'All',
+    [form.target_group],
+  );
+  const selectedTargetGroupProgram = useMemo(
+    () => TARGET_GROUP_PROGRAMS[form.target_group],
     [form.target_group],
   );
 
@@ -345,6 +419,11 @@ export default function NewDistributionPage() {
       return;
     }
 
+    if (!form.barangay_id.trim()) {
+      setError('Select the barangay that will receive this event.');
+      return;
+    }
+
     if (!form.location.trim()) {
       setError('Please pin a location on the map.');
       return;
@@ -375,6 +454,7 @@ export default function NewDistributionPage() {
       await createDistributionEvent(
         {
           event_name: form.event_name.trim(),
+          barangay_id: form.barangay_id,
           type: form.type,
           target_scope: form.target_scope,
           target_group: form.target_group,
@@ -479,6 +559,30 @@ export default function NewDistributionPage() {
                 </datalist>
               </div>
 
+              <div>
+                <label className="mb-1.5 block text-xs font-semibold text-slate-600">
+                  Target Barangay <span className="text-red-400">*</span>
+                </label>
+                <select
+                  value={form.barangay_id}
+                  onChange={(e) => setField('barangay_id', e.target.value)}
+                  disabled={user.role !== 'admin'}
+                  className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm transition-all focus:border-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/30 disabled:cursor-not-allowed disabled:opacity-70"
+                >
+                  {!form.barangay_id && <option value="">Select barangay</option>}
+                  {barangayOptions.map((barangay) => (
+                    <option key={barangay.barangay_id} value={barangay.barangay_id}>
+                      {barangay.barangay_name}
+                    </option>
+                  ))}
+                </select>
+                <p className="mt-1 text-[11px] text-slate-400">
+                  {user.role === 'admin'
+                    ? 'Only the selected barangay will qualify for this event.'
+                    : 'Your account is limited to your assigned barangay.'}
+                </p>
+              </div>
+
               <div className="grid gap-3 sm:grid-cols-2">
                 <div>
                   <label className="mb-1.5 flex items-center gap-1 text-xs font-semibold text-slate-600">
@@ -561,7 +665,7 @@ export default function NewDistributionPage() {
 
               <div>
                 <p className="mb-2 text-xs font-semibold text-slate-600">
-                  Target Group <span className="text-red-400">*</span>
+                  Sector / Target Group <span className="text-red-400">*</span>
                 </p>
                 <div className="grid gap-2 sm:grid-cols-3">
                   {TARGET_GROUPS.map((group) => {
@@ -591,6 +695,18 @@ export default function NewDistributionPage() {
                 </div>
               </div>
 
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                <p className="text-xs font-bold uppercase tracking-wider text-slate-500">
+                  Selected Sector Program
+                </p>
+                <p className="mt-2 text-sm font-semibold text-slate-900">
+                  {selectedTargetGroupProgram.sector}
+                </p>
+                <p className="mt-1 text-[11px] leading-5 text-slate-500">
+                  {selectedTargetGroupProgram.program}
+                </p>
+              </div>
+
               <div className="rounded-2xl border border-emerald-200 bg-emerald-50/60 p-4">
                 <div className="flex items-start justify-between gap-3">
                   <div>
@@ -599,10 +715,10 @@ export default function NewDistributionPage() {
                     </p>
                     <p className="mt-1 text-[11px] leading-5 text-emerald-800/80">
                       {form.target_group === 'all'
-                          ? `This event will show all ${form.target_scope === 'resident' ? 'residents' : 'eligible households'} across ${audienceScopeLabel}.`
+                          ? `This event will show all ${form.target_scope === 'resident' ? 'residents' : 'eligible households'} in ${selectedAudienceScopeLabel}.`
                         : form.target_scope === 'household'
-                          ? `This event will show households in ${audienceScopeLabel} that have at least one ${selectedTargetGroupLabel.toLowerCase()} member.`
-                          : `This event will only show ${selectedTargetGroupLabel.toLowerCase()} ${form.target_scope === 'resident' ? 'residents' : 'households with matching members'} across ${audienceScopeLabel}.`}
+                          ? `This event will show households in ${selectedAudienceScopeLabel} that have at least one ${selectedTargetGroupLabel.toLowerCase()} member.`
+                          : `This event will only show ${selectedTargetGroupLabel.toLowerCase()} ${form.target_scope === 'resident' ? 'residents' : 'households with matching members'} in ${selectedAudienceScopeLabel}.`}
                     </p>
                   </div>
                   {isLoadingAudience ? <Loader2 className="h-4 w-4 animate-spin text-emerald-600" /> : null}
@@ -632,6 +748,55 @@ export default function NewDistributionPage() {
                     {audienceStats.eligibility_summary.match_support}
                   </p>
                 ) : null}
+
+                {selectedBarangay ? (
+                  <div className="mt-4 rounded-2xl border border-emerald-100 bg-white/80 p-3">
+                    <p className="text-xs font-bold uppercase tracking-wider text-slate-500">
+                      Selected Barangay
+                    </p>
+                    <div className="mt-3 rounded-xl border border-slate-200 bg-white px-4 py-3">
+                      <p className="text-sm font-semibold text-slate-900">{selectedBarangay.barangay_name}</p>
+                      <p className="mt-1 text-[11px] text-slate-500">
+                        Only households and residents from this barangay will be included in the event audience.
+                      </p>
+                    </div>
+                  </div>
+                ) : null}
+
+                <div className="mt-4 rounded-2xl border border-emerald-100 bg-white/80 p-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <p className="text-xs font-bold uppercase tracking-wider text-slate-500">
+                        Master List of Recipients
+                      </p>
+                      <p className="mt-1 text-[11px] text-slate-500">
+                        Preview the exact {form.target_scope === 'household' ? 'households' : 'residents'} currently qualified for this selected barangay and sector.
+                      </p>
+                    </div>
+                    <span className="rounded-full bg-emerald-50 px-3 py-1 text-[11px] font-semibold text-emerald-700">
+                      {audienceStats?.audience_master_list.length ?? 0} record{(audienceStats?.audience_master_list.length ?? 0) === 1 ? '' : 's'}
+                    </span>
+                  </div>
+
+                  {audienceStats?.audience_master_list.length ? (
+                    <div className="mt-3 max-h-72 space-y-2 overflow-y-auto pr-1">
+                      {audienceStats.audience_master_list.map((entry) => (
+                        <div
+                          key={entry.id}
+                          className="rounded-xl border border-slate-200 bg-white px-4 py-3"
+                        >
+                          <p className="text-sm font-semibold text-slate-900">{entry.primary_text}</p>
+                          <p className="mt-1 text-xs text-slate-500">{entry.secondary_text}</p>
+                          <p className="mt-2 text-[11px] text-emerald-800/80">{entry.qualification_text}</p>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="mt-3 rounded-xl border border-dashed border-slate-300 bg-white px-4 py-5 text-sm text-slate-500">
+                      No matching {form.target_scope === 'household' ? 'households' : 'residents'} found yet for this barangay and sector.
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
 

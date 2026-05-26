@@ -42,6 +42,20 @@ export type DistributionAudienceStats = {
   eligibleHouseholds: number;
   eligibleResidents: number;
   eligibility_summary: DistributionEligibilitySummary;
+  breakdown_by_barangay: Array<{
+    barangay_id: string;
+    barangay_name: string;
+    total_households: number;
+    total_residents: number;
+    eligible_households: number;
+    eligible_residents: number;
+  }>;
+  audience_master_list: Array<{
+    id: string;
+    primary_text: string;
+    secondary_text: string;
+    qualification_text: string;
+  }>;
 };
 
 function generateId(prefix = 'dist'): string {
@@ -67,6 +81,25 @@ function inferTargetConfig(eventName: string): {
   }
 
   return { target_scope: 'household', target_group: 'all' };
+}
+
+function getDistributionTargetGroupLabel(targetGroup: DistributionTargetGroup) {
+  switch (targetGroup) {
+    case 'all':
+      return 'All';
+    case 'senior':
+      return 'Senior';
+    case 'pwd':
+      return 'PWD';
+    case 'pregnant':
+      return 'Pregnant';
+    case 'minor':
+      return 'Minor';
+    case 'low_income':
+      return 'Low Income';
+    default:
+      return 'Audience';
+  }
 }
 
 function normalizeDistributedItems(items: DistributedItem[] | undefined): DistributedItem[] {
@@ -122,6 +155,157 @@ async function getScopedHouseholdsAndResidents(barangayId?: string | null) {
   };
 }
 
+function getHouseholdBarangayLabel(household: Household) {
+  const barangayName = household.barangay_name?.trim();
+  if (barangayName) {
+    return barangayName;
+  }
+
+  const barangayId = household.barangay_id?.trim();
+  return barangayId || 'Unassigned barangay';
+}
+
+function buildAudienceBreakdownByBarangay(params: {
+  households: Household[];
+  residents: Resident[];
+  matches: ReturnType<typeof resolveDistributionAudienceMatches>;
+}) {
+  const { households, residents, matches } = params;
+  const residentsByHouseholdId = new Map<string, Resident[]>();
+  const householdById = new Map(households.map((household) => [household.id, household]));
+  const eligibleHouseholdIds = new Set(matches.eligibleHouseholds.map((household) => household.id));
+  const eligibleResidentIds = new Set(matches.eligibleResidents.map((resident) => resident.id));
+
+  residents.forEach((resident) => {
+    const current = residentsByHouseholdId.get(resident.household_id) ?? [];
+    current.push(resident);
+    residentsByHouseholdId.set(resident.household_id, current);
+  });
+
+  const grouped = new Map<string, {
+    barangay_id: string;
+    barangay_name: string;
+    total_households: number;
+    total_residents: number;
+    eligible_households: number;
+    eligible_residents: number;
+  }>();
+
+  households.forEach((household) => {
+    const key = household.barangay_id?.trim() || household.id;
+    const current = grouped.get(key) ?? {
+      barangay_id: household.barangay_id,
+      barangay_name: getHouseholdBarangayLabel(household),
+      total_households: 0,
+      total_residents: 0,
+      eligible_households: 0,
+      eligible_residents: 0,
+    };
+
+    current.total_households += 1;
+    current.total_residents += (residentsByHouseholdId.get(household.id) ?? []).length;
+    if (eligibleHouseholdIds.has(household.id)) {
+      current.eligible_households += 1;
+    }
+
+    grouped.set(key, current);
+  });
+
+  matches.eligibleResidents.forEach((resident) => {
+    if (!eligibleResidentIds.has(resident.id)) {
+      return;
+    }
+
+    const household = householdById.get(resident.household_id);
+    if (!household) {
+      return;
+    }
+
+    const key = household.barangay_id?.trim() || household.id;
+    const current = grouped.get(key);
+    if (!current) {
+      return;
+    }
+
+    current.eligible_residents += 1;
+  });
+
+  return Array.from(grouped.values()).sort((left, right) => {
+    if (right.eligible_households !== left.eligible_households) {
+      return right.eligible_households - left.eligible_households;
+    }
+
+    if (right.eligible_residents !== left.eligible_residents) {
+      return right.eligible_residents - left.eligible_residents;
+    }
+
+    return left.barangay_name.localeCompare(right.barangay_name);
+  });
+}
+
+function buildAudienceMasterList(params: {
+  households: Household[];
+  residents: Resident[];
+  matches: ReturnType<typeof resolveDistributionAudienceMatches>;
+  target_group: DistributionTargetGroup;
+  target_scope: DistributionTargetScope;
+}) {
+  const {
+    households,
+    residents,
+    matches,
+    target_group,
+    target_scope,
+  } = params;
+
+  const residentsByHouseholdId = new Map<string, Resident[]>();
+  const householdsById = new Map(households.map((household) => [household.id, household]));
+
+  residents.forEach((resident) => {
+    const current = residentsByHouseholdId.get(resident.household_id) ?? [];
+    current.push(resident);
+    residentsByHouseholdId.set(resident.household_id, current);
+  });
+
+  if (target_scope === 'household') {
+    return matches.eligibleHouseholds.map((household) => {
+      const residentsInHousehold = residentsByHouseholdId.get(household.id) ?? [];
+      const matchedResidents = matches.matchedResidentsByHouseholdId.get(household.id) ?? [];
+      const matchedNames = matchedResidents.slice(0, 3).map((resident) => resident.full_name).join(', ');
+      const extraMatches = Math.max(0, matchedResidents.length - 3);
+      const qualificationText = target_group === 'all'
+        ? `${residentsInHousehold.length} resident${residentsInHousehold.length === 1 ? '' : 's'} in this household.`
+        : `${matchedResidents.length} ${getDistributionTargetGroupLabel(target_group).toLowerCase()} match${matchedResidents.length === 1 ? '' : 'es'}${matchedNames ? `: ${matchedNames}` : ''}${extraMatches > 0 ? `, plus ${extraMatches} more` : ''}.`;
+
+      return {
+        id: household.id,
+        primary_text: household.head_name,
+        secondary_text: `${household.purok_sitio} · ${household.street_address}`,
+        qualification_text: qualificationText,
+      };
+    });
+  }
+
+  return matches.eligibleResidents.map((resident) => {
+    const household = householdsById.get(resident.household_id);
+    const supportSegments = [
+      resident.relationship_to_head,
+      household?.head_name ? `Household head: ${household.head_name}` : '',
+      household?.purok_sitio ?? '',
+    ].filter(Boolean);
+
+    return {
+      id: resident.id,
+      primary_text: resident.full_name,
+      secondary_text: supportSegments.join(' · '),
+      qualification_text:
+        target_group === 'all'
+          ? 'Qualified active resident within the selected barangay.'
+          : `${getDistributionTargetGroupLabel(target_group)} match for the selected barangay audience.`,
+    };
+  });
+}
+
 export async function getDistributionAudienceContext(config: {
   barangay_id?: string | null;
   target_group: DistributionTargetGroup;
@@ -172,6 +356,18 @@ export async function getDistributionAudienceStats(config: {
     eligibleHouseholds: context.eligibility_summary.eligible_households,
     eligibleResidents: context.eligibility_summary.eligible_residents,
     eligibility_summary: context.eligibility_summary,
+    breakdown_by_barangay: buildAudienceBreakdownByBarangay({
+      households: context.households,
+      residents: context.residents,
+      matches: context.matches,
+    }),
+    audience_master_list: buildAudienceMasterList({
+      households: context.households,
+      residents: context.residents,
+      matches: context.matches,
+      target_group: config.target_group,
+      target_scope: config.target_scope ?? 'household',
+    }),
   };
 }
 
@@ -216,14 +412,13 @@ export async function getDistributionEvent(id: string): Promise<DistributionEven
  * Create distribution event
  */
 export async function createDistributionEvent(
-  data: Omit<DistributionEvent, 'id' | 'syncStatus' | 'created_by' | 'barangay_id'>,
+  data: Omit<DistributionEvent, 'id' | 'syncStatus' | 'created_by'>,
   userId: string,
 ): Promise<DistributionEvent> {
   try {
     const event = normalizeDistributionEvent({
       ...data,
       id: generateId(),
-      barangay_id: '',
       created_by: userId,
       syncStatus: 'synced',
     });

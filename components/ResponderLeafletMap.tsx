@@ -558,6 +558,57 @@ function escapeMarkerText(value: string) {
     .replaceAll("'", '&#39;');
 }
 
+function toDisplayLabel(value?: string | null, fallback = 'Not set') {
+  const normalized = typeof value === 'string' ? value.trim() : '';
+  return normalized || fallback;
+}
+
+function buildHouseholdTooltipHtml(household: Household) {
+  const locationParts = [
+    household.purok_sitio,
+    household.barangay_name || household.barangay_id,
+    household.municipality,
+  ].filter(Boolean);
+  const locationText = locationParts.join(', ');
+  const statusText = household.location_verified ? 'Verified pin' : 'Pin needs review';
+  const riskText = household.disaster_risk_level
+    ? `${household.disaster_risk_level.charAt(0).toUpperCase()}${household.disaster_risk_level.slice(1)} risk`
+    : 'No risk tag';
+
+  return `
+    <div class="responder-hover-card">
+      <div class="responder-hover-card__eyebrow">Household</div>
+      <div class="responder-hover-card__title">${escapeMarkerText(toDisplayLabel(household.head_name, 'Unnamed household'))}</div>
+      <div class="responder-hover-card__line">${escapeMarkerText(toDisplayLabel(locationText, 'Location not set'))}</div>
+      <div class="responder-hover-card__line">${escapeMarkerText(toDisplayLabel(household.street_address, 'Street / landmark not set'))}</div>
+      <div class="responder-hover-card__meta">
+        <span>${escapeMarkerText(statusText)}</span>
+        <span>${escapeMarkerText(riskText)}</span>
+      </div>
+      ${household.contact_number ? `<div class="responder-hover-card__contact">${escapeMarkerText(household.contact_number)}</div>` : ''}
+    </div>
+  `;
+}
+
+function buildIncidentTooltipHtml(incident: Incident) {
+  const severityText = `${incident.severity.charAt(0).toUpperCase()}${incident.severity.slice(1)} severity`;
+  const statusText = `${incident.status.charAt(0).toUpperCase()}${incident.status.slice(1)} status`;
+  const typeText = `${incident.type.charAt(0).toUpperCase()}${incident.type.slice(1)} incident`;
+
+  return `
+    <div class="responder-hover-card responder-hover-card--incident">
+      <div class="responder-hover-card__eyebrow">Incident</div>
+      <div class="responder-hover-card__title">${escapeMarkerText(typeText)}</div>
+      <div class="responder-hover-card__line">${escapeMarkerText(toDisplayLabel(incident.location, 'Location not set'))}</div>
+      <div class="responder-hover-card__line">${escapeMarkerText(toDisplayLabel(incident.description, 'No description provided'))}</div>
+      <div class="responder-hover-card__meta">
+        <span>${escapeMarkerText(severityText)}</span>
+        <span>${escapeMarkerText(statusText)}</span>
+      </div>
+    </div>
+  `;
+}
+
 const ALERT_RULE_ZONE_MARKER_COLORS = {
   halo: 'rgba(14,116,144,0.16)',
   border: 'rgba(14,116,144,0.48)',
@@ -1034,12 +1085,21 @@ export default function ResponderLeafletMap({
     households.filter(hasHouseholdPin).forEach((household) => {
       const isSelected = activeSelectedHousehold?.id === household.id;
       const marker = runtime.marker([household.gps_lat, household.gps_long], {
+        title: household.head_name,
         icon: runtime.divIcon({
           className: 'responder-marker',
           html: buildHouseholdMarkerHtml(isSelected),
           iconSize: isSelected ? [30, 30] : [22, 22],
           iconAnchor: isSelected ? [15, 15] : [11, 11],
         }),
+      });
+
+      marker.bindTooltip(buildHouseholdTooltipHtml(household), {
+        className: 'responder-hover-tooltip',
+        direction: 'top',
+        offset: [0, -12],
+        opacity: 1,
+        sticky: true,
       });
 
       marker.on('click', () => {
@@ -1055,12 +1115,21 @@ export default function ResponderLeafletMap({
     activeIncidents.filter(hasIncidentPin).forEach((incident) => {
       const isSelected = activeSelectedIncident?.id === incident.id;
       const marker = runtime.marker([incident.gps_lat, incident.gps_lng], {
+        title: incident.location,
         icon: runtime.divIcon({
           className: 'responder-marker',
           html: buildIncidentMarkerHtml(incident.severity, isSelected),
           iconSize: isSelected ? [22, 22] : [18, 18],
           iconAnchor: isSelected ? [11, 11] : [9, 9],
         }),
+      });
+
+      marker.bindTooltip(buildIncidentTooltipHtml(incident), {
+        className: 'responder-hover-tooltip',
+        direction: 'top',
+        offset: [0, -10],
+        opacity: 1,
+        sticky: true,
       });
 
       marker.on('click', () => {

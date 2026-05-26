@@ -65,6 +65,7 @@ export async function POST(request: NextRequest) {
     switch (action) {
       case 'create_household_bundle': {
         const household = body.household;
+        const headProfile = body.head_profile;
         const members = Array.isArray(body.members) ? body.members : [];
         if (!household || typeof household !== 'object') {
           return badRequest('household payload is required.');
@@ -82,11 +83,35 @@ export async function POST(request: NextRequest) {
             occupation?: string;
             income_level?: string;
             is_pregnant?: boolean;
+            pregnancy_months?: number | null;
+            expected_delivery_date?: string;
             is_pwd?: boolean;
+            is_4ps?: boolean;
+            is_indigent?: boolean;
             pwd_type?: string;
             has_chronic_illness?: boolean;
             chronic_conditions?: string[];
           }>,
+          (headProfile && typeof headProfile === 'object'
+            ? headProfile
+            : undefined) as
+            | {
+              birthdate: string;
+              gender: 'M' | 'F';
+              civil_status?: string;
+              occupation?: string;
+              income_level?: string;
+              is_pregnant?: boolean;
+              pregnancy_months?: number | null;
+              expected_delivery_date?: string;
+              is_pwd?: boolean;
+              is_4ps?: boolean;
+              is_indigent?: boolean;
+              pwd_type?: string;
+              has_chronic_illness?: boolean;
+              chronic_conditions?: string[];
+            }
+            | undefined,
         );
 
         return NextResponse.json(data, {
@@ -137,7 +162,9 @@ export async function POST(request: NextRequest) {
           residentId,
           updates as {
             is_pregnant?: boolean;
-              is_pwd?: boolean;
+            pregnancy_months?: number;
+            expected_delivery_date?: string;
+            is_pwd?: boolean;
             pwd_type?: string;
             has_chronic_illness?: boolean;
             chronic_conditions?: string[];

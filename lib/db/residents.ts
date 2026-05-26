@@ -210,6 +210,8 @@ export async function updateHealthFlags(
   resident_id: string,
   updates: {
     is_pregnant?: boolean;
+    pregnancy_months?: number;
+    expected_delivery_date?: string;
     is_pwd?: boolean;
     pwd_type?: PWDType;
     has_chronic_illness?: boolean;

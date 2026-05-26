@@ -11,7 +11,7 @@ import {
   getResidentsInHousehold, createResident, updateResident,
   deleteResident, getResidentVulnerabilityFlags, verifyResident, updateHealthFlags,
 } from '@/lib/db/residents';
-import { calculateAge } from '@/lib/db/vulnerability';
+import { calculateAge, getPregnancyProgress } from '@/lib/db/vulnerability';
 import { type DisasterRiskLevel, type FollowUpStatus, type HazardType, type PWDType, Household, PurokRiskProfile, Resident, VulnerabilityFlags } from '@/lib/db/schema';
 import { mergePurokOptions, normalizePurokSitio } from '@/lib/geocoding';
 import {
@@ -62,6 +62,8 @@ const emptyResidentForm = {
 
 const emptyHealthForm = {
   is_pregnant: false,
+  pregnancy_months: '' as number | '',
+  expected_delivery_date: '',
   is_pwd: false,
   pwd_type: '' as PWDType | '',
   has_chronic_illness: false,
@@ -265,6 +267,8 @@ export default function HouseholdDetailsPage() {
     setShowAddResident(false);
     setHealthForm({
       is_pregnant: Boolean(flags?.is_pregnant),
+      pregnancy_months: typeof flags?.pregnancy_months === 'number' ? flags.pregnancy_months : '',
+      expected_delivery_date: flags?.expected_delivery_date ?? '',
       is_pwd: Boolean(flags?.is_pwd),
       pwd_type: flags?.pwd_type ?? '',
       has_chronic_illness: Boolean(flags?.has_chronic_illness),
@@ -313,6 +317,18 @@ export default function HouseholdDetailsPage() {
       return;
     }
 
+    if (healthForm.is_pregnant) {
+      const months = Number(healthForm.pregnancy_months);
+      if (!Number.isFinite(months) || months < 1 || months > 9) {
+        showToast('Enter the pregnancy month from 1 to 9.', 'error');
+        return;
+      }
+      if (!healthForm.expected_delivery_date) {
+        showToast('Enter the expected date of delivery (EDD) before saving.', 'error');
+        return;
+      }
+    }
+
     if (healthForm.is_pwd && !healthForm.pwd_type) {
       showToast('Select the PWD type before saving.', 'error');
       return;
@@ -322,6 +338,12 @@ export default function HouseholdDetailsPage() {
     try {
       const updatedFlags = await updateHealthFlags(resident.id, {
         is_pregnant: healthForm.is_pregnant,
+        pregnancy_months: healthForm.is_pregnant && typeof healthForm.pregnancy_months === 'number'
+          ? healthForm.pregnancy_months
+          : undefined,
+        expected_delivery_date: healthForm.is_pregnant
+          ? healthForm.expected_delivery_date || undefined
+          : undefined,
         is_pwd: healthForm.is_pwd,
         pwd_type: healthForm.is_pwd && healthForm.pwd_type ? healthForm.pwd_type : undefined,
         has_chronic_illness: healthForm.has_chronic_illness,
@@ -963,7 +985,13 @@ export default function HouseholdDetailsPage() {
                 if (flags?.is_child) vuln.push('Child');
                 if (flags?.is_senior) vuln.push('Senior');
                 if (flags?.is_pwd) vuln.push('PWD');
-                if (flags?.is_pregnant) vuln.push('Pregnant');
+                if (flags?.is_pregnant) {
+                  vuln.push(
+                    typeof flags.pregnancy_months === 'number'
+                      ? `Pregnant (${flags.pregnancy_months} months)`
+                      : 'Pregnant',
+                  );
+                }
                 if (flags?.has_chronic_illness) vuln.push('Chronic');
                 if (flags?.is_low_income) vuln.push('Low-Income');
 
@@ -1006,6 +1034,12 @@ export default function HouseholdDetailsPage() {
                             ) : null}
                             {flags?.medical_notes ? (
                               <p><span className="font-semibold text-slate-600">Medical notes:</span> {flags.medical_notes}</p>
+                            ) : null}
+                            {typeof flags?.pregnancy_months === 'number' ? (
+                              <p><span className="font-semibold text-slate-600">Pregnancy month:</span> {flags.pregnancy_months}</p>
+                            ) : null}
+                            {flags?.expected_delivery_date ? (
+                              <p><span className="font-semibold text-slate-600">Expected date of delivery (EDD):</span> {flags.expected_delivery_date}</p>
                             ) : null}
                           </div>
                         ) : null}
@@ -1052,7 +1086,12 @@ export default function HouseholdDetailsPage() {
                             <input
                               type="checkbox"
                               checked={healthForm.is_pregnant}
-                              onChange={(event) => setHealthForm((current) => ({ ...current, is_pregnant: event.target.checked }))}
+                              onChange={(event) => setHealthForm((current) => ({
+                                ...current,
+                                is_pregnant: event.target.checked,
+                                pregnancy_months: event.target.checked ? current.pregnancy_months : '',
+                                expected_delivery_date: event.target.checked ? current.expected_delivery_date : '',
+                              }))}
                               className="mt-1"
                             />
                             <span>
@@ -1060,6 +1099,68 @@ export default function HouseholdDetailsPage() {
                               <span className="block text-xs text-slate-500">Include in maternal health monitoring.</span>
                             </span>
                           </label>
+                          {healthForm.is_pregnant && (
+                            <div className="rounded-xl border border-slate-200 bg-white px-3 py-3 sm:col-span-2">
+                              <div className="grid gap-3 sm:grid-cols-2">
+                                <div>
+                                  <label className="block text-xs font-semibold uppercase tracking-wide text-slate-500">Pregnancy Month</label>
+                                  <input
+                                    type="number"
+                                    min={1}
+                                    max={9}
+                                    value={healthForm.pregnancy_months}
+                                    onChange={(event) => setHealthForm((current) => ({
+                                      ...current,
+                                      pregnancy_months: event.target.value ? Number(event.target.value) : '',
+                                    }))}
+                                    className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-indigo-400"
+                                    placeholder="e.g. 6"
+                                  />
+                                </div>
+                                <div>
+                                  <label className="block text-xs font-semibold uppercase tracking-wide text-slate-500">Expected Date of Delivery (EDD)</label>
+                                  <input
+                                    type="date"
+                                    value={healthForm.expected_delivery_date}
+                                    onChange={(event) => setHealthForm((current) => ({
+                                      ...current,
+                                      expected_delivery_date: event.target.value,
+                                    }))}
+                                    className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-indigo-400"
+                                  />
+                                </div>
+                              </div>
+                              {getPregnancyProgress(
+                                typeof healthForm.pregnancy_months === 'number' ? healthForm.pregnancy_months : null,
+                              ) && typeof healthForm.pregnancy_months === 'number' ? (
+                                <div className="mt-3 rounded-xl border border-rose-200 bg-rose-50/80 px-3 py-3 text-sm text-rose-900">
+                                  {(() => {
+                                    const progress = getPregnancyProgress(healthForm.pregnancy_months);
+                                    if (!progress) return null;
+                                    return (
+                                      <>
+                                        <p className="font-semibold">
+                                          {healthForm.pregnancy_months} month{healthForm.pregnancy_months === 1 ? '' : 's'} pregnant
+                                        </p>
+                                        <p className="mt-1 text-xs text-rose-700">
+                                          {progress.trimesterLabel}
+                                          {' · '}
+                                          {progress.monthsRemaining === 0
+                                            ? 'Full-term month reached, monitor closely for delivery and maternal care.'
+                                            : `About ${progress.monthsRemaining} month${progress.monthsRemaining === 1 ? '' : 's'} left before the usual 9-month full term.`}
+                                        </p>
+                                        {healthForm.expected_delivery_date ? (
+                                          <p className="mt-1 text-xs text-rose-700">
+                                            Expected date of delivery (EDD): {healthForm.expected_delivery_date}
+                                          </p>
+                                        ) : null}
+                                      </>
+                                    );
+                                  })()}
+                                </div>
+                              ) : null}
+                            </div>
+                          )}
                           <label className="flex items-start gap-3 rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm">
                             <input
                               type="checkbox"

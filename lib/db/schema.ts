@@ -138,11 +138,16 @@ export interface Resident {
 export interface VulnerabilityFlags {
   id: string;
   resident_id: string;
+  is_infant?: boolean; // computed: age 0-1
   is_child: boolean; // computed: age 0-17
   is_adult: boolean; // computed: age 18-59
   is_senior: boolean; // computed: age 60+
   is_pregnant: boolean;
+  pregnancy_months?: number;
+  expected_delivery_date?: string;
   is_pwd: boolean;
+  is_4ps?: boolean;
+  is_indigent?: boolean;
   pwd_type?: PWDType;
   has_chronic_illness: boolean;
   chronic_conditions?: string[];
