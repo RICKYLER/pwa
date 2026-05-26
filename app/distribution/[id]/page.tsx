@@ -2,10 +2,11 @@
 
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import {
   AlertTriangle,
   ArrowLeft,
+  Camera,
   Calendar,
   CheckCircle2,
   Clock,
@@ -15,6 +16,7 @@ import {
   Loader2,
   MapPin,
   Package,
+  QrCode,
   Save,
   Search,
   ShieldCheck,
@@ -23,6 +25,7 @@ import {
   Users,
   X,
 } from 'lucide-react';
+import jsQR from 'jsqr';
 import { getAnalyticsBarangayScope, getAnalyticsScopeLabel } from '@/lib/analytics-scope';
 import { getCurrentUser, hasPermission } from '@/lib/auth';
 import MapLocationPicker from '@/components/MapLocationPicker';
@@ -45,6 +48,7 @@ import { getPendingSyncCount } from '@/lib/db/client-sync';
 import { getHouseholds } from '@/lib/db/households';
 import { getInventoryItems } from '@/lib/db/inventory';
 import { getLastSupabaseBootstrapCompletedAt } from '@/lib/supabase/bootstrap';
+import { extractDistributionQrToken } from '@/lib/distribution-qr';
 import type {
   DistributedItem,
   DistributionEvent,
@@ -140,6 +144,7 @@ const DISTRIBUTION_BOOTSTRAP_TABLES = [
 
 export default function DistributionDetailPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const params = useParams<{ id: string }>();
   const user = getCurrentUser();
 
@@ -167,6 +172,12 @@ export default function DistributionDetailPage() {
   const [isExportingPdf, setIsExportingPdf] = useState(false);
   const [pendingSyncCount, setPendingSyncCount] = useState(0);
   const [lastBootstrapAt, setLastBootstrapAt] = useState<number | null>(null);
+  const [qrInputValue, setQrInputValue] = useState('');
+  const [isScanningQr, setIsScanningQr] = useState(false);
+  const [isProcessingQr, setIsProcessingQr] = useState(false);
+  const [qrStatus, setQrStatus] = useState('');
+  const [lastReleasedRecordId, setLastReleasedRecordId] = useState('');
+  const qrScannerSectionRef = useRef<HTMLDivElement | null>(null);
 
   const [editStatus, setEditStatus] = useState<DistributionEvent['status']>('planned');
   const [editTargetScope, setEditTargetScope] = useState<DistributionTargetScope>('household');
@@ -177,6 +188,13 @@ export default function DistributionDetailPage() {
   const [mapCoords, setMapCoords] = useState<{ lat: number; lng: number } | null>(null);
   const geocodedRef = useRef(false);
   const latestLoadRequestIdRef = useRef(0);
+  const processedQrTokenRef = useRef<string | null>(null);
+  const isProcessingQrRef = useRef(false);
+  const qrVideoRef = useRef<HTMLVideoElement | null>(null);
+  const qrCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const qrStreamRef = useRef<MediaStream | null>(null);
+  const qrAnimationFrameRef = useRef<number | null>(null);
+  const recordsSectionRef = useRef<HTMLDivElement | null>(null);
   const [mapsReady, setMapsReady] = useState(false);
 
   const deferredSearch = useDeferredValue(releaseSearch.trim().toLowerCase());
@@ -373,9 +391,10 @@ export default function DistributionDetailPage() {
   );
 
   const filteredHouseholds = useMemo(() => {
-    if (!deferredSearch) return eligibleHouseholds;
+    const readyHouseholds = eligibleHouseholds.filter((household) => !servedHouseholdIds.has(household.id));
+    if (!deferredSearch) return readyHouseholds;
 
-    return eligibleHouseholds.filter((household) => {
+    return readyHouseholds.filter((household) => {
       const matchedResidents = matchedResidentsForHouseholds
         .filter((resident) => resident.household_id === household.id)
         .map((resident) => `${resident.full_name} ${resident.relationship_to_head}`);
@@ -393,12 +412,13 @@ export default function DistributionDetailPage() {
 
       return haystack.includes(deferredSearch);
     });
-  }, [eligibleHouseholds, deferredSearch, matchedResidentsForHouseholds]);
+  }, [eligibleHouseholds, deferredSearch, matchedResidentsForHouseholds, servedHouseholdIds]);
 
   const filteredResidents = useMemo(() => {
-    if (!deferredSearch) return eligibleResidents;
+    const readyResidents = eligibleResidents.filter((resident) => !servedResidentIds.has(resident.id));
+    if (!deferredSearch) return readyResidents;
 
-    return eligibleResidents.filter((resident) => {
+    return readyResidents.filter((resident) => {
       const household = householdsById.get(resident.household_id);
       const haystack = [
         resident.full_name,
@@ -413,7 +433,7 @@ export default function DistributionDetailPage() {
 
       return haystack.includes(deferredSearch);
     });
-  }, [eligibleResidents, householdsById, deferredSearch]);
+  }, [eligibleResidents, householdsById, deferredSearch, servedResidentIds]);
 
   const selectedHousehold = useMemo(() => {
     if (!event) return null;
@@ -491,7 +511,339 @@ export default function DistributionDetailPage() {
     setReceivedByName(defaultReceiver);
     setReleaseNotes('');
     setReleaseError('');
-  }, [event?.target_scope, selectedHousehold?.id, selectedResident?.id]);
+  }, [
+    event?.target_scope,
+    selectedHousehold?.head_name,
+    selectedResident?.full_name,
+  ]);
+
+  const stopQrScanner = useCallback(() => {
+    if (qrAnimationFrameRef.current !== null) {
+      cancelAnimationFrame(qrAnimationFrameRef.current);
+      qrAnimationFrameRef.current = null;
+    }
+
+    if (qrStreamRef.current) {
+      qrStreamRef.current.getTracks().forEach((track) => track.stop());
+      qrStreamRef.current = null;
+    }
+
+    if (qrVideoRef.current) {
+      qrVideoRef.current.srcObject = null;
+    }
+
+    setIsScanningQr(false);
+  }, []);
+
+  useEffect(() => stopQrScanner, [stopQrScanner]);
+
+  const scrollToDistributionRecords = useCallback(() => {
+    recordsSectionRef.current?.scrollIntoView({
+      behavior: 'smooth',
+      block: 'start',
+    });
+  }, []);
+
+  const scrollToQrScanner = useCallback(() => {
+    qrScannerSectionRef.current?.scrollIntoView({
+      behavior: 'smooth',
+      block: 'start',
+    });
+  }, []);
+
+  const completeRelease = useCallback(async (input: {
+    householdId?: string;
+    residentId?: string;
+    receivedByName?: string;
+    notes?: string;
+    successMessage?: string;
+  }) => {
+    if (!user || !event) {
+      return null;
+    }
+
+    setIsReleasing(true);
+    setReleaseError('');
+    setReleaseSuccess('');
+    setQrStatus('');
+
+    try {
+      const record = await releaseDistributionPackage({
+        event_id: event.id,
+        distributor_id: user.id,
+        household_id: input.householdId,
+        resident_id: input.residentId,
+        received_by_name: input.receivedByName?.trim() || undefined,
+        notes: input.notes?.trim() || undefined,
+      });
+
+      let latestEvent = event;
+      if (event.status === 'planned') {
+        latestEvent = await updateDistributionEvent(event.id, { status: 'ongoing' });
+        setEvent(latestEvent);
+        setEditStatus(latestEvent.status);
+      }
+
+      setRecords((current) => [record, ...current.filter((entry) => entry.id !== record.id)]);
+      setInventoryItems(await getInventoryItems());
+      setReleaseSearch('');
+      setSelectedHouseholdId('');
+      setSelectedResidentId('');
+      setReceivedByName('');
+      setReleaseNotes('');
+      setLastReleasedRecordId(record.id);
+      await refreshOperationalFreshness();
+      setReleaseSuccess(
+        input.successMessage
+        || `Package released to ${record.received_by_name || record.beneficiary_name || 'beneficiary'}.`,
+      );
+
+      window.setTimeout(() => {
+        scrollToDistributionRecords();
+      }, 150);
+
+      return record;
+    } catch (releaseFailure) {
+      setReleaseError(
+        releaseFailure instanceof Error ? releaseFailure.message : 'Failed to release package.',
+      );
+      return null;
+    } finally {
+      setIsReleasing(false);
+    }
+  }, [event, refreshOperationalFreshness, scrollToDistributionRecords, user]);
+
+  const processDistributionQr = useCallback(async (
+    rawValue: string,
+    source: 'camera' | 'manual' | 'link' = 'manual',
+  ) => {
+    if (!event || isProcessingQrRef.current) {
+      return false;
+    }
+
+    const extracted = extractDistributionQrToken(rawValue, event.id);
+    if (!extracted?.token) {
+      setQrStatus('The scanned QR code is not a valid distribution claim for this event.');
+      return false;
+    }
+
+    isProcessingQrRef.current = true;
+    setIsProcessingQr(true);
+    setQrStatus('Validating household QR...');
+    setReleaseError('');
+    setReleaseSuccess('');
+
+    try {
+      const response = await fetch('/api/distribution/qr/resolve', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+        },
+        credentials: 'same-origin',
+        cache: 'no-store',
+        body: JSON.stringify({
+          token: extracted.token,
+          eventId: event.id,
+          source,
+        }),
+      });
+
+      const payload = await response.json().catch(() => null) as {
+        error?: string;
+        householdId?: string;
+        householdName?: string;
+        receivedByName?: string;
+      } | null;
+
+      if (!response.ok || !payload?.householdId) {
+        throw new Error(payload?.error || 'Unable to validate the household QR code.');
+      }
+
+      const released = await completeRelease({
+        householdId: payload.householdId,
+        receivedByName: payload.receivedByName || payload.householdName,
+        notes: 'Released through household QR scan.',
+        successMessage: `QR release completed for ${payload.householdName || 'the household'}.`,
+      });
+
+      if (!released) {
+        return false;
+      }
+
+      processedQrTokenRef.current = extracted.token;
+      setQrInputValue('');
+      setQrStatus(`QR verified for ${payload.householdName || 'the household'}.`);
+      stopQrScanner();
+
+      if (searchParams.get('qr')) {
+        router.replace(`/distribution/${event.id}`);
+      }
+      return true;
+    } catch (qrError) {
+      setQrStatus(
+        qrError instanceof Error ? qrError.message : 'Unable to process the household QR code.',
+      );
+      return false;
+    } finally {
+      isProcessingQrRef.current = false;
+      setIsProcessingQr(false);
+    }
+  }, [completeRelease, event, router, searchParams, stopQrScanner]);
+
+  const startQrScanner = useCallback(async () => {
+    if (isScanningQr || isProcessingQr) {
+      return;
+    }
+
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setQrStatus('Camera scanning is not available on this device. Paste the QR link instead.');
+      return;
+    }
+
+    if (!window.isSecureContext) {
+      setQrStatus('Camera access requires HTTPS or localhost. Open this page in a secure context, or paste the QR link instead.');
+      return;
+    }
+
+    try {
+      setQrStatus('Opening camera...');
+
+      const requestStream = async () => {
+        const attempts: MediaStreamConstraints[] = [
+          {
+            video: {
+              facingMode: { ideal: 'environment' },
+              width: { ideal: 1280 },
+              height: { ideal: 720 },
+            },
+            audio: false,
+          },
+          {
+            video: true,
+            audio: false,
+          },
+        ];
+
+        let lastError: unknown = null;
+
+        for (const constraints of attempts) {
+          try {
+            return await navigator.mediaDevices.getUserMedia(constraints);
+          } catch (error) {
+            lastError = error;
+          }
+        }
+
+        throw lastError instanceof Error
+          ? lastError
+          : new Error('Unable to access the camera for QR scanning.');
+      };
+
+      const stream = await requestStream();
+
+      qrStreamRef.current = stream;
+      setIsScanningQr(true);
+      setQrStatus('Camera ready. Point the QR code inside the frame.');
+
+      const video = qrVideoRef.current;
+      const canvas = qrCanvasRef.current;
+      if (!video || !canvas) {
+        stopQrScanner();
+        setQrStatus('Unable to open the QR scanner preview.');
+        return;
+      }
+
+      video.muted = true;
+      video.setAttribute('playsinline', 'true');
+      video.setAttribute('autoplay', 'true');
+      video.srcObject = stream;
+      await video.play();
+
+      const ctx = canvas.getContext('2d', { willReadFrequently: true });
+      if (!ctx) {
+        stopQrScanner();
+        setQrStatus('Unable to start the QR scanner camera.');
+        return;
+      }
+
+      const BarcodeDetectorCtor = (
+        window as typeof window & {
+          BarcodeDetector?: new (options?: { formats?: string[] }) => {
+            detect: (source: CanvasImageSource) => Promise<Array<{ rawValue?: string }>>;
+          };
+        }
+      ).BarcodeDetector;
+      const detector = BarcodeDetectorCtor
+        ? new BarcodeDetectorCtor({ formats: ['qr_code'] })
+        : null;
+
+      const tick = async () => {
+        if (!qrStreamRef.current || !qrVideoRef.current) {
+          return;
+        }
+
+        if (video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA || !video.videoWidth || !video.videoHeight) {
+          qrAnimationFrameRef.current = requestAnimationFrame(() => { void tick(); });
+          return;
+        }
+
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+        let decodedValue = '';
+
+        if (detector) {
+          try {
+            const barcodes = await detector.detect(canvas);
+            decodedValue = barcodes.find((barcode) => typeof barcode.rawValue === 'string' && barcode.rawValue.trim())?.rawValue?.trim() || '';
+          } catch {
+            decodedValue = '';
+          }
+        }
+
+        if (!decodedValue) {
+          const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+          const decoded = jsQR(imageData.data, imageData.width, imageData.height, {
+            inversionAttempts: 'attemptBoth',
+          });
+          decodedValue = decoded?.data?.trim() || '';
+        }
+
+        if (decodedValue) {
+          const success = await processDistributionQr(decodedValue, 'camera');
+          if (!success && qrStreamRef.current) {
+            qrAnimationFrameRef.current = requestAnimationFrame(() => { void tick(); });
+          }
+          return;
+        }
+
+        qrAnimationFrameRef.current = requestAnimationFrame(() => { void tick(); });
+      };
+
+      qrAnimationFrameRef.current = requestAnimationFrame(() => { void tick(); });
+    } catch (scanError) {
+      stopQrScanner();
+      setQrStatus(
+        scanError instanceof DOMException && scanError.name === 'NotAllowedError'
+          ? 'Camera permission was denied. Allow camera access, then try again.'
+          : scanError instanceof Error
+            ? scanError.message
+            : 'Unable to access the camera for QR scanning.',
+      );
+    }
+  }, [isProcessingQr, isScanningQr, processDistributionQr, stopQrScanner]);
+
+  useEffect(() => {
+    const qrFromUrl = searchParams.get('qr');
+    if (!event || !qrFromUrl || processedQrTokenRef.current === qrFromUrl) {
+      return;
+    }
+
+    processedQrTokenRef.current = qrFromUrl;
+    void processDistributionQr(qrFromUrl, 'link');
+  }, [event, processDistributionQr, searchParams]);
 
   async function handleSave() {
     if (!event) return;
@@ -549,46 +901,12 @@ export default function DistributionDetailPage() {
   }
 
   async function handleRelease() {
-    if (!user || !event) return;
-
-    try {
-      setIsReleasing(true);
-      setReleaseError('');
-      setReleaseSuccess('');
-
-      const record = await releaseDistributionPackage({
-        event_id: event.id,
-        distributor_id: user.id,
-        household_id: event.target_scope === 'household' ? selectedHousehold?.id : undefined,
-        resident_id: event.target_scope === 'resident' ? selectedResident?.id : undefined,
-        received_by_name: receivedByName.trim() || undefined,
-        notes: releaseNotes.trim() || undefined,
-      });
-
-      let latestEvent = event;
-      if (event.status === 'planned') {
-        latestEvent = await updateDistributionEvent(event.id, { status: 'ongoing' });
-        setEvent(latestEvent);
-        setEditStatus(latestEvent.status);
-      }
-
-      setRecords((current) => [record, ...current]);
-      setInventoryItems(await getInventoryItems());
-      setReleaseSearch('');
-      setSelectedHouseholdId('');
-      setSelectedResidentId('');
-      setReleaseNotes('');
-      await refreshOperationalFreshness();
-      setReleaseSuccess(
-        `Package released to ${record.received_by_name || record.beneficiary_name || 'beneficiary'}.`,
-      );
-    } catch (releaseFailure) {
-      setReleaseError(
-        releaseFailure instanceof Error ? releaseFailure.message : 'Failed to release package.',
-      );
-    } finally {
-      setIsReleasing(false);
-    }
+    await completeRelease({
+      householdId: event?.target_scope === 'household' ? selectedHousehold?.id : undefined,
+      residentId: event?.target_scope === 'resident' ? selectedResident?.id : undefined,
+      receivedByName,
+      notes: releaseNotes,
+    });
   }
 
   if (!user) return null;
@@ -647,6 +965,9 @@ export default function DistributionDetailPage() {
       ? `${eligibleHouseholds.length} eligible household${eligibleHouseholds.length === 1 ? '' : 's'}`
       : `${eligibleResidents.length} eligible resident${eligibleResidents.length === 1 ? '' : 's'}`
   );
+  const isHouseholdRelease = event.target_scope === 'household'
+    || targetCountLabel.toLowerCase().includes('household')
+    || SCOPE_LABELS[event.target_scope] === 'Household-based release';
   const releaseDisabled =
     !canManage ||
     event.status === 'completed' ||
@@ -1087,6 +1408,111 @@ export default function DistributionDetailPage() {
               </div>
             </div>
 
+            {isHouseholdRelease ? (
+              <div
+                ref={qrScannerSectionRef}
+                className="space-y-4 rounded-2xl border border-cyan-200 bg-cyan-50/70 p-5 shadow-sm"
+              >
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-bold text-slate-900">QR Code Scanner</p>
+                    <p className="mt-0.5 text-xs text-slate-500">
+                      Scan or paste the household QR from the resident notification, then release the package directly.
+                    </p>
+                  </div>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={isScanningQr ? stopQrScanner : () => { void startQrScanner(); }}
+                      disabled={event.status === 'completed' || isProcessingQr}
+                      className="inline-flex items-center gap-2 rounded-xl border border-cyan-200 bg-white px-3 py-2 text-xs font-semibold text-cyan-800 transition hover:bg-cyan-50 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {isScanningQr ? (
+                        <>
+                          <X className="h-3.5 w-3.5" />
+                          Stop Camera
+                        </>
+                      ) : (
+                        <>
+                          <Camera className="h-3.5 w-3.5" />
+                          Open Camera
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="flex flex-col gap-3 sm:flex-row">
+                  <div className="relative flex-1">
+                    <QrCode className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                    <input
+                      type="text"
+                      value={qrInputValue}
+                      onChange={(e) => setQrInputValue(e.target.value)}
+                      onKeyDown={(keyboardEvent) => {
+                        if (keyboardEvent.key === 'Enter') {
+                          keyboardEvent.preventDefault();
+                          void processDistributionQr(qrInputValue, 'manual');
+                        }
+                      }}
+                      placeholder="Paste the QR link or token here"
+                      className="w-full rounded-xl border border-cyan-100 bg-white py-2.5 pl-10 pr-3 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500/30"
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => { void processDistributionQr(qrInputValue, 'manual'); }}
+                    disabled={!qrInputValue.trim() || isProcessingQr || event.status === 'completed'}
+                    className="inline-flex items-center justify-center gap-2 rounded-xl bg-cyan-950 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-cyan-900 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {isProcessingQr ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <QrCode className="h-4 w-4" />
+                    )}
+                    Use QR
+                  </button>
+                </div>
+
+                <div className="relative overflow-hidden rounded-2xl border border-cyan-100 bg-slate-950">
+                  <video
+                    ref={qrVideoRef}
+                    className={`aspect-[4/3] w-full object-cover ${isScanningQr ? 'block' : 'hidden'}`}
+                    muted
+                    playsInline
+                  />
+                  {isScanningQr ? (
+                    <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+                      <div className="relative h-[58%] w-[68%] max-w-[280px] rounded-[28px] border-2 border-white/85 bg-transparent shadow-[0_0_0_9999px_rgba(2,6,23,0.28)]">
+                        <div className="absolute -left-1.5 -top-1.5 h-10 w-10 rounded-tl-[24px] border-l-4 border-t-4 border-cyan-300" />
+                        <div className="absolute -right-1.5 -top-1.5 h-10 w-10 rounded-tr-[24px] border-r-4 border-t-4 border-cyan-300" />
+                        <div className="absolute -bottom-1.5 -left-1.5 h-10 w-10 rounded-bl-[24px] border-b-4 border-l-4 border-cyan-300" />
+                        <div className="absolute -bottom-1.5 -right-1.5 h-10 w-10 rounded-br-[24px] border-b-4 border-r-4 border-cyan-300" />
+                        <div className="absolute inset-x-6 top-1/2 h-px -translate-y-1/2 bg-cyan-200/80" />
+                        <div className="absolute inset-x-0 -bottom-12 flex justify-center">
+                          <span className="rounded-full bg-slate-950/80 px-3 py-1 text-[11px] font-semibold tracking-[0.18em] text-cyan-100 backdrop-blur-sm">
+                            ALIGN QR INSIDE FRAME
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  ) : null}
+                  {!isScanningQr ? (
+                    <div className="border border-dashed border-cyan-200 bg-white/80 px-4 py-4 text-sm text-slate-600">
+                      Camera preview appears here after you click <span className="font-semibold text-slate-900">Open Camera</span>.
+                    </div>
+                  ) : null}
+                </div>
+                <canvas ref={qrCanvasRef} className="hidden" />
+
+                {qrStatus ? (
+                  <div className="rounded-xl border border-cyan-200 bg-white px-3 py-3 text-sm text-cyan-900">
+                    {qrStatus}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+
             <div className="space-y-4 rounded-2xl border border-slate-200/60 bg-white p-5 shadow-sm">
               <div className="flex items-center justify-between gap-3">
                 <div>
@@ -1095,9 +1521,21 @@ export default function DistributionDetailPage() {
                     Search the target, confirm the receiver, then release the configured package.
                   </p>
                 </div>
-                <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-500">
-                  {targetCountLabel}
-                </span>
+                <div className="flex items-center gap-2">
+                  {isHouseholdRelease ? (
+                    <button
+                      type="button"
+                      onClick={scrollToQrScanner}
+                      className="inline-flex items-center gap-1.5 rounded-full border border-cyan-200 bg-cyan-50 px-3 py-1 text-xs font-semibold text-cyan-800 transition hover:bg-cyan-100"
+                    >
+                      <QrCode className="h-3.5 w-3.5" />
+                      QR Scanner
+                    </button>
+                  ) : null}
+                  <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-500">
+                    {targetCountLabel}
+                  </span>
+                </div>
               </div>
 
               {event.status === 'completed' ? (
@@ -1454,7 +1892,10 @@ export default function DistributionDetailPage() {
           </div>
         </div>
 
-        <div className="overflow-hidden rounded-2xl border border-slate-200/60 bg-white shadow-sm">
+        <div
+          ref={recordsSectionRef}
+          className="overflow-hidden rounded-2xl border border-slate-200/60 bg-white shadow-sm"
+        >
           <div className="flex items-center justify-between border-b border-slate-100 px-5 py-3.5">
             <div>
               <p className="text-sm font-bold text-slate-800">Distribution Records</p>
@@ -1493,7 +1934,14 @@ export default function DistributionDetailPage() {
           ) : (
             <div className="divide-y divide-slate-100">
               {records.map((record) => (
-                <div key={record.id} className="space-y-3 px-5 py-4">
+                <div
+                  key={record.id}
+                  className={`space-y-3 px-5 py-4 ${
+                    record.id === lastReleasedRecordId
+                      ? 'bg-emerald-50/80'
+                      : ''
+                  }`}
+                >
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
                       <p className="text-sm font-semibold text-slate-800">

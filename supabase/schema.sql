@@ -324,6 +324,24 @@ create table if not exists public.vulnerability_flags (
     check (sync_status in ('pending', 'synced'))
 );
 
+alter table public.vulnerability_flags
+  add column if not exists follow_up_status text not null default 'none',
+  add column if not exists medical_notes text;
+
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'vulnerability_flags_follow_up_status_check'
+      and conrelid = 'public.vulnerability_flags'::regclass
+  ) then
+    alter table public.vulnerability_flags
+      add constraint vulnerability_flags_follow_up_status_check
+      check (follow_up_status in ('none', 'needs_visit', 'visited', 'referred', 'resolved'));
+  end if;
+end $$;
+
 create table if not exists public.programs (
   id text primary key default gen_random_uuid()::text,
   name text not null,
@@ -439,6 +457,21 @@ create table if not exists public.distribution_records (
   )
 );
 
+create table if not exists public.distribution_qr_scan_logs (
+  id text primary key default gen_random_uuid()::text,
+  event_id text not null references public.distribution_events (id) on delete cascade,
+  household_id text references public.households (id) on delete set null,
+  claimant_user_id uuid references public.users (id) on delete set null,
+  scanned_by uuid references public.users (id) on delete set null,
+  source text not null default 'manual'
+    check (source in ('camera', 'manual', 'link')),
+  status text not null
+    check (status in ('resolved', 'rejected', 'released')),
+  token_hash text,
+  notes text,
+  created_at timestamptz not null default timezone('utc', now())
+);
+
 create table if not exists public.incidents (
   id text primary key default gen_random_uuid()::text,
   type text not null
@@ -533,6 +566,8 @@ create index if not exists inventory_movements_timestamp_idx on public.inventory
 create index if not exists distribution_events_scheduled_date_idx on public.distribution_events (scheduled_date);
 create index if not exists distribution_events_status_idx on public.distribution_events (status);
 create index if not exists distribution_records_event_id_idx on public.distribution_records (event_id);
+create index if not exists distribution_qr_scan_logs_event_id_idx on public.distribution_qr_scan_logs (event_id, created_at desc);
+create index if not exists distribution_qr_scan_logs_household_id_idx on public.distribution_qr_scan_logs (household_id, created_at desc);
 create index if not exists incidents_status_idx on public.incidents (status);
 create index if not exists incidents_reported_at_idx on public.incidents (reported_at desc);
 create index if not exists incidents_source_alert_id_idx on public.incidents (source_alert_id);
@@ -785,6 +820,7 @@ alter table public.inventory_movements enable row level security;
 alter table public.package_templates enable row level security;
 alter table public.distribution_events enable row level security;
 alter table public.distribution_records enable row level security;
+alter table public.distribution_qr_scan_logs enable row level security;
 alter table public.incidents enable row level security;
 alter table public.audit_logs enable row level security;
 alter table public.sync_backups enable row level security;
@@ -1032,6 +1068,13 @@ for all
 using (coalesce(public.current_user_role(), '') in ('admin', 'encoder'))
 with check (coalesce(public.current_user_role(), '') in ('admin', 'encoder'));
 
+drop policy if exists "distribution_qr_scan_logs_staff_access" on public.distribution_qr_scan_logs;
+create policy "distribution_qr_scan_logs_staff_access"
+on public.distribution_qr_scan_logs
+for all
+using (coalesce(public.current_user_role(), '') in ('admin', 'encoder'))
+with check (coalesce(public.current_user_role(), '') in ('admin', 'encoder'));
+
 drop policy if exists "incidents_select_staff" on public.incidents;
 create policy "incidents_select_staff"
 on public.incidents
@@ -1079,6 +1122,7 @@ alter table public.inventory_movements replica identity full;
 alter table public.package_templates replica identity full;
 alter table public.distribution_events replica identity full;
 alter table public.distribution_records replica identity full;
+alter table public.distribution_qr_scan_logs replica identity full;
 alter table public.incidents replica identity full;
 alter table public.location_master_lists replica identity full;
 alter table public.purok_risk_profiles replica identity full;
@@ -1104,6 +1148,7 @@ declare
     'package_templates',
     'distribution_events',
     'distribution_records',
+    'distribution_qr_scan_logs',
     'incidents',
     'audit_logs',
     'sync_backups'

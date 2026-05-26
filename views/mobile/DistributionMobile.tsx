@@ -246,7 +246,7 @@ export default function DistributionMobile() {
                   actions={(
                     <>
                       <Button asChild variant="outline" className="h-10 rounded-full border-slate-200 px-4 text-xs font-semibold text-slate-700">
-                        <Link href={`/distribution/${event.id}`}>Open event</Link>
+                        <Link href={`/distribution/${event.id}`} prefetch={false}>Open event</Link>
                       </Button>
                       {canManage ? (
                         <Button

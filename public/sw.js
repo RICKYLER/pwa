@@ -6,6 +6,7 @@ const STATIC_ASSET_CACHE_PREFIX = 'mswdo-static-assets-';
 const MAP_TILE_CACHE_PREFIX = 'mswdo-map-tiles-';
 const RUNTIME_CACHES = [APP_SHELL_CACHE, STATIC_ASSET_CACHE, MAP_TILE_CACHE];
 const WEATHER_TILE_PATH = '/api/weather/map-tile';
+const IS_LOCALHOST = self.location.hostname === 'localhost' || self.location.hostname === '127.0.0.1';
 const APP_SHELL_URLS = [
   '/',
   '/offline',
@@ -77,6 +78,19 @@ async function cleanupOutdatedCaches() {
   );
 }
 
+async function clearRuntimeCaches() {
+  const cacheNames = await caches.keys();
+  await Promise.all(
+    cacheNames
+      .filter((cacheName) => (
+        cacheName.startsWith(APP_CACHE_PREFIX)
+        || cacheName.startsWith(STATIC_ASSET_CACHE_PREFIX)
+        || cacheName.startsWith(MAP_TILE_CACHE_PREFIX)
+      ))
+      .map((cacheName) => caches.delete(cacheName)),
+  );
+}
+
 async function precacheAppShell() {
   const cache = await caches.open(APP_SHELL_CACHE);
   await cache.addAll(APP_SHELL_URLS);
@@ -125,6 +139,11 @@ async function updateMapTileCache(cache, request) {
 }
 
 self.addEventListener('install', (event) => {
+  if (IS_LOCALHOST) {
+    event.waitUntil(self.skipWaiting());
+    return;
+  }
+
   event.waitUntil(Promise.all([
     precacheAppShell(),
     self.skipWaiting(),
@@ -132,6 +151,14 @@ self.addEventListener('install', (event) => {
 });
 
 self.addEventListener('activate', (event) => {
+  if (IS_LOCALHOST) {
+    event.waitUntil(Promise.all([
+      self.clients.claim(),
+      clearRuntimeCaches(),
+    ]));
+    return;
+  }
+
   event.waitUntil(Promise.all([
     self.clients.claim(),
     cleanupOutdatedCaches(),
@@ -139,6 +166,10 @@ self.addEventListener('activate', (event) => {
 });
 
 self.addEventListener('fetch', (event) => {
+  if (IS_LOCALHOST) {
+    return;
+  }
+
   if (shouldHandleNavigation(event.request)) {
     event.respondWith(handleNavigation(event.request));
     return;

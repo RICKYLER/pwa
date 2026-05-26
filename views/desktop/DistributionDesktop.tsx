@@ -237,7 +237,7 @@ export default function DistributionDesktop() {
                             const hasZeroMatches = zeroMatchEventIds.has(event.id);
                             return (
                                 <div key={event.id} className={`group relative bg-white border border-slate-200/60 rounded-2xl ${cfg.border} hover:shadow-lg transition-all hover:-translate-y-0.5`}>
-                                    <Link href={`/distribution/${event.id}`} className="block p-5">
+                                    <Link href={`/distribution/${event.id}`} prefetch={false} className="block p-5">
                                         <div className="flex items-start gap-3 mb-4">
                                             <div className="w-10 h-10 rounded-xl bg-emerald-50 flex items-center justify-center flex-shrink-0"><Package className="w-5 h-5 text-emerald-600" /></div>
                                             <div className="flex-1 min-w-0">

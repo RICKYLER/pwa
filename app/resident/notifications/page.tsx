@@ -22,9 +22,11 @@ import {
   CivicPanel,
   CivicSectionHeading,
 } from '@/components/ui/civic-primitives';
+import DistributionNotificationQr from '@/components/resident/DistributionNotificationQr';
 import { getDefaultRouteForUser, getCurrentUser, isResidentUser } from '@/lib/auth';
 import { getHouseholds } from '@/lib/db/households';
 import { getPurokRiskProfile } from '@/lib/db/purok-risk-profiles';
+import { getResidents } from '@/lib/db/residents';
 import {
   getUserNotifications,
   isFallbackUserNotificationId,
@@ -35,7 +37,9 @@ import type {
   DistributionStatus,
   Household,
   PurokRiskProfile,
+  Resident,
   UserNotification,
+  VulnerabilityFlags,
 } from '@/lib/db/schema';
 import {
   buildAffectedAreaLabel,
@@ -53,7 +57,9 @@ import {
   getDistributionNotificationAudienceLabel,
   parseDistributionEventNotification,
 } from '@/lib/distribution-notifications';
+import { evaluateHouseholdDistributionEligibility } from '@/lib/distribution-claims';
 import { resolveResidentActiveApprovedHousehold } from '@/lib/resident-households';
+import { getCurrentVulnerabilityFlagsMapForResidents } from '@/lib/db/vulnerability';
 
 declare global {
   interface WindowEventMap {
@@ -112,6 +118,8 @@ export default function ResidentNotificationsPage() {
   const [notifications, setNotifications] = useState<UserNotification[]>([]);
   const [activeHousehold, setActiveHousehold] = useState<Household | null>(null);
   const [purokRiskProfile, setPurokRiskProfile] = useState<PurokRiskProfile | null>(null);
+  const [activeHouseholdResidents, setActiveHouseholdResidents] = useState<Resident[]>([]);
+  const [flagsByResidentId, setFlagsByResidentId] = useState<Map<string, VulnerabilityFlags>>(new Map());
   const [isLoading, setIsLoading] = useState(true);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [markingId, setMarkingId] = useState<string | null>(null);
@@ -141,6 +149,12 @@ export default function ResidentNotificationsPage() {
           getHouseholds({ applicant_user_id: residentUser.id }),
         ]);
         const nextActiveHousehold = resolveResidentActiveApprovedHousehold(households);
+        const nextResidents = nextActiveHousehold
+          ? await getResidents({ household_id: nextActiveHousehold.id, status: 'active' })
+          : [];
+        const nextFlags = nextActiveHousehold
+          ? await getCurrentVulnerabilityFlagsMapForResidents(nextResidents, [nextActiveHousehold])
+          : new Map<string, VulnerabilityFlags>();
         const nextPurokRiskProfile = nextActiveHousehold
           ? await getPurokRiskProfile(nextActiveHousehold.barangay_id, nextActiveHousehold.purok_sitio)
           : null;
@@ -148,6 +162,8 @@ export default function ResidentNotificationsPage() {
           setNotifications(nextNotifications);
           setActiveHousehold(nextActiveHousehold ?? null);
           setPurokRiskProfile(nextPurokRiskProfile ?? null);
+          setActiveHouseholdResidents(nextResidents);
+          setFlagsByResidentId(nextFlags);
         }
       } finally {
         if (!cancelled) {
@@ -157,7 +173,13 @@ export default function ResidentNotificationsPage() {
     }
 
     function handleDataChanged(event: WindowEventMap['mswdo-data-changed']) {
-      if (event.detail.table !== 'user_notifications' && event.detail.table !== 'purok_risk_profiles' && event.detail.table !== 'households') {
+      if (
+        event.detail.table !== 'user_notifications'
+        && event.detail.table !== 'purok_risk_profiles'
+        && event.detail.table !== 'households'
+        && event.detail.table !== 'residents'
+        && event.detail.table !== 'vulnerability_flags'
+      ) {
         return;
       }
 
@@ -173,9 +195,27 @@ export default function ResidentNotificationsPage() {
     };
   }, [router, user]);
 
+  const visibleNotifications = useMemo(() => {
+    return notifications.filter((notification) => {
+      const distributionPayload = parseDistributionEventNotification(notification);
+      if (!distributionPayload) {
+        return true;
+      }
+
+      const eligibility = evaluateHouseholdDistributionEligibility({
+        household: activeHousehold,
+        notification: distributionPayload,
+        residents: activeHouseholdResidents,
+        flagsByResidentId,
+      });
+
+      return eligibility.eligible;
+    });
+  }, [activeHousehold, activeHouseholdResidents, flagsByResidentId, notifications]);
+
   const unreadCount = useMemo(
-    () => notifications.filter((notification) => !notification.read_at).length,
-    [notifications],
+    () => visibleNotifications.filter((notification) => !notification.read_at).length,
+    [visibleNotifications],
   );
 
   async function handleToggle(notification: UserNotification) {
@@ -211,7 +251,7 @@ export default function ResidentNotificationsPage() {
       <div className="grid gap-4 sm:grid-cols-2">
         <CivicKpiCard
           label="Inbox Items"
-          value={notifications.length}
+          value={visibleNotifications.length}
           hint="Resident notices include both distribution updates and automatic disaster alerts."
           icon={Inbox}
           tone="navy"
@@ -247,7 +287,7 @@ export default function ResidentNotificationsPage() {
             <Loader2 className="mx-auto h-5 w-5 animate-spin text-slate-400" />
             <p className="mt-3">Loading your notifications...</p>
           </div>
-        ) : notifications.length === 0 ? (
+        ) : visibleNotifications.length === 0 ? (
           <div className="mt-6">
             <CivicEmptyState
               icon={Inbox}
@@ -257,12 +297,20 @@ export default function ResidentNotificationsPage() {
           </div>
         ) : (
           <div className="mt-6 space-y-4">
-            {notifications.map((notification) => {
+            {visibleNotifications.map((notification) => {
               const distributionPayload = parseDistributionEventNotification(notification);
               const disasterPayload = parseDisasterAlertNotification(notification);
               const isUnread = !notification.read_at;
               const isExpanded = expandedId === notification.id;
               const isMarkingRead = markingId === notification.id;
+              const distributionEligibility = distributionPayload
+                ? evaluateHouseholdDistributionEligibility({
+                  household: activeHousehold,
+                  notification: distributionPayload,
+                  residents: activeHouseholdResidents,
+                  flagsByResidentId,
+                })
+                : null;
               const affectedArea = disasterPayload
                 ? buildAffectedAreaLabel({
                   barangay_id: disasterPayload.barangay_id,
@@ -390,6 +438,21 @@ export default function ResidentNotificationsPage() {
                           <p className="mt-1">{distributionPayload.notes.trim()}</p>
                         </div>
                       ) : null}
+
+                      {distributionPayload.target_scope === 'household'
+                      && distributionPayload.status !== 'completed'
+                      && activeHousehold
+                      && distributionEligibility?.eligible ? (
+                        <DistributionNotificationQr
+                          eventId={distributionPayload.event_id}
+                          householdHeadName={activeHousehold.head_name}
+                          audienceLabel={getDistributionNotificationAudienceLabel(
+                            distributionPayload.target_scope,
+                            distributionPayload.target_group,
+                          )}
+                          matchedResidentNames={distributionEligibility.matchedResidents.map((resident) => resident.full_name)}
+                        />
+                        ) : null}
 
                       {!isUnread ? (
                         <div className="mt-4 inline-flex items-center gap-2 text-xs font-medium text-emerald-700">

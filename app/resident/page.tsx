@@ -9,9 +9,18 @@ import ResidentShell from '@/components/resident/ResidentShell';
 import { getDefaultRouteForUser, getCurrentUser, isResidentUser } from '@/lib/auth';
 import { getHouseholds } from '@/lib/db/households';
 import { getPurokRiskProfile } from '@/lib/db/purok-risk-profiles';
+import { getResidents } from '@/lib/db/residents';
 import { getDisasterAlertRules } from '@/lib/db/disaster-alerts';
 import { getUserNotifications } from '@/lib/db/user-notifications';
-import type { DisasterAlertRule, DistributionStatus, Household, PurokRiskProfile, UserNotification } from '@/lib/db/schema';
+import type {
+  DisasterAlertRule,
+  DistributionStatus,
+  Household,
+  PurokRiskProfile,
+  Resident,
+  UserNotification,
+  VulnerabilityFlags,
+} from '@/lib/db/schema';
 import { buildRegistrationTimeline, formatRegistrationStatusLabel, getHouseholdRegistrationStatus } from '@/lib/household-registration';
 import {
   matchesHouseholdAlertScope,
@@ -33,7 +42,9 @@ import {
   DISTRIBUTION_NOTIFICATION_STATUS_LABELS,
   parseDistributionEventNotification,
 } from '@/lib/distribution-notifications';
+import { evaluateHouseholdDistributionEligibility } from '@/lib/distribution-claims';
 import { resolveResidentActiveApprovedHousehold } from '@/lib/resident-households';
+import { getCurrentVulnerabilityFlagsMapForResidents } from '@/lib/db/vulnerability';
 
 declare global {
   interface WindowEventMap {
@@ -70,6 +81,8 @@ export default function ResidentPortalPage() {
   const [purokRiskProfile, setPurokRiskProfile] = useState<PurokRiskProfile | null>(null);
   const [alertRules, setAlertRules] = useState<DisasterAlertRule[]>([]);
   const [liveWeather, setLiveWeather] = useState<FieldResponseWeatherPayload | null>(null);
+  const [activeHouseholdResidents, setActiveHouseholdResidents] = useState<Resident[]>([]);
+  const [flagsByResidentId, setFlagsByResidentId] = useState<Map<string, VulnerabilityFlags>>(new Map());
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
@@ -95,6 +108,12 @@ export default function ResidentPortalPage() {
           getDisasterAlertRules(),
         ]);
         const activeHousehold = resolveResidentActiveApprovedHousehold(households);
+        const nextResidents = activeHousehold
+          ? await getResidents({ household_id: activeHousehold.id, status: 'active' })
+          : [];
+        const nextFlags = activeHousehold
+          ? await getCurrentVulnerabilityFlagsMapForResidents(nextResidents, [activeHousehold])
+          : new Map<string, VulnerabilityFlags>();
         const profile = activeHousehold
           ? await getPurokRiskProfile(activeHousehold.barangay_id, activeHousehold.purok_sitio)
           : null;
@@ -103,6 +122,8 @@ export default function ResidentPortalPage() {
           setNotifications(inboxItems);
           setPurokRiskProfile(profile ?? null);
           setAlertRules(rules);
+          setActiveHouseholdResidents(nextResidents);
+          setFlagsByResidentId(nextFlags);
         }
       } finally {
         if (!cancelled) {
@@ -118,6 +139,8 @@ export default function ResidentPortalPage() {
         && event.detail.table !== 'user_notifications'
         && event.detail.table !== 'purok_risk_profiles'
         && event.detail.table !== 'disaster_alert_rules'
+        && event.detail.table !== 'residents'
+        && event.detail.table !== 'vulnerability_flags'
       ) {
         return;
       }
@@ -140,9 +163,26 @@ export default function ResidentPortalPage() {
     () => resolveResidentActiveApprovedHousehold(records),
     [records],
   );
+  const visibleNotifications = useMemo(() => {
+    return notifications.filter((notification) => {
+      const distributionPayload = parseDistributionEventNotification(notification);
+      if (!distributionPayload) {
+        return true;
+      }
+
+      const eligibility = evaluateHouseholdDistributionEligibility({
+        household: activeHousehold,
+        notification: distributionPayload,
+        residents: activeHouseholdResidents,
+        flagsByResidentId,
+      });
+
+      return eligibility.eligible;
+    });
+  }, [activeHousehold, activeHouseholdResidents, flagsByResidentId, notifications]);
   const unreadNotificationCount = useMemo(
-    () => notifications.filter((notification) => !notification.read_at).length,
-    [notifications],
+    () => visibleNotifications.filter((notification) => !notification.read_at).length,
+    [visibleNotifications],
   );
 
   const activeRule = useMemo(() => {
@@ -389,13 +429,13 @@ export default function ResidentPortalPage() {
         </div>
 
         <div className="mt-6 flex flex-wrap gap-2">
-          <CivicBadge label={`${notifications.length} total notice${notifications.length === 1 ? '' : 's'}`} tone="slate" />
+          <CivicBadge label={`${visibleNotifications.length} total notice${visibleNotifications.length === 1 ? '' : 's'}`} tone="slate" />
           <CivicBadge label={`${unreadNotificationCount} unread`} tone={unreadNotificationCount > 0 ? 'amber' : 'emerald'} />
         </div>
 
-        {notifications.length > 0 ? (
+        {visibleNotifications.length > 0 ? (
           <div className="mt-5 space-y-3">
-            {notifications.slice(0, 2).map((notification) => {
+            {visibleNotifications.slice(0, 2).map((notification) => {
               const distributionPayload = parseDistributionEventNotification(notification);
               const disasterPayload = parseDisasterAlertNotification(notification);
               const affectedArea = disasterPayload

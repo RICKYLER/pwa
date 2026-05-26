@@ -13,11 +13,32 @@ declare global {
   }
 }
 
-const CACHE_PREFIXES = ['mswdo-pwa-'];
+const CACHE_PREFIXES = [
+  'mswdo-pwa-',
+  'mswdo-app-shell-',
+  'mswdo-static-assets-',
+  'mswdo-map-tiles-',
+];
 const CURRENT_SERVICE_WORKER_PATH = '/sw.js';
+
+function isLocalDevelopmentHost() {
+  if (typeof window === 'undefined') {
+    return false;
+  }
+
+  return window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+}
 
 async function registerCurrentServiceWorker() {
   if (typeof window === 'undefined' || !('serviceWorker' in navigator)) {
+    return;
+  }
+
+  if (isLocalDevelopmentHost()) {
+    const registrations = await navigator.serviceWorker.getRegistrations().catch(() => []);
+    await Promise.all(
+      registrations.map((registration) => registration.unregister().catch(() => false)),
+    );
     return;
   }
 
