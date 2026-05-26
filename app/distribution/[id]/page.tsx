@@ -49,6 +49,7 @@ import { getHouseholds } from '@/lib/db/households';
 import { getInventoryItems } from '@/lib/db/inventory';
 import { getLastSupabaseBootstrapCompletedAt } from '@/lib/supabase/bootstrap';
 import { extractDistributionQrToken } from '@/lib/distribution-qr';
+import { toast } from '@/hooks/use-toast';
 import type {
   DistributedItem,
   DistributionEvent,
@@ -176,6 +177,7 @@ export default function DistributionDetailPage() {
   const [isScanningQr, setIsScanningQr] = useState(false);
   const [isProcessingQr, setIsProcessingQr] = useState(false);
   const [qrStatus, setQrStatus] = useState('');
+  const [qrFeedbackState, setQrFeedbackState] = useState<'idle' | 'scanning' | 'detected' | 'success' | 'error' | 'claimed'>('idle');
   const [lastReleasedRecordId, setLastReleasedRecordId] = useState('');
   const qrScannerSectionRef = useRef<HTMLDivElement | null>(null);
 
@@ -189,11 +191,13 @@ export default function DistributionDetailPage() {
   const geocodedRef = useRef(false);
   const latestLoadRequestIdRef = useRef(0);
   const processedQrTokenRef = useRef<string | null>(null);
+  const lastRejectedQrRef = useRef<{ key: string; at: number } | null>(null);
   const isProcessingQrRef = useRef(false);
   const qrVideoRef = useRef<HTMLVideoElement | null>(null);
   const qrCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const qrStreamRef = useRef<MediaStream | null>(null);
   const qrAnimationFrameRef = useRef<number | null>(null);
+  const qrFeedbackTimeoutRef = useRef<number | null>(null);
   const recordsSectionRef = useRef<HTMLDivElement | null>(null);
   const [mapsReady, setMapsReady] = useState(false);
 
@@ -517,7 +521,13 @@ export default function DistributionDetailPage() {
     selectedResident?.full_name,
   ]);
 
-  const stopQrScanner = useCallback(() => {
+  const stopQrScanner = useCallback((options?: { resetFeedback?: boolean }) => {
+    const shouldResetFeedback = options?.resetFeedback ?? true;
+    if (shouldResetFeedback && qrFeedbackTimeoutRef.current !== null) {
+      window.clearTimeout(qrFeedbackTimeoutRef.current);
+      qrFeedbackTimeoutRef.current = null;
+    }
+
     if (qrAnimationFrameRef.current !== null) {
       cancelAnimationFrame(qrAnimationFrameRef.current);
       qrAnimationFrameRef.current = null;
@@ -533,9 +543,39 @@ export default function DistributionDetailPage() {
     }
 
     setIsScanningQr(false);
+    if (shouldResetFeedback) {
+      setQrFeedbackState('idle');
+    }
   }, []);
 
   useEffect(() => stopQrScanner, [stopQrScanner]);
+
+  const triggerQrFeedback = useCallback((
+    nextState: 'scanning' | 'detected' | 'success' | 'error' | 'claimed',
+    options?: {
+      durationMs?: number;
+      resetTo?: 'scanning' | 'idle' | 'error' | 'claimed';
+      vibratePattern?: number | number[];
+    },
+  ) => {
+    if (qrFeedbackTimeoutRef.current !== null) {
+      window.clearTimeout(qrFeedbackTimeoutRef.current);
+      qrFeedbackTimeoutRef.current = null;
+    }
+
+    setQrFeedbackState(nextState);
+
+    if (typeof navigator !== 'undefined' && 'vibrate' in navigator && options?.vibratePattern) {
+      navigator.vibrate(options.vibratePattern);
+    }
+
+    if (options?.durationMs) {
+      qrFeedbackTimeoutRef.current = window.setTimeout(() => {
+        setQrFeedbackState(options.resetTo ?? 'scanning');
+        qrFeedbackTimeoutRef.current = null;
+      }, options.durationMs);
+    }
+  }, []);
 
   const scrollToDistributionRecords = useCallback(() => {
     recordsSectionRef.current?.scrollIntoView({
@@ -622,8 +662,26 @@ export default function DistributionDetailPage() {
     }
 
     const extracted = extractDistributionQrToken(rawValue, event.id);
+    const rejectionKey = extracted?.token || rawValue.trim();
+    const now = Date.now();
+    if (
+      rejectionKey
+      && lastRejectedQrRef.current
+      && lastRejectedQrRef.current.key === rejectionKey
+      && (now - lastRejectedQrRef.current.at) < 2200
+    ) {
+      return false;
+    }
+
     if (!extracted?.token) {
       setQrStatus('The scanned QR code is not a valid distribution claim for this event.');
+      toast({
+        title: 'QR Rejected',
+        description: 'The scanned QR code is not valid for this event.',
+        variant: 'destructive',
+      });
+      lastRejectedQrRef.current = { key: rejectionKey, at: now };
+      triggerQrFeedback('error', { durationMs: 1100, resetTo: 'scanning', vibratePattern: 120 });
       return false;
     }
 
@@ -657,7 +715,26 @@ export default function DistributionDetailPage() {
       } | null;
 
       if (!response.ok || !payload?.householdId) {
-        throw new Error(payload?.error || 'Unable to validate the household QR code.');
+        const errorMessage = payload?.error || 'Unable to validate the household QR code.';
+        const alreadyClaimed = response.status === 409 && /already claimed/i.test(errorMessage);
+
+        if (alreadyClaimed) {
+          setQrStatus(errorMessage);
+          toast({
+            title: 'Already Claimed',
+            description: errorMessage,
+            variant: 'destructive',
+          });
+          lastRejectedQrRef.current = { key: rejectionKey, at: Date.now() };
+          triggerQrFeedback('claimed', {
+            durationMs: 1800,
+            resetTo: 'scanning',
+            vibratePattern: [120, 40, 120, 40, 120],
+          });
+          return false;
+        }
+
+        throw new Error(errorMessage);
       }
 
       const released = await completeRelease({
@@ -672,24 +749,38 @@ export default function DistributionDetailPage() {
       }
 
       processedQrTokenRef.current = extracted.token;
+      lastRejectedQrRef.current = null;
       setQrInputValue('');
       setQrStatus(`QR verified for ${payload.householdName || 'the household'}.`);
-      stopQrScanner();
+      triggerQrFeedback('success', {
+        durationMs: 1800,
+        resetTo: 'idle',
+        vibratePattern: [60, 40, 120],
+      });
+      stopQrScanner({ resetFeedback: false });
 
       if (searchParams.get('qr')) {
         router.replace(`/distribution/${event.id}`);
       }
       return true;
     } catch (qrError) {
-      setQrStatus(
-        qrError instanceof Error ? qrError.message : 'Unable to process the household QR code.',
-      );
+      const errorMessage = qrError instanceof Error
+        ? qrError.message
+        : 'Unable to process the household QR code.';
+      setQrStatus(errorMessage);
+      toast({
+        title: 'QR Rejected',
+        description: errorMessage,
+        variant: 'destructive',
+      });
+      lastRejectedQrRef.current = { key: rejectionKey, at: Date.now() };
+      triggerQrFeedback('error', { durationMs: 1200, resetTo: 'scanning', vibratePattern: [90, 30, 90] });
       return false;
     } finally {
       isProcessingQrRef.current = false;
       setIsProcessingQr(false);
     }
-  }, [completeRelease, event, router, searchParams, stopQrScanner]);
+  }, [completeRelease, event, router, searchParams, stopQrScanner, triggerQrFeedback]);
 
   const startQrScanner = useCallback(async () => {
     if (isScanningQr || isProcessingQr) {
@@ -745,6 +836,7 @@ export default function DistributionDetailPage() {
       qrStreamRef.current = stream;
       setIsScanningQr(true);
       setQrStatus('Camera ready. Point the QR code inside the frame.');
+      setQrFeedbackState('scanning');
 
       const video = qrVideoRef.current;
       const canvas = qrCanvasRef.current;
@@ -812,6 +904,11 @@ export default function DistributionDetailPage() {
         }
 
         if (decodedValue) {
+          triggerQrFeedback('detected', {
+            durationMs: 700,
+            resetTo: 'scanning',
+            vibratePattern: 50,
+          });
           const success = await processDistributionQr(decodedValue, 'camera');
           if (!success && qrStreamRef.current) {
             qrAnimationFrameRef.current = requestAnimationFrame(() => { void tick(); });
@@ -833,7 +930,7 @@ export default function DistributionDetailPage() {
             : 'Unable to access the camera for QR scanning.',
       );
     }
-  }, [isProcessingQr, isScanningQr, processDistributionQr, stopQrScanner]);
+  }, [isProcessingQr, isScanningQr, processDistributionQr, stopQrScanner, triggerQrFeedback]);
 
   useEffect(() => {
     const qrFromUrl = searchParams.get('qr');
@@ -968,6 +1065,50 @@ export default function DistributionDetailPage() {
   const isHouseholdRelease = event.target_scope === 'household'
     || targetCountLabel.toLowerCase().includes('household')
     || SCOPE_LABELS[event.target_scope] === 'Household-based release';
+  const qrFrameTone = qrFeedbackState === 'success'
+    ? {
+      shell: 'border-emerald-200 bg-emerald-400/15',
+      frame: 'border-emerald-200 shadow-[0_0_0_9999px_rgba(2,6,23,0.16)]',
+      corner: 'border-emerald-300',
+      line: 'bg-emerald-300/90',
+      badge: 'bg-emerald-500/90 text-white',
+      label: 'QR VERIFIED',
+    }
+    : qrFeedbackState === 'claimed'
+      ? {
+        shell: 'border-rose-300 bg-rose-500/14',
+        frame: 'border-rose-300 shadow-[0_0_0_9999px_rgba(127,29,29,0.24)]',
+        corner: 'border-rose-400',
+        line: 'bg-rose-300/95',
+        badge: 'bg-rose-600/95 text-white',
+        label: 'ALREADY CLAIMED',
+      }
+    : qrFeedbackState === 'detected'
+      ? {
+        shell: 'border-amber-200 bg-amber-400/12',
+        frame: 'border-amber-200 shadow-[0_0_0_9999px_rgba(2,6,23,0.22)]',
+        corner: 'border-amber-300',
+        line: 'bg-amber-200/90',
+        badge: 'bg-amber-500/90 text-white',
+        label: 'QR DETECTED',
+      }
+      : qrFeedbackState === 'error'
+        ? {
+          shell: 'border-rose-200 bg-rose-400/12',
+          frame: 'border-rose-200 shadow-[0_0_0_9999px_rgba(2,6,23,0.24)]',
+          corner: 'border-rose-300',
+          line: 'bg-rose-200/90',
+          badge: 'bg-rose-500/90 text-white',
+          label: 'TRY AGAIN',
+        }
+        : {
+          shell: 'border-cyan-100 bg-transparent',
+          frame: 'border-white/85 shadow-[0_0_0_9999px_rgba(2,6,23,0.28)]',
+          corner: 'border-cyan-300',
+          line: 'bg-cyan-200/80',
+          badge: 'bg-slate-950/80 text-cyan-100',
+          label: isProcessingQr ? 'PROCESSING' : 'SCANNING',
+        };
   const releaseDisabled =
     !canManage ||
     event.status === 'completed' ||
@@ -1474,7 +1615,7 @@ export default function DistributionDetailPage() {
                   </button>
                 </div>
 
-                <div className="relative overflow-hidden rounded-2xl border border-cyan-100 bg-slate-950">
+                <div className={`relative overflow-hidden rounded-2xl border bg-slate-950 transition-all duration-300 ${qrFrameTone.shell}`}>
                   <video
                     ref={qrVideoRef}
                     className={`aspect-[4/3] w-full object-cover ${isScanningQr ? 'block' : 'hidden'}`}
@@ -1483,15 +1624,16 @@ export default function DistributionDetailPage() {
                   />
                   {isScanningQr ? (
                     <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-                      <div className="relative h-[58%] w-[68%] max-w-[280px] rounded-[28px] border-2 border-white/85 bg-transparent shadow-[0_0_0_9999px_rgba(2,6,23,0.28)]">
-                        <div className="absolute -left-1.5 -top-1.5 h-10 w-10 rounded-tl-[24px] border-l-4 border-t-4 border-cyan-300" />
-                        <div className="absolute -right-1.5 -top-1.5 h-10 w-10 rounded-tr-[24px] border-r-4 border-t-4 border-cyan-300" />
-                        <div className="absolute -bottom-1.5 -left-1.5 h-10 w-10 rounded-bl-[24px] border-b-4 border-l-4 border-cyan-300" />
-                        <div className="absolute -bottom-1.5 -right-1.5 h-10 w-10 rounded-br-[24px] border-b-4 border-r-4 border-cyan-300" />
-                        <div className="absolute inset-x-6 top-1/2 h-px -translate-y-1/2 bg-cyan-200/80" />
+                      <div className={`relative h-[58%] w-[68%] max-w-[280px] rounded-[28px] border-2 bg-transparent transition-all duration-300 ${qrFrameTone.frame} ${qrFeedbackState === 'detected' ? 'scale-[1.03]' : qrFeedbackState === 'success' ? 'scale-[1.04]' : ''}`}>
+                        <div className={`absolute -left-1.5 -top-1.5 h-10 w-10 rounded-tl-[24px] border-l-4 border-t-4 ${qrFrameTone.corner}`} />
+                        <div className={`absolute -right-1.5 -top-1.5 h-10 w-10 rounded-tr-[24px] border-r-4 border-t-4 ${qrFrameTone.corner}`} />
+                        <div className={`absolute -bottom-1.5 -left-1.5 h-10 w-10 rounded-bl-[24px] border-b-4 border-l-4 ${qrFrameTone.corner}`} />
+                        <div className={`absolute -bottom-1.5 -right-1.5 h-10 w-10 rounded-br-[24px] border-b-4 border-r-4 ${qrFrameTone.corner}`} />
+                        <div className={`absolute inset-x-6 top-1/2 h-px -translate-y-1/2 ${qrFrameTone.line} ${qrFeedbackState === 'scanning' ? 'animate-pulse' : ''}`} />
+                        <div className={`absolute inset-x-5 top-6 h-1 rounded-full bg-gradient-to-r from-transparent via-white/90 to-transparent transition-all duration-300 ${qrFeedbackState === 'success' ? 'opacity-0' : 'opacity-100 animate-pulse'}`} />
                         <div className="absolute inset-x-0 -bottom-12 flex justify-center">
-                          <span className="rounded-full bg-slate-950/80 px-3 py-1 text-[11px] font-semibold tracking-[0.18em] text-cyan-100 backdrop-blur-sm">
-                            ALIGN QR INSIDE FRAME
+                          <span className={`rounded-full px-3 py-1 text-[11px] font-semibold tracking-[0.18em] backdrop-blur-sm ${qrFrameTone.badge}`}>
+                            {qrFrameTone.label}
                           </span>
                         </div>
                       </div>

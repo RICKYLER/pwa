@@ -4,6 +4,7 @@ import { Analytics } from '@vercel/analytics/next'
 import AuthBootstrap from '@/components/AuthBootstrap'
 import GoogleMapsProvider from '@/components/GoogleMapsProvider'
 import PwaBootstrap from '@/components/PwaBootstrap'
+import { Toaster } from '@/components/ui/toaster'
 import { PwaInstallProvider } from '@/hooks/usePwaInstall'
 import './globals.css'
 
@@ -81,6 +82,7 @@ export default function RootLayout({
               {children}
             </GoogleMapsProvider>
           </AuthBootstrap>
+          <Toaster />
         </PwaInstallProvider>
         <Analytics />
       </body>
