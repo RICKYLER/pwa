@@ -241,7 +241,9 @@ export default function DistributionDetailPage() {
     try {
       let distributionEvent = await getDistributionEvent(params.id);
       if (!distributionEvent) {
-        router.push('/distribution');
+        if (!background) {
+          router.push('/distribution');
+        }
         return;
       }
 
@@ -1109,6 +1111,10 @@ export default function DistributionDetailPage() {
           badge: 'bg-slate-950/80 text-cyan-100',
           label: isProcessingQr ? 'PROCESSING' : 'SCANNING',
         };
+  const shouldAnimateQrSweep = isScanningQr
+    && qrFeedbackState !== 'success'
+    && qrFeedbackState !== 'error'
+    && qrFeedbackState !== 'claimed';
   const releaseDisabled =
     !canManage ||
     event.status === 'completed' ||
@@ -1629,8 +1635,9 @@ export default function DistributionDetailPage() {
                         <div className={`absolute -right-1.5 -top-1.5 h-10 w-10 rounded-tr-[24px] border-r-4 border-t-4 ${qrFrameTone.corner}`} />
                         <div className={`absolute -bottom-1.5 -left-1.5 h-10 w-10 rounded-bl-[24px] border-b-4 border-l-4 ${qrFrameTone.corner}`} />
                         <div className={`absolute -bottom-1.5 -right-1.5 h-10 w-10 rounded-br-[24px] border-b-4 border-r-4 ${qrFrameTone.corner}`} />
+                        <div className={`qr-scanner-grid absolute inset-3 rounded-[22px] transition-opacity duration-300 ${shouldAnimateQrSweep ? 'opacity-100' : 'opacity-0'}`} />
                         <div className={`absolute inset-x-6 top-1/2 h-px -translate-y-1/2 ${qrFrameTone.line} ${qrFeedbackState === 'scanning' ? 'animate-pulse' : ''}`} />
-                        <div className={`absolute inset-x-5 top-6 h-1 rounded-full bg-gradient-to-r from-transparent via-white/90 to-transparent transition-all duration-300 ${qrFeedbackState === 'success' ? 'opacity-0' : 'opacity-100 animate-pulse'}`} />
+                        <div className={`qr-scanner-sweep absolute inset-x-5 h-1 rounded-full bg-gradient-to-r from-transparent via-emerald-300 to-transparent transition-opacity duration-300 ${shouldAnimateQrSweep ? 'opacity-100' : 'opacity-0'}`} />
                         <div className="absolute inset-x-0 -bottom-12 flex justify-center">
                           <span className={`rounded-full px-3 py-1 text-[11px] font-semibold tracking-[0.18em] backdrop-blur-sm ${qrFrameTone.badge}`}>
                             {qrFrameTone.label}

@@ -52,11 +52,11 @@ const ROUTE_TABLES: Array<{
   },
   {
     prefix: '/resident/household',
-    tables: ['households', 'residents', 'vulnerability_flags', 'user_notifications', 'purok_risk_profiles'],
+    tables: ['households', 'residents', 'vulnerability_flags', 'user_notifications', 'distribution_records', 'purok_risk_profiles'],
   },
   {
     prefix: '/resident',
-    tables: ['households', 'user_notifications', 'purok_risk_profiles'],
+    tables: ['households', 'residents', 'vulnerability_flags', 'user_notifications', 'distribution_records', 'purok_risk_profiles'],
   },
 ];
 

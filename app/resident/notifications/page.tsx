@@ -24,6 +24,7 @@ import {
 } from '@/components/ui/civic-primitives';
 import DistributionNotificationQr from '@/components/resident/DistributionNotificationQr';
 import { getDefaultRouteForUser, getCurrentUser, isResidentUser } from '@/lib/auth';
+import { getDistributionRecordsForHousehold } from '@/lib/db/distribution';
 import { getHouseholds } from '@/lib/db/households';
 import { getPurokRiskProfile } from '@/lib/db/purok-risk-profiles';
 import { getResidents } from '@/lib/db/residents';
@@ -34,6 +35,7 @@ import {
   markUserNotificationReadLocally,
 } from '@/lib/db/user-notifications';
 import type {
+  DistributionRecord,
   DistributionStatus,
   Household,
   PurokRiskProfile,
@@ -119,6 +121,7 @@ export default function ResidentNotificationsPage() {
   const [activeHousehold, setActiveHousehold] = useState<Household | null>(null);
   const [purokRiskProfile, setPurokRiskProfile] = useState<PurokRiskProfile | null>(null);
   const [activeHouseholdResidents, setActiveHouseholdResidents] = useState<Resident[]>([]);
+  const [householdDistributionRecords, setHouseholdDistributionRecords] = useState<DistributionRecord[]>([]);
   const [flagsByResidentId, setFlagsByResidentId] = useState<Map<string, VulnerabilityFlags>>(new Map());
   const [isLoading, setIsLoading] = useState(true);
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -158,11 +161,15 @@ export default function ResidentNotificationsPage() {
         const nextPurokRiskProfile = nextActiveHousehold
           ? await getPurokRiskProfile(nextActiveHousehold.barangay_id, nextActiveHousehold.purok_sitio)
           : null;
+        const nextDistributionRecords = nextActiveHousehold
+          ? await getDistributionRecordsForHousehold(nextActiveHousehold.id)
+          : [];
         if (!cancelled) {
           setNotifications(nextNotifications);
           setActiveHousehold(nextActiveHousehold ?? null);
           setPurokRiskProfile(nextPurokRiskProfile ?? null);
           setActiveHouseholdResidents(nextResidents);
+          setHouseholdDistributionRecords(nextDistributionRecords);
           setFlagsByResidentId(nextFlags);
         }
       } finally {
@@ -179,6 +186,7 @@ export default function ResidentNotificationsPage() {
         && event.detail.table !== 'households'
         && event.detail.table !== 'residents'
         && event.detail.table !== 'vulnerability_flags'
+        && event.detail.table !== 'distribution_records'
       ) {
         return;
       }
@@ -217,6 +225,22 @@ export default function ResidentNotificationsPage() {
     () => visibleNotifications.filter((notification) => !notification.read_at).length,
     [visibleNotifications],
   );
+
+  const claimedRecordsByEventId = useMemo(() => {
+    const recordsByEventId = new Map<string, DistributionRecord>();
+
+    householdDistributionRecords.forEach((record) => {
+      const existing = recordsByEventId.get(record.event_id);
+      const existingTime = existing ? new Date(existing.timestamp).getTime() : 0;
+      const recordTime = new Date(record.timestamp).getTime();
+
+      if (!existing || recordTime > existingTime) {
+        recordsByEventId.set(record.event_id, record);
+      }
+    });
+
+    return recordsByEventId;
+  }, [householdDistributionRecords]);
 
   async function handleToggle(notification: UserNotification) {
     const nextExpandedId = expandedId === notification.id ? null : notification.id;
@@ -311,6 +335,9 @@ export default function ResidentNotificationsPage() {
                   flagsByResidentId,
                 })
                 : null;
+              const claimedRecord = distributionPayload
+                ? claimedRecordsByEventId.get(distributionPayload.event_id) ?? null
+                : null;
               const affectedArea = disasterPayload
                 ? buildAffectedAreaLabel({
                   barangay_id: disasterPayload.barangay_id,
@@ -360,8 +387,9 @@ export default function ResidentNotificationsPage() {
                               <CivicBadge label={DISTRIBUTION_NOTIFICATION_TYPE_LABELS[distributionPayload.type]} tone="slate" />
                               <CivicBadge
                                 label={DISTRIBUTION_NOTIFICATION_STATUS_LABELS[distributionPayload.status]}
-                                tone={STATUS_BADGE_TONES[distributionPayload.status]}
+                                tone={claimedRecord ? 'emerald' : STATUS_BADGE_TONES[distributionPayload.status]}
                               />
+                              {claimedRecord ? <CivicBadge label="Claimed" tone="emerald" /> : null}
                             </>
                           ) : null}
                           {disasterPayload ? (
@@ -397,6 +425,9 @@ export default function ResidentNotificationsPage() {
                           tone={STATUS_BADGE_TONES[distributionPayload.status]}
                         />
                         <CivicBadge label={`Latest update ${formatDateTime(notification.updatedAt)}`} tone="slate" />
+                        {claimedRecord ? (
+                          <CivicBadge label={`Claimed ${formatDateTime(claimedRecord.timestamp)}`} tone="emerald" />
+                        ) : null}
                       </div>
 
                       <div className="grid gap-3 md:grid-cols-3">
@@ -440,7 +471,7 @@ export default function ResidentNotificationsPage() {
                       ) : null}
 
                       {distributionPayload.target_scope === 'household'
-                      && distributionPayload.status !== 'completed'
+                      && (claimedRecord || distributionPayload.status !== 'completed')
                       && activeHousehold
                       && distributionEligibility?.eligible ? (
                         <DistributionNotificationQr
@@ -451,6 +482,10 @@ export default function ResidentNotificationsPage() {
                             distributionPayload.target_group,
                           )}
                           matchedResidentNames={distributionEligibility.matchedResidents.map((resident) => resident.full_name)}
+                          claimedRelease={claimedRecord ? {
+                            receivedByName: claimedRecord.received_by_name || claimedRecord.beneficiary_name,
+                            claimedAt: claimedRecord.timestamp,
+                          } : null}
                         />
                         ) : null}
 

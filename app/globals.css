@@ -415,3 +415,51 @@
   background: rgba(20, 184, 166, 0.16);
   color: #ccfbf1;
 }
+
+.qr-scanner-grid {
+  background:
+    linear-gradient(rgba(52, 211, 153, 0.12) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(52, 211, 153, 0.12) 1px, transparent 1px);
+  background-size: 22px 22px;
+  mask-image: radial-gradient(circle at center, black 55%, transparent 78%);
+}
+
+.qr-scanner-sweep {
+  top: 16%;
+  box-shadow:
+    0 0 18px rgba(52, 211, 153, 0.95),
+    0 0 46px rgba(16, 185, 129, 0.62);
+  animation: qr-scanner-sweep 1.65s ease-in-out infinite alternate;
+}
+
+.qr-scanner-sweep::after {
+  content: '';
+  position: absolute;
+  inset: -18px 0 -14px;
+  border-radius: 999px;
+  background: linear-gradient(180deg, rgba(16, 185, 129, 0.24), transparent);
+  filter: blur(10px);
+}
+
+@keyframes qr-scanner-sweep {
+  0% {
+    top: 16%;
+    opacity: 0.72;
+  }
+
+  45% {
+    opacity: 1;
+  }
+
+  100% {
+    top: 82%;
+    opacity: 0.82;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .qr-scanner-sweep {
+    animation: none;
+    top: 50%;
+  }
+}

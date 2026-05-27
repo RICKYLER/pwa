@@ -714,6 +714,24 @@ export async function getDistributionRecords(eventId: string): Promise<Distribut
   }
 }
 
+export async function getDistributionRecordsForHousehold(householdId: string): Promise<DistributionRecord[]> {
+  try {
+    const normalizedHouseholdId = householdId.trim();
+    if (!normalizedHouseholdId) {
+      return [];
+    }
+
+    const all = await db.getAll<DistributionRecord>(STORE_NAMES.distribution_records);
+    return all
+      .map(normalizeDistributionRecord)
+      .filter((record) => record.household_id === normalizedHouseholdId)
+      .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+  } catch (error) {
+    console.error('Error fetching household distribution records:', error);
+    throw error;
+  }
+}
+
 /**
  * Get total distributed count for resident in event
  */

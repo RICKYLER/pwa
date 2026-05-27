@@ -366,6 +366,107 @@ async function updateDistributionEventViaLegacyUpdate(
   return data;
 }
 
+async function notifyResidentDistributionClaim(input: {
+  eventId: string;
+  householdId?: string | null;
+  residentId?: string | null;
+  recordId: string;
+  receivedByName?: string | null;
+}) {
+  const supabase = getSupabaseAdminClient();
+  const { data: eventRow, error: eventError } = await supabase
+    .from('distribution_events')
+    .select('id, event_name, type, status, target_scope, target_group, scheduled_date, location, notes')
+    .eq('id', input.eventId)
+    .maybeSingle();
+
+  if (eventError) {
+    throw new Error(eventError.message);
+  }
+
+  if (!eventRow) {
+    return;
+  }
+
+  let householdId = toOptionalString(input.householdId);
+  if (!householdId && input.residentId) {
+    const { data: residentRow, error: residentError } = await supabase
+      .from('residents')
+      .select('household_id')
+      .eq('id', input.residentId)
+      .maybeSingle();
+
+    if (residentError) {
+      throw new Error(residentError.message);
+    }
+
+    householdId = typeof residentRow?.household_id === 'string' ? residentRow.household_id : null;
+  }
+
+  if (!householdId) {
+    return;
+  }
+
+  const { data: householdRow, error: householdError } = await supabase
+    .from('households')
+    .select('id, head_name, applicant_user_id')
+    .eq('id', householdId)
+    .maybeSingle();
+
+  if (householdError) {
+    throw new Error(householdError.message);
+  }
+
+  const recipientUserId = typeof householdRow?.applicant_user_id === 'string'
+    ? householdRow.applicant_user_id
+    : '';
+
+  if (!recipientUserId) {
+    return;
+  }
+
+  const claimedAt = new Date().toISOString();
+  const householdName = typeof householdRow?.head_name === 'string'
+    ? householdRow.head_name
+    : 'your household';
+  const eventName = typeof eventRow.event_name === 'string' ? eventRow.event_name : 'Distribution event';
+  const receivedByName = toOptionalString(input.receivedByName) ?? householdName;
+  const payload = stripUndefined({
+    event_id: eventRow.id,
+    event_name: eventName,
+    type: eventRow.type,
+    status: eventRow.status,
+    target_scope: eventRow.target_scope,
+    target_group: eventRow.target_group,
+    scheduled_date: eventRow.scheduled_date,
+    location: eventRow.location,
+    notes: eventRow.notes,
+    claim_status: 'released',
+    claim_record_id: input.recordId,
+    claimed_at: claimedAt,
+    received_by_name: receivedByName,
+  });
+
+  const { error } = await supabase
+    .from('user_notifications')
+    .upsert({
+      user_id: recipientUserId,
+      event_id: input.eventId,
+      type: 'distribution_event',
+      title: eventName,
+      body: `Your relief package for ${eventName} has been claimed by ${receivedByName}.`,
+      payload,
+      read_at: null,
+      updated_at: claimedAt,
+    }, {
+      onConflict: 'user_id,type,event_id',
+    });
+
+  if (error) {
+    throw new Error(error.message);
+  }
+}
+
 async function createAuditLogEntry(params: {
   user: User;
   action: string;
@@ -1486,6 +1587,20 @@ export async function releaseDistributionPackageOnServer(
       received_by_name: toOptionalString(params.received_by_name),
     },
   });
+
+  try {
+    await notifyResidentDistributionClaim({
+      eventId: params.event_id,
+      householdId: toOptionalString(params.household_id),
+      residentId: toOptionalString(params.resident_id),
+      recordId: distributionRecordId,
+      receivedByName: toOptionalString(params.received_by_name),
+    });
+  } catch (notificationError) {
+    if (!isMissingDistributionNotificationSchemaError(notificationError as { code?: string | null; message?: string | null })) {
+      console.warn('Distribution release was saved, but resident claim notification was not updated:', notificationError);
+    }
+  }
 
   return data;
 }

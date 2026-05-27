@@ -312,6 +312,27 @@ async function loadDistributionRecords() {
   return data ?? [];
 }
 
+async function loadDistributionRecordsForResidentScope(householdIds: string[], residentIds: string[]) {
+  if (!householdIds.length && !residentIds.length) {
+    return [];
+  }
+
+  const supabase = getSupabaseAdminClient();
+  const filters = [
+    householdIds.length ? `household_id.in.(${householdIds.join(',')})` : '',
+    residentIds.length ? `resident_id.in.(${residentIds.join(',')})` : '',
+  ].filter(Boolean);
+
+  const { data, error } = await supabase
+    .from('distribution_records')
+    .select('*')
+    .or(filters.join(','))
+    .order('timestamp', { ascending: false });
+
+  if (error) throw new Error(error.message);
+  return data ?? [];
+}
+
 async function loadIncidents() {
   const supabase = getSupabaseAdminClient();
   const { data, error } = await supabase
@@ -588,6 +609,8 @@ async function buildBootstrapPayload(
 
   if (distributionRecordsPromise) {
     payload.distribution_records = await distributionRecordsPromise;
+  } else if (wants('distribution_records') && user.role === 'resident') {
+    payload.distribution_records = await loadDistributionRecordsForResidentScope(householdIds, residentIds);
   }
 
   if (incidentsPromise) {

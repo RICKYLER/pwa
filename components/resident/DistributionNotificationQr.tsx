@@ -3,7 +3,7 @@
 import Image from 'next/image';
 import { useEffect, useState } from 'react';
 import QRCode from 'qrcode';
-import { Loader2, QrCode } from 'lucide-react';
+import { CheckCircle2, Loader2, PackageCheck, QrCode } from 'lucide-react';
 
 type DistributionQrPayload = {
   deepLink: string;
@@ -11,24 +11,49 @@ type DistributionQrPayload = {
   matchedResidentNames: string[];
 };
 
+type ClaimedRelease = {
+  receivedByName?: string;
+  claimedAt?: Date;
+};
+
 type DistributionNotificationQrProps = {
   eventId: string;
   householdHeadName: string;
   audienceLabel: string;
   matchedResidentNames: string[];
+  claimedRelease?: ClaimedRelease | null;
 };
+
+function formatClaimedAt(value?: Date) {
+  if (!value) {
+    return 'Just now';
+  }
+
+  return new Intl.DateTimeFormat('en-PH', {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  }).format(value);
+}
 
 export default function DistributionNotificationQr({
   eventId,
   householdHeadName,
   audienceLabel,
   matchedResidentNames,
+  claimedRelease,
 }: DistributionNotificationQrProps) {
   const [qrPayload, setQrPayload] = useState<DistributionQrPayload | null>(null);
   const [qrImageUrl, setQrImageUrl] = useState('');
   const [error, setError] = useState('');
 
   useEffect(() => {
+    if (claimedRelease) {
+      setQrPayload(null);
+      setQrImageUrl('');
+      setError('');
+      return;
+    }
+
     let cancelled = false;
 
     async function loadQr() {
@@ -91,7 +116,38 @@ export default function DistributionNotificationQr({
     return () => {
       cancelled = true;
     };
-  }, [audienceLabel, eventId, householdHeadName, matchedResidentNames]);
+  }, [audienceLabel, claimedRelease, eventId, householdHeadName, matchedResidentNames]);
+
+  if (claimedRelease) {
+    return (
+      <div className="mt-4 rounded-[24px] border border-emerald-200 bg-emerald-50/90 p-4">
+        <div className="flex flex-wrap items-start gap-4">
+          <div className="flex h-20 w-20 items-center justify-center rounded-2xl border border-emerald-200 bg-white text-emerald-700">
+            <PackageCheck className="h-9 w-9" />
+          </div>
+
+          <div className="min-w-0 flex-1">
+            <div className="inline-flex items-center gap-2 rounded-full bg-white px-3 py-1 text-xs font-semibold text-emerald-700">
+              <CheckCircle2 className="h-3.5 w-3.5" />
+              Relief Claimed
+            </div>
+            <p className="mt-3 text-sm font-semibold text-slate-900">
+              Your {audienceLabel.toLowerCase()} package has been released.
+            </p>
+            <p className="mt-2 text-sm leading-6 text-slate-700">
+              Received by: {claimedRelease.receivedByName || householdHeadName}
+            </p>
+            <p className="mt-1 text-sm leading-6 text-slate-700">
+              Claimed on: {formatClaimedAt(claimedRelease.claimedAt)}
+            </p>
+            <p className="mt-3 text-xs leading-5 text-emerald-800">
+              This event QR is now closed and cannot be used again.
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   if (error) {
     return (
