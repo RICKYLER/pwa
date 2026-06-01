@@ -45,7 +45,6 @@ import {
   type DistributionEligibilitySummary,
 } from '@/lib/distribution-insights';
 import { getPendingSyncCount } from '@/lib/db/client-sync';
-import { getHouseholds } from '@/lib/db/households';
 import { getInventoryItems } from '@/lib/db/inventory';
 import { getLastSupabaseBootstrapCompletedAt } from '@/lib/supabase/bootstrap';
 import { extractDistributionQrToken } from '@/lib/distribution-qr';
@@ -265,14 +264,14 @@ export default function DistributionDetailPage() {
         }
       }
 
-      const audienceBarangayId = user?.role === 'admin'
-        ? undefined
-        : audienceBarangayScope ?? distributionEvent.barangay_id;
+      const eventBarangayId = distributionEvent.barangay_id?.trim() || null;
+      const audienceBarangayId = eventBarangayId ?? (
+        user?.role === 'admin' ? undefined : audienceBarangayScope
+      );
 
-      const [distributionRecords, stockItems, households, audienceContext] = await Promise.all([
+      const [distributionRecords, stockItems, audienceContext] = await Promise.all([
         getDistributionRecords(distributionEvent.id),
         getInventoryItems(),
-        getHouseholds({ status: 'active', registration_status: 'approved' }),
         getDistributionAudienceContext({
           barangay_id: audienceBarangayId,
           target_group: distributionEvent.target_group,
@@ -288,7 +287,7 @@ export default function DistributionDetailPage() {
       setEvent(distributionEvent);
       setRecords(distributionRecords);
       setInventoryItems(stockItems);
-      setAllHouseholds(households);
+      setAllHouseholds(audienceContext.households);
       setEligibilitySummary(audienceContext.eligibility_summary);
       setFlagsByResidentId(audienceContext.flagsByResidentId);
       setEligibleHouseholds(audienceContext.matches.eligibleHouseholds);
@@ -455,6 +454,26 @@ export default function DistributionDetailPage() {
     if (event?.target_scope !== 'resident') return null;
     return eligibleResidents.find((resident) => resident.id === selectedResidentId) ?? null;
   }, [event?.target_scope, eligibleResidents, selectedResidentId]);
+
+  useEffect(() => {
+    if (!selectedHouseholdId) {
+      return;
+    }
+
+    if (!eligibleHouseholds.some((household) => household.id === selectedHouseholdId)) {
+      setSelectedHouseholdId('');
+    }
+  }, [eligibleHouseholds, selectedHouseholdId]);
+
+  useEffect(() => {
+    if (!selectedResidentId) {
+      return;
+    }
+
+    if (!eligibleResidents.some((resident) => resident.id === selectedResidentId)) {
+      setSelectedResidentId('');
+    }
+  }, [eligibleResidents, selectedResidentId]);
 
   const matchedResidentsByHouseholdId = useMemo(() => {
     const entries = new Map<string, Resident[]>();

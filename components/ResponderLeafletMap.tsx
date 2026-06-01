@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Loader2 } from 'lucide-react';
-import type { DisasterAlertRule, Household, Incident, PurokRiskProfile } from '@/lib/db/schema';
+import type { DisasterAlertRule, DistributionEvent, Household, Incident, PurokRiskProfile } from '@/lib/db/schema';
 import {
   DEFAULT_BARANGAY_CENTER,
   HOUSEHOLD_PIN_COLOR,
@@ -140,12 +140,15 @@ interface WindSurfaceGrid {
 interface ResponderLeafletMapProps {
   households: Household[];
   incidents: Incident[];
+  events?: DistributionEvent[];
   purokRiskProfiles?: PurokRiskProfile[];
   alertRules?: DisasterAlertRule[];
   selectedHousehold?: Household | null;
   onSelectHousehold?: (household: Household | null) => void;
   selectedIncident?: Incident | null;
   onSelectIncident?: (incident: Incident | null) => void;
+  selectedEvent?: DistributionEvent | null;
+  onSelectEvent?: (event: DistributionEvent | null) => void;
   activeBaseLayerId: ResponderBaseMapLayerId;
   activeLayerIds: OpenWeatherTileLayerId[];
   showWeather: boolean;
@@ -161,6 +164,7 @@ const INCIDENT_SEVERITY_COLORS: Record<string, string> = {
   medium: '#f59e0b',
   low: '#94a3b8',
 };
+const EVENT_PIN_COLOR = '#7c3aed';
 
 const LEAFLET_CSS_ID = 'responder-leaflet-css';
 const LEAFLET_SCRIPT_ID = 'responder-leaflet-script';
@@ -549,6 +553,20 @@ function buildIncidentMarkerHtml(severity: string, selected: boolean) {
   `;
 }
 
+function buildEventMarkerHtml(selected: boolean) {
+  const size = selected ? 34 : 28;
+  const innerSize = selected ? 20 : 16;
+  const haloSize = selected ? 46 : 38;
+  return `
+    <div style="position:relative;width:${haloSize}px;height:${haloSize}px;display:flex;align-items:center;justify-content:center;">
+      <div style="position:absolute;width:${haloSize}px;height:${haloSize}px;border-radius:999px;background:rgba(124,58,237,0.14);"></div>
+      <div style="position:relative;width:${size}px;height:${size}px;transform:rotate(45deg);border-radius:999px 999px 999px 4px;background:${EVENT_PIN_COLOR};border:3px solid #ffffff;box-shadow:0 14px 28px rgba(15,23,42,0.26);">
+        <div style="position:absolute;left:50%;top:50%;width:${innerSize}px;height:${innerSize}px;transform:translate(-50%,-50%) rotate(-45deg);border-radius:999px;background:#ffffff;color:${EVENT_PIN_COLOR};display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:900;">E</div>
+      </div>
+    </div>
+  `;
+}
+
 function escapeMarkerText(value: string) {
   return value
     .replaceAll('&', '&amp;')
@@ -609,6 +627,31 @@ function buildIncidentTooltipHtml(incident: Incident) {
   `;
 }
 
+function buildEventTooltipHtml(event: DistributionEvent) {
+  const typeText = `${event.type.replaceAll('_', ' ')} event`;
+  const targetText = event.target_group === 'all'
+    ? event.target_scope
+    : `${event.target_group.replaceAll('_', ' ')} ${event.target_scope}`;
+  const scheduleText = new Date(event.scheduled_date).toLocaleDateString('en-PH', {
+    month: 'long',
+    day: 'numeric',
+    year: 'numeric',
+  });
+
+  return `
+    <div class="responder-hover-card responder-hover-card--event">
+      <div class="responder-hover-card__eyebrow">Distribution event</div>
+      <div class="responder-hover-card__title">${escapeMarkerText(toDisplayLabel(event.event_name, 'Unnamed event'))}</div>
+      <div class="responder-hover-card__line">${escapeMarkerText(toDisplayLabel(event.location, 'Location not set'))}</div>
+      <div class="responder-hover-card__meta">
+        <span>${escapeMarkerText(typeText)}</span>
+        <span>${escapeMarkerText(targetText)}</span>
+        <span>${escapeMarkerText(scheduleText)}</span>
+      </div>
+    </div>
+  `;
+}
+
 const ALERT_RULE_ZONE_MARKER_COLORS = {
   halo: 'rgba(14,116,144,0.16)',
   border: 'rgba(14,116,144,0.48)',
@@ -660,15 +703,25 @@ function hasIncidentPin(incident: Pick<Incident, 'gps_lat' | 'gps_lng'>): incide
   return typeof incident.gps_lat === 'number' && typeof incident.gps_lng === 'number';
 }
 
+function hasEventPin(event: Pick<DistributionEvent, 'gps_lat' | 'gps_lng'>): event is DistributionEvent & {
+  gps_lat: number;
+  gps_lng: number;
+} {
+  return typeof event.gps_lat === 'number' && typeof event.gps_lng === 'number';
+}
+
 export default function ResponderLeafletMap({
   households,
   incidents,
+  events = [],
   purokRiskProfiles = [],
   alertRules = [],
   selectedHousehold,
   onSelectHousehold,
   selectedIncident,
   onSelectIncident,
+  selectedEvent,
+  onSelectEvent,
   activeBaseLayerId,
   activeLayerIds,
   showWeather,
@@ -687,16 +740,20 @@ export default function ResponderLeafletMap({
   const [mapTransitioning, setMapTransitioning] = useState(false);
   const [internalSelectedHousehold, setInternalSelectedHousehold] = useState<Household | null>(null);
   const [internalSelectedIncident, setInternalSelectedIncident] = useState<Incident | null>(null);
+  const [internalSelectedEvent, setInternalSelectedEvent] = useState<DistributionEvent | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<LeafletMap | null>(null);
   const onSelectHouseholdRef = useRef(onSelectHousehold);
   const onSelectIncidentRef = useRef(onSelectIncident);
+  const onSelectEventRef = useRef(onSelectEvent);
   const selectedHouseholdControlledRef = useRef(selectedHousehold !== undefined);
   const selectedIncidentControlledRef = useRef(selectedIncident !== undefined);
+  const selectedEventControlledRef = useRef(selectedEvent !== undefined);
   const zoneLayerRef = useRef<LeafletLayerGroup | null>(null);
   const boundaryLayerRef = useRef<LeafletLayerGroup | null>(null);
   const householdLayerRef = useRef<LeafletLayerGroup | null>(null);
   const incidentLayerRef = useRef<LeafletLayerGroup | null>(null);
+  const eventLayerRef = useRef<LeafletLayerGroup | null>(null);
   const facilityLayerRef = useRef<LeafletLayerGroup | null>(null);
   const baseTileRefs = useRef<Partial<Record<ResponderBaseMapLayerId, LeafletTileLayer>>>({});
   const weatherTileRefs = useRef<Partial<Record<OpenWeatherTileLayerId, LeafletTileLayer>>>({});
@@ -713,9 +770,15 @@ export default function ResponderLeafletMap({
     selectedHousehold === undefined ? internalSelectedHousehold : selectedHousehold;
   const activeSelectedIncident =
     selectedIncident === undefined ? internalSelectedIncident : selectedIncident;
+  const activeSelectedEvent =
+    selectedEvent === undefined ? internalSelectedEvent : selectedEvent;
   const activeIncidents = useMemo(
     () => incidents.filter((incident) => incident.status !== 'resolved'),
     [incidents],
+  );
+  const activeEvents = useMemo(
+    () => events.filter((event) => event.status !== 'completed'),
+    [events],
   );
   const zoneMarkers = useMemo(
     () => buildFieldResponseZoneMarkers(households, purokRiskProfiles, alertRules),
@@ -742,9 +805,11 @@ export default function ResponderLeafletMap({
   useEffect(() => {
     onSelectHouseholdRef.current = onSelectHousehold;
     onSelectIncidentRef.current = onSelectIncident;
+    onSelectEventRef.current = onSelectEvent;
     selectedHouseholdControlledRef.current = selectedHousehold !== undefined;
     selectedIncidentControlledRef.current = selectedIncident !== undefined;
-  }, [onSelectHousehold, onSelectIncident, selectedHousehold, selectedIncident]);
+    selectedEventControlledRef.current = selectedEvent !== undefined;
+  }, [onSelectHousehold, onSelectIncident, onSelectEvent, selectedHousehold, selectedIncident, selectedEvent]);
 
   useEffect(() => {
     let cancelled = false;
@@ -787,6 +852,7 @@ export default function ResponderLeafletMap({
     boundaryLayerRef.current = runtime.layerGroup().addTo(map);
     householdLayerRef.current = runtime.layerGroup().addTo(map);
     incidentLayerRef.current = runtime.layerGroup().addTo(map);
+    eventLayerRef.current = runtime.layerGroup().addTo(map);
     facilityLayerRef.current = runtime.layerGroup().addTo(map);
 
     Object.keys(WEATHER_LAYER_Z_INDEX).forEach((layerId) => {
@@ -818,8 +884,10 @@ export default function ResponderLeafletMap({
     const handleMapClick = () => {
       onSelectHouseholdRef.current?.(null);
       onSelectIncidentRef.current?.(null);
+      onSelectEventRef.current?.(null);
       if (!selectedHouseholdControlledRef.current) setInternalSelectedHousehold(null);
       if (!selectedIncidentControlledRef.current) setInternalSelectedIncident(null);
+      if (!selectedEventControlledRef.current) setInternalSelectedEvent(null);
     };
 
     const handleMoveStart = () => {
@@ -866,6 +934,7 @@ export default function ResponderLeafletMap({
       boundaryLayerRef.current = null;
       householdLayerRef.current = null;
       incidentLayerRef.current = null;
+      eventLayerRef.current = null;
       facilityLayerRef.current = null;
       baseTileRefs.current = {};
       weatherTileRefs.current = {};
@@ -989,8 +1058,21 @@ export default function ResponderLeafletMap({
       return;
     }
 
+    if (activeSelectedEvent && hasEventPin(activeSelectedEvent)) {
+      map.flyTo(
+        [activeSelectedEvent.gps_lat, activeSelectedEvent.gps_lng],
+        resolveSelectionZoom(map, weatherOverlayVisible),
+        {
+          duration: weatherOverlayVisible ? 0.32 : 0.45,
+        },
+      );
+      queueMapRefresh(map);
+      return;
+    }
+
     const pinnedHouseholds = households.filter(hasHouseholdPin);
     const pinnedIncidents = activeIncidents.filter(hasIncidentPin);
+    const pinnedEvents = activeEvents.filter(hasEventPin);
     const zoneFocusPoints = zoneMarkers.map((marker) => ({
       lat: marker.lat,
       lng: marker.lng,
@@ -1001,6 +1083,12 @@ export default function ResponderLeafletMap({
         lng: incident.gps_lng,
       })),
     );
+    const eventFocusPoints = pickPrimaryCluster(
+      pinnedEvents.map((event) => ({
+        lat: event.gps_lat,
+        lng: event.gps_lng,
+      })),
+    );
     const focusPoints = pickPrimaryCluster(
       pinnedHouseholds.map((household) => ({
         lat: household.gps_lat,
@@ -1009,9 +1097,11 @@ export default function ResponderLeafletMap({
     );
     const preferredFocusPoints = incidentFocusPoints.length > 0
       ? incidentFocusPoints
-      : focusPoints.length > 0
-        ? focusPoints
-        : zoneFocusPoints;
+      : eventFocusPoints.length > 0
+        ? eventFocusPoints
+        : focusPoints.length > 0
+          ? focusPoints
+          : zoneFocusPoints;
 
     if (preferredFocusPoints.length === 0) {
       map.fitBounds(
@@ -1036,16 +1126,17 @@ export default function ResponderLeafletMap({
       { padding: [28, 28], maxZoom: weatherOverlayVisible ? 15 : 16 },
     );
     queueMapRefresh(map);
-  }, [runtime, households, activeIncidents, activeSelectedHousehold, activeSelectedIncident, weatherOverlayVisible, zoneMarkers]);
+  }, [runtime, households, activeIncidents, activeEvents, activeSelectedHousehold, activeSelectedIncident, activeSelectedEvent, weatherOverlayVisible, zoneMarkers]);
 
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !runtime || !zoneLayerRef.current || !boundaryLayerRef.current || !householdLayerRef.current || !incidentLayerRef.current || !facilityLayerRef.current) return;
+    if (!map || !runtime || !zoneLayerRef.current || !boundaryLayerRef.current || !householdLayerRef.current || !incidentLayerRef.current || !eventLayerRef.current || !facilityLayerRef.current) return;
 
     zoneLayerRef.current.clearLayers();
     boundaryLayerRef.current.clearLayers();
     householdLayerRef.current.clearLayers();
     incidentLayerRef.current.clearLayers();
+    eventLayerRef.current.clearLayers();
     facilityLayerRef.current.clearLayers();
 
     MABINI_BOUNDARY_PATHS.forEach((path) => {
@@ -1105,8 +1196,10 @@ export default function ResponderLeafletMap({
       marker.on('click', () => {
         onSelectHousehold?.(household);
         onSelectIncident?.(null);
+        onSelectEvent?.(null);
         if (selectedHousehold === undefined) setInternalSelectedHousehold(household);
         if (selectedIncident === undefined) setInternalSelectedIncident(null);
+        if (selectedEvent === undefined) setInternalSelectedEvent(null);
       });
 
       householdLayerRef.current?.addLayer(marker);
@@ -1135,11 +1228,46 @@ export default function ResponderLeafletMap({
       marker.on('click', () => {
         onSelectIncident?.(incident);
         onSelectHousehold?.(null);
+        onSelectEvent?.(null);
         if (selectedIncident === undefined) setInternalSelectedIncident(incident);
         if (selectedHousehold === undefined) setInternalSelectedHousehold(null);
+        if (selectedEvent === undefined) setInternalSelectedEvent(null);
       });
 
       incidentLayerRef.current?.addLayer(marker);
+    });
+
+    activeEvents.filter(hasEventPin).forEach((event) => {
+      const isSelected = activeSelectedEvent?.id === event.id;
+      const marker = runtime.marker([event.gps_lat, event.gps_lng], {
+        title: event.event_name,
+        zIndexOffset: isSelected ? 650 : 500,
+        icon: runtime.divIcon({
+          className: 'responder-marker responder-event-marker',
+          html: buildEventMarkerHtml(isSelected),
+          iconSize: isSelected ? [46, 46] : [38, 38],
+          iconAnchor: isSelected ? [23, 38] : [19, 32],
+        }),
+      });
+
+      marker.bindTooltip(buildEventTooltipHtml(event), {
+        className: 'responder-hover-tooltip',
+        direction: 'top',
+        offset: [0, -24],
+        opacity: 1,
+        sticky: true,
+      });
+
+      marker.on('click', () => {
+        onSelectEvent?.(event);
+        onSelectHousehold?.(null);
+        onSelectIncident?.(null);
+        if (selectedEvent === undefined) setInternalSelectedEvent(event);
+        if (selectedHousehold === undefined) setInternalSelectedHousehold(null);
+        if (selectedIncident === undefined) setInternalSelectedIncident(null);
+      });
+
+      eventLayerRef.current?.addLayer(marker);
     });
 
     MABINI_MEDICAL_FACILITIES.forEach((facility) => {
@@ -1174,13 +1302,17 @@ export default function ResponderLeafletMap({
     runtime,
     households,
     activeIncidents,
+    activeEvents,
     zoneMarkers,
     activeSelectedHousehold,
     activeSelectedIncident,
+    activeSelectedEvent,
     onSelectHousehold,
     onSelectIncident,
+    onSelectEvent,
     selectedHousehold,
     selectedIncident,
+    selectedEvent,
   ]);
 
   useEffect(() => {

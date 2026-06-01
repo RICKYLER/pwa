@@ -19,6 +19,9 @@ const registerSchema = z.object({
     .trim()
     .min(1, 'Select your barangay.')
     .refine((value) => isBarangayId(value), { message: 'Select a valid barangay.' }),
+  consentToDataPrivacy: z.boolean().refine((value) => value === true, {
+    message: 'Please agree to the Data Privacy Notice before creating an account.',
+  }),
 });
 
 export async function POST(request: NextRequest) {
@@ -35,7 +38,8 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const user = await createResidentSelfServiceAccount(payload);
+    const { consentToDataPrivacy: _consentToDataPrivacy, ...registration } = payload;
+    const user = await createResidentSelfServiceAccount(registration);
     try {
       await writeServerAuditLog({
         actor: user,

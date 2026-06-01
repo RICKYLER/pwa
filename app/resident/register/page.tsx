@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { FormEvent, useEffect, useState } from 'react';
+import { FormEvent, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import CivicAuthShell, { type CivicAuthFeature, type CivicAuthStat } from '@/components/auth/CivicAuthShell';
 import { getDefaultRouteForUser, restoreSession } from '@/lib/auth';
@@ -13,9 +13,11 @@ import {
   Eye,
   EyeOff,
   FileCheck2,
+  FileText,
   Lock,
   Mail,
   ShieldCheck,
+  X,
   User,
 } from 'lucide-react';
 
@@ -59,8 +61,12 @@ export default function ResidentRegisterPage() {
   });
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [termsAccepted, setTermsAccepted] = useState(false);
+  const [dataPrivacyAccepted, setDataPrivacyAccepted] = useState(false);
+  const [activeModal, setActiveModal] = useState<'terms' | 'privacy' | null>(null);
   const [error, setError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const modalRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     const existingUser = restoreSession();
@@ -68,6 +74,40 @@ export default function ResidentRegisterPage() {
       router.push(getDefaultRouteForUser(existingUser));
     }
   }, [router]);
+
+  useEffect(() => {
+    if (!activeModal) {
+      return undefined;
+    }
+
+    const originalOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setActiveModal(null);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      document.body.style.overflow = originalOverflow;
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [activeModal]);
+
+  useEffect(() => {
+    if (!activeModal) {
+      return;
+    }
+
+    const frame = window.requestAnimationFrame(() => {
+      modalRef.current?.focus();
+    });
+
+    return () => window.cancelAnimationFrame(frame);
+  }, [activeModal]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -88,6 +128,11 @@ export default function ResidentRegisterPage() {
       return;
     }
 
+    if (!dataPrivacyAccepted) {
+      setError('Please agree to the Data Privacy Notice before creating an account.');
+      return;
+    }
+
     try {
       setIsSubmitting(true);
       const response = await fetch('/api/auth/register', {
@@ -98,6 +143,7 @@ export default function ResidentRegisterPage() {
           email: form.email,
           password: form.password,
           barangay_id: form.barangay_id,
+          consentToDataPrivacy: dataPrivacyAccepted,
         }),
       });
 
@@ -116,6 +162,178 @@ export default function ResidentRegisterPage() {
     } finally {
       setIsSubmitting(false);
     }
+  }
+
+  function openModal(type: 'terms' | 'privacy') {
+    setActiveModal(type);
+  }
+
+  function acceptActiveModal() {
+    if (activeModal === 'terms') {
+      setTermsAccepted(true);
+    }
+
+    if (activeModal === 'privacy') {
+      setDataPrivacyAccepted(true);
+    }
+
+    setActiveModal(null);
+  }
+
+  function renderModalContent() {
+    if (!activeModal) {
+      return null;
+    }
+
+    const isTerms = activeModal === 'terms';
+
+    return (
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="consent-modal-title"
+        aria-describedby="consent-modal-description"
+        ref={modalRef}
+        tabIndex={-1}
+        className="fixed inset-0 z-50 flex items-center justify-center px-4 py-6 outline-none"
+      >
+        <button
+          type="button"
+          aria-label="Close modal overlay"
+          className="absolute inset-0 cursor-default bg-slate-950/55 backdrop-blur-sm"
+          onClick={() => setActiveModal(null)}
+        />
+
+        <div className="relative z-10 w-full max-w-2xl overflow-hidden rounded-[24px] border border-white/80 bg-white shadow-[0_30px_80px_-36px_rgba(15,23,42,0.55)]">
+          <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-4 sm:px-6">
+            <div>
+              <div className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+                <FileText className="h-4 w-4 text-blue-700" />
+                {isTerms ? 'Terms & Conditions' : 'Privacy Policy'}
+              </div>
+              <h2 id="consent-modal-title" className="mt-3 text-xl font-black tracking-tight text-slate-950 sm:text-2xl">
+                {isTerms ? 'Terms & Conditions' : 'Privacy Policy'}
+              </h2>
+              <p id="consent-modal-description" className="mt-1 text-sm leading-6 text-slate-600">
+                {isTerms
+                  ? 'Please review the responsibilities, security expectations, and proper use rules before accepting.'
+                  : 'Please review how your information is collected, processed, stored, and protected before accepting.'}
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setActiveModal(null)}
+              aria-label="Close modal"
+              className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:bg-slate-100 hover:text-slate-800"
+            >
+              <X className="h-5 w-5" />
+            </button>
+          </div>
+
+          <div className="max-h-[70vh] overflow-y-auto px-5 py-5 sm:px-6">
+            {isTerms ? (
+              <div className="space-y-4 text-sm leading-6 text-slate-700">
+                <section>
+                  <h3 className="font-semibold text-slate-950">User Responsibilities</h3>
+                  <p className="mt-1">
+                    You agree to provide accurate information, keep your account details updated, and use the system
+                    responsibly for legitimate resident services only.
+                  </p>
+                </section>
+                <section>
+                  <h3 className="font-semibold text-slate-950">Account Security</h3>
+                  <p className="mt-1">
+                    You are responsible for safeguarding your password, avoiding credential sharing, and notifying
+                    authorized personnel if you suspect unauthorized access.
+                  </p>
+                </section>
+                <section>
+                  <h3 className="font-semibold text-slate-950">Proper System Usage</h3>
+                  <p className="mt-1">
+                    The system must not be used for unlawful activity, fraudulent submissions, abusive behavior, or any
+                    action that could disrupt service or compromise records.
+                  </p>
+                </section>
+                <section>
+                  <h3 className="font-semibold text-slate-950">Data Handling</h3>
+                  <p className="mt-1">
+                    By using the system, you acknowledge that submitted data may be processed for account registration,
+                    resident profiling, household records, notifications, and related government services.
+                  </p>
+                </section>
+                <section>
+                  <h3 className="font-semibold text-slate-950">Liability Disclaimer</h3>
+                  <p className="mt-1">
+                    The system is provided for administrative and public service use. We are not liable for losses
+                    arising from incorrect user input, unauthorized access caused by shared credentials, or misuse of the
+                    platform.
+                  </p>
+                </section>
+              </div>
+            ) : (
+              <div className="space-y-4 text-sm leading-6 text-slate-700">
+                <section>
+                  <h3 className="font-semibold text-slate-950">Data Collection</h3>
+                  <p className="mt-1">
+                    We may collect your full name, email address, contact number, address or household information,
+                    profile information, account credentials, and other details you provide while using the system.
+                  </p>
+                </section>
+                <section>
+                  <h3 className="font-semibold text-slate-950">Data Processing</h3>
+                  <p className="mt-1">
+                    Your information is processed for account registration and authentication, household profiling and
+                    record management, relief distribution and monitoring, system notifications and reporting, and
+                    service improvement.
+                  </p>
+                </section>
+                <section>
+                  <h3 className="font-semibold text-slate-950">Data Storage</h3>
+                  <p className="mt-1">
+                    Your information is stored securely using protected systems and is accessible only to authorized
+                    personnel for official processing and record keeping.
+                  </p>
+                </section>
+                <section>
+                  <h3 className="font-semibold text-slate-950">User Rights</h3>
+                  <p className="mt-1">
+                    You have the right to access your data, correct inaccurate information, request deletion when
+                    applicable, withdraw consent, and raise privacy concerns.
+                  </p>
+                </section>
+                <section>
+                  <h3 className="font-semibold text-slate-950">RA 10173 Compliance</h3>
+                  <p className="mt-1">
+                    In compliance with Republic Act No. 10173, also known as the Data Privacy Act of 2012, we are
+                    committed to protecting your personal information and handling it with lawful, fair, and transparent
+                    processing.
+                  </p>
+                </section>
+              </div>
+            )}
+          </div>
+
+          <div className="flex flex-col-reverse gap-3 border-t border-slate-200 px-5 py-4 sm:flex-row sm:justify-end sm:px-6">
+            <button
+              type="button"
+              onClick={() => setActiveModal(null)}
+              className="inline-flex h-11 items-center justify-center rounded-md border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50"
+            >
+              Close
+            </button>
+            <button
+              type="button"
+              onClick={acceptActiveModal}
+              className="inline-flex h-11 items-center justify-center gap-2 rounded-md bg-blue-900 px-5 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-800"
+            >
+              <BadgeCheck className="h-4 w-4" />
+              Accept
+            </button>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -266,6 +484,76 @@ export default function ResidentRegisterPage() {
           Passwords should be at least 8 characters long and easy for you to remember securely.
         </div>
 
+        <div className="space-y-3">
+          <div className="flex items-start gap-3 rounded-md border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 shadow-sm">
+            <input
+              id="terms-accepted"
+              type="checkbox"
+              checked={termsAccepted}
+              onChange={(event) => {
+                if (event.target.checked) {
+                  if (!termsAccepted) {
+                    openModal('terms');
+                  }
+                  return;
+                }
+
+                setTermsAccepted(false);
+              }}
+              className="mt-1 h-4 w-4 rounded border-slate-300 text-blue-900 focus:ring-2 focus:ring-blue-700/20"
+            />
+            <div className="leading-6">
+              <label htmlFor="terms-accepted" className="cursor-pointer">
+                I agree to the
+              </label>{' '}
+              <button
+                type="button"
+                onClick={() => openModal('terms')}
+                className="font-semibold text-blue-700 underline decoration-blue-200 underline-offset-2 transition hover:text-blue-900"
+              >
+                Terms &amp; Conditions
+              </button>{' '}
+              <span className="text-xs uppercase tracking-[0.16em] text-slate-500">(Optional)</span>
+            </div>
+          </div>
+
+          <div className="flex items-start gap-3 rounded-md border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 shadow-sm">
+            <input
+              id="privacy-accepted"
+              type="checkbox"
+              checked={dataPrivacyAccepted}
+              onChange={(event) => {
+                if (event.target.checked) {
+                  if (!dataPrivacyAccepted) {
+                    openModal('privacy');
+                  }
+                  return;
+                }
+
+                setDataPrivacyAccepted(false);
+              }}
+              className="mt-1 h-4 w-4 rounded border-slate-300 text-blue-900 focus:ring-2 focus:ring-blue-700/20"
+            />
+            <div className="leading-6">
+              <label htmlFor="privacy-accepted" className="cursor-pointer">
+                I have read and agree to the{' '}
+              </label>
+              <button
+                type="button"
+                onClick={() => openModal('privacy')}
+                className="font-semibold text-blue-700 underline decoration-blue-200 underline-offset-2 transition hover:text-blue-900"
+              >
+                Privacy Policy
+              </button>
+              .
+            </div>
+          </div>
+
+          <p className="px-1 text-xs text-slate-500">
+            Click the blue text links to review each policy before you continue.
+          </p>
+        </div>
+
         {error ? (
           <div className="flex items-start gap-3 rounded-md border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800 shadow-sm">
             <AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0" />
@@ -275,12 +563,14 @@ export default function ResidentRegisterPage() {
 
         <button
           type="submit"
-          disabled={isSubmitting}
+          disabled={isSubmitting || !dataPrivacyAccepted}
           className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-md bg-blue-900 px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-800 disabled:cursor-not-allowed disabled:opacity-60"
         >
           {isSubmitting ? 'Creating account...' : 'Create account and send verification'}
         </button>
       </form>
+
+      {renderModalContent()}
 
       <div className="mt-4 text-center text-sm text-slate-600">
         Already have a resident account?

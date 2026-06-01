@@ -22,7 +22,7 @@ import ResponderSelectionSummary from '@/components/ResponderSelectionSummary';
 import { MobileActionBar, MobileListCard, MobilePageHeader } from '@/components/mobile/mobile-primitives';
 import { CivicBadge, CivicEmptyState, CivicPage, CivicPanel } from '@/components/ui/civic-primitives';
 import { getCurrentUser, hasRole } from '@/lib/auth';
-import { getDisasterAlertRules } from '@/lib/db/disaster-alerts';
+import { getDisasterAlertRules, getDisasterAlerts } from '@/lib/db/disaster-alerts';
 import { getDistributionEvents } from '@/lib/db/distribution';
 import { getHouseholds } from '@/lib/db/households';
 import { getIncidents, updateIncidentStatus } from '@/lib/db/incidents';
@@ -42,7 +42,6 @@ import type {
 import {
   buildFieldResponseZoneMarkers,
   buildPurokRiskProfileMap,
-  getPurokRiskProfileForHousehold,
   matchesPurokRiskFilters,
   PUROK_FLOOD_CONTROL_STATUS_LABELS,
 } from '@/lib/purok-risk-profiles';
@@ -52,6 +51,12 @@ import {
   getResponderCoverageLabel,
   getResponderMappedHouseholds,
 } from '@/lib/responder-households';
+import {
+  buildPurokPriorityGroups,
+  getVulnerabilityPriorityLabels,
+  matchesPurokPriorityFilters,
+  type PurokPriorityGroup,
+} from '@/lib/responder-priorities';
 
 declare global {
   interface WindowEventMap {
@@ -61,13 +66,6 @@ declare global {
       mode: 'hydrate' | 'change';
     }>;
   }
-}
-
-interface PriorityHousehold {
-  household: Household;
-  residents: Resident[];
-  flags: VulnerabilityFlags[];
-  score: number;
 }
 
 const INCIDENT_TYPE_CODE: Record<string, string> = {
@@ -96,28 +94,6 @@ function howLongAgo(date: Date): string {
   const hoursPassed = Math.floor(minutesPassed / 60);
   if (hoursPassed < 24) return `${hoursPassed}h ago`;
   return `${Math.floor(hoursPassed / 24)}d ago`;
-}
-
-function getHouseholdPriorityScore(flags: VulnerabilityFlags[]): number {
-  let score = 0;
-  for (const flag of flags) {
-    if (flag.is_senior) score += 3;
-    if (flag.is_pwd) score += 3;
-    if (flag.is_pregnant) score += 3;
-    if (flag.has_chronic_illness) score += 2;
-    if (flag.is_child) score += 1;
-  }
-  return score;
-}
-
-function getVulnerabilityLabels(flags: VulnerabilityFlags[]): string[] {
-  const labels: string[] = [];
-  if (flags.some((flag) => flag.is_senior)) labels.push('Senior');
-  if (flags.some((flag) => flag.is_pwd)) labels.push('PWD');
-  if (flags.some((flag) => flag.is_pregnant)) labels.push('Pregnant');
-  if (flags.some((flag) => flag.has_chronic_illness)) labels.push('Chronic');
-  if (flags.some((flag) => flag.is_child)) labels.push('Child');
-  return labels;
 }
 
 function getSeverityTone(severity: string) {
@@ -203,7 +179,7 @@ export default function ResponderMobile() {
   const mapControls = useResponderMapControls();
 
   const [incidents, setIncidents] = useState<Incident[]>([]);
-  const [priorities, setPriorities] = useState<PriorityHousehold[]>([]);
+  const [priorityGroups, setPriorityGroups] = useState<PurokPriorityGroup[]>([]);
   const [events, setEvents] = useState<DistributionEvent[]>([]);
   const [mapHouseholds, setMapHouseholds] = useState<Household[]>([]);
   const [purokRiskProfiles, setPurokRiskProfiles] = useState<PurokRiskProfile[]>([]);
@@ -214,6 +190,7 @@ export default function ResponderMobile() {
   const [sheetIncident, setSheetIncident] = useState<Incident | null>(null);
   const [selectedHousehold, setSelectedHousehold] = useState<Household | null>(null);
   const [selectedIncident, setSelectedIncident] = useState<Incident | null>(null);
+  const [selectedEvent, setSelectedEvent] = useState<DistributionEvent | null>(null);
   const [visited, setVisited] = useState<Set<string>>(new Set());
   const [mapControlsOpen, setMapControlsOpen] = useState(false);
   const [selectionOpen, setSelectionOpen] = useState(false);
@@ -230,7 +207,7 @@ export default function ResponderMobile() {
 
     setLoading(true);
     try {
-      const [allIncidents, allApprovedHouseholds, allResidents, allFlags, ongoingEvents, profiles, rules] = await Promise.all([
+      const [allIncidents, allApprovedHouseholds, allResidents, allFlags, ongoingEvents, profiles, rules, alerts] = await Promise.all([
         getIncidents(),
         getHouseholds({
           registration_status: 'approved',
@@ -240,6 +217,7 @@ export default function ResponderMobile() {
         getDistributionEvents({ status: 'ongoing' }),
         getPurokRiskProfiles(user.role === 'admin' ? undefined : user.barangay_id),
         getDisasterAlertRules(),
+        getDisasterAlerts(),
       ]);
       const allHouseholds = getResponderMappedHouseholds(allApprovedHouseholds, user);
 
@@ -249,19 +227,15 @@ export default function ResponderMobile() {
       setPurokRiskProfiles(profiles);
       setAlertRules(rules);
 
-      const householdsWithScores: PriorityHousehold[] = allHouseholds
-        .map((household) => {
-          const residentsInHousehold = allResidents.filter(
-            (resident) => resident.household_id === household.id && resident.status === 'active',
-          );
-          const householdFlags = allFlags.filter((flag) => residentsInHousehold.some((resident) => resident.id === flag.resident_id));
-          const score = getHouseholdPriorityScore(householdFlags);
-          return { household, residents: residentsInHousehold, flags: householdFlags, score };
-        })
-        .filter((household) => household.score > 0)
-        .sort((left, right) => right.score - left.score);
-
-      setPriorities(householdsWithScores);
+      setPriorityGroups(buildPurokPriorityGroups({
+        households: allHouseholds,
+        residents: allResidents,
+        flags: allFlags,
+        purokRiskProfiles: profiles,
+        alertRules: rules,
+        alerts,
+        incidents: allIncidents,
+      }));
     } catch (error) {
       console.error('Failed to load responder data:', error);
     } finally {
@@ -300,7 +274,7 @@ export default function ResponderMobile() {
     }
 
     function handleDataChanged(event: WindowEventMap['mswdo-data-changed']) {
-      if (!['households', 'residents', 'vulnerability_flags', 'incidents', 'distribution_events', 'purok_risk_profiles', 'disaster_alert_rules'].includes(event.detail.table)) {
+      if (!['households', 'residents', 'vulnerability_flags', 'incidents', 'distribution_events', 'purok_risk_profiles', 'disaster_alert_rules', 'disaster_alerts'].includes(event.detail.table)) {
         return;
       }
 
@@ -346,11 +320,23 @@ export default function ResponderMobile() {
     floodControlStatus: filterFloodControlStatus,
   }));
   const visibleFloodZoneCount = buildFieldResponseZoneMarkers(filteredMapHouseholds, purokRiskProfiles, alertRules).length;
-  const filteredPriorities = priorities.filter((priority) => matchesPurokRiskFilters(priority.household, purokRiskProfileMap, {
+  const filteredPriorityGroups = priorityGroups.filter((group) => matchesPurokPriorityFilters(group, {
     floodProne: filterFloodProne,
     floodControlStatus: filterFloodControlStatus,
   }));
-  const hasSelection = Boolean(selectedHousehold || selectedIncident);
+  const filteredPriorityHouseholdCount = filteredPriorityGroups.reduce(
+    (total, group) => total + group.householdCount,
+    0,
+  );
+  const mappedEventCount = events.filter((event) => (
+    typeof event.gps_lat === 'number' && typeof event.gps_lng === 'number'
+  )).length;
+  const topPriorityGroup = filteredPriorityGroups[0] ?? null;
+  const topPriorityHousehold = topPriorityGroup
+    ? topPriorityGroup.households.find((priority) => !visited.has(priority.household.id)) ?? topPriorityGroup.households[0] ?? null
+    : null;
+  const topPriorityTags = topPriorityHousehold ? getVulnerabilityPriorityLabels(topPriorityHousehold.flags) : [];
+  const hasSelection = Boolean(selectedHousehold || selectedIncident || selectedEvent);
   const hasPurokFilters = filterFloodProne !== 'all' || filterFloodControlStatus !== 'all';
 
   return (
@@ -398,13 +384,16 @@ export default function ResponderMobile() {
               compact
               household={selectedHousehold}
               incident={selectedIncident}
+              event={selectedEvent}
               onClear={() => {
                 setSelectedHousehold(null);
                 setSelectedIncident(null);
+                setSelectedEvent(null);
                 setSelectionOpen(false);
               }}
               onNavigateHousehold={(household) => openResponderMapLocation(household.gps_lat, household.gps_long, household.street_address)}
               onNavigateIncident={(incident) => openResponderMapLocation(incident.gps_lat, incident.gps_lng, incident.location)}
+              onNavigateEvent={(event) => openResponderMapLocation(event.gps_lat, event.gps_lng, event.location)}
             />
           </div>
         </DrawerContent>
@@ -456,6 +445,7 @@ export default function ResponderMobile() {
                         onClick={() => {
                           setSelectedIncident(incident);
                           setSelectedHousehold(null);
+                          setSelectedEvent(null);
                           setQueueOpen(false);
                           setSelectionOpen(true);
                         }}
@@ -490,8 +480,8 @@ export default function ResponderMobile() {
       <Drawer open={priorityOpen} onOpenChange={setPriorityOpen}>
         <DrawerContent className="max-h-[84vh] rounded-t-[30px] border-slate-200 bg-white">
           <DrawerHeader className="pb-0 text-left">
-            <DrawerTitle>Priority check-ins</DrawerTitle>
-            <DrawerDescription>Use the queue to inspect high-risk households without pushing the map off-screen.</DrawerDescription>
+            <DrawerTitle>Purok priority queue</DrawerTitle>
+            <DrawerDescription>Start with the highest-risk purok, then visit the households listed under it.</DrawerDescription>
           </DrawerHeader>
           <div className="space-y-3 overflow-y-auto px-4 pb-[calc(env(safe-area-inset-bottom)+1.25rem)] pt-3">
             {loading ? (
@@ -500,91 +490,168 @@ export default function ResponderMobile() {
                   <div key={index} className="h-32 animate-pulse rounded-[24px] bg-slate-100" />
                 ))}
               </div>
-            ) : filteredPriorities.length === 0 ? (
+            ) : filteredPriorityGroups.length === 0 ? (
               <CivicEmptyState
                 icon={Users}
-                title="No priority households"
-                description="Vulnerability scoring did not surface any check-ins right now."
+                title="No priority puroks"
+                description="Flood risk, vulnerability, and live alerts did not surface a queue right now."
               />
             ) : (
-              filteredPriorities.map((priority, index) => {
-                const labels = getVulnerabilityLabels(priority.flags);
-                const alreadyVisited = visited.has(priority.household.id);
-                const canNavigate = priority.household.gps_lat !== undefined && priority.household.gps_long !== undefined;
-                const purokRiskProfile = getPurokRiskProfileForHousehold(priority.household, purokRiskProfileMap);
+              <>
+              {topPriorityGroup && topPriorityHousehold ? (() => {
+                const levelTone = topPriorityGroup.level === 'critical' ? 'rose' : topPriorityGroup.level === 'high' ? 'amber' : topPriorityGroup.level === 'medium' ? 'navy' : 'slate';
+                return (
+                  <div className="rounded-[24px] border border-cyan-200 bg-cyan-50/70 px-4 py-4 shadow-sm shadow-cyan-100">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-cyan-700">Recommended first response</p>
+                        <h3 className="mt-1 text-base font-black text-slate-950">{topPriorityGroup.purokSitio}</h3>
+                        <p className="mt-1 text-sm text-slate-600">
+                          Start with <span className="font-bold text-slate-950">{topPriorityHousehold.household.head_name}</span>
+                        </p>
+                      </div>
+                      <CivicBadge label={topPriorityGroup.level.toUpperCase()} tone={levelTone} className="text-[10px]" />
+                    </div>
+                    <div className="mt-3 flex flex-wrap gap-1.5">
+                      <CivicBadge label={`Score ${topPriorityGroup.score}`} tone="amber" className="text-[10px]" />
+                      <CivicBadge label={`${topPriorityGroup.vulnerableResidentCount} vulnerable`} tone="rose" className="text-[10px]" />
+                      <CivicBadge label={`${topPriorityGroup.householdCount} households`} tone="slate" className="text-[10px]" />
+                      {topPriorityGroup.reasons.slice(0, 3).map((reason) => (
+                        <CivicBadge key={reason} label={reason} tone="navy" className="text-[10px]" />
+                      ))}
+                      {topPriorityTags.slice(0, 3).map((tag) => (
+                        <CivicBadge key={tag} label={tag} tone="rose" className="text-[10px]" />
+                      ))}
+                    </div>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <Button
+                        type="button"
+                        onClick={() => {
+                          setSelectedHousehold(topPriorityHousehold.household);
+                          setSelectedIncident(null);
+                          setSelectedEvent(null);
+                          setPriorityOpen(false);
+                          setSelectionOpen(true);
+                        }}
+                        className="h-9 rounded-full px-3 text-xs font-semibold"
+                      >
+                        Inspect first
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => openResponderMapLocation(
+                          topPriorityHousehold.household.gps_lat,
+                          topPriorityHousehold.household.gps_long,
+                          `${topPriorityHousehold.household.street_address}, ${topPriorityHousehold.household.purok_sitio}`,
+                        )}
+                        className="h-9 rounded-full border-cyan-200 bg-white px-3 text-xs font-semibold text-cyan-900"
+                      >
+                        Navigate
+                      </Button>
+                    </div>
+                  </div>
+                );
+              })() : null}
 
+              {filteredPriorityGroups.map((group, index) => {
+                const levelTone = group.level === 'critical' ? 'rose' : group.level === 'high' ? 'amber' : group.level === 'medium' ? 'navy' : 'slate';
+                const firstHousehold = group.households.find((priority) => !visited.has(priority.household.id)) ?? group.households[0];
                 return (
                   <MobileListCard
-                    key={priority.household.id}
-                    title={priority.household.head_name}
-                    subtitle={`${priority.household.purok_sitio} | ${priority.household.street_address}`}
+                    key={group.id}
+                    title={`${index + 1}. ${group.purokSitio}`}
+                    subtitle={group.barangayLabel}
                     leading={<span className="text-sm font-bold">{index + 1}</span>}
                     status={(
                       <>
-                        <CivicBadge
-                          label={purokRiskProfile?.flood_prone ? 'Flood-prone purok' : 'Not flood-prone'}
-                          tone={purokRiskProfile?.flood_prone ? 'rose' : 'emerald'}
-                          className="text-[10px]"
-                        />
-                        <CivicBadge
-                          label={PUROK_FLOOD_CONTROL_STATUS_LABELS[purokRiskProfile?.flood_control_status ?? 'unknown']}
-                          tone="slate"
-                          className="text-[10px]"
-                        />
-                        {labels.map((label) => (
-                          <CivicBadge key={label} label={label} tone="rose" className="text-[10px]" />
+                        <CivicBadge label={group.level.toUpperCase()} tone={levelTone} className="text-[10px]" />
+                        <CivicBadge label={group.floodProne ? 'Flood-prone purok' : 'Not flood-prone'} tone={group.floodProne ? 'rose' : 'emerald'} className="text-[10px]" />
+                        <CivicBadge label={group.floodControlLabel} tone="slate" className="text-[10px]" />
+                        <CivicBadge label={`Score ${group.score}`} tone="amber" className="text-[10px]" />
+                        {group.reasons.slice(0, 3).map((reason) => (
+                          <CivicBadge key={reason} label={reason} tone="navy" className="text-[10px]" />
                         ))}
-                        <CivicBadge label={`Score ${priority.score}`} tone="amber" className="text-[10px]" />
-                        {alreadyVisited ? <CivicBadge label="Visited" tone="emerald" className="text-[10px]" /> : null}
                       </>
                     )}
                     meta={(
-                      <div className="flex items-center justify-between gap-3 text-xs text-slate-500">
-                        <span>{priority.residents.length} residents</span>
-                        <span>{canNavigate ? 'Mapped' : 'No map pin'}</span>
+                      <div className="space-y-2 text-xs text-slate-500">
+                        <div className="flex items-center justify-between gap-3">
+                          <span>{group.householdCount} households</span>
+                          <span>{group.vulnerableResidentCount} vulnerable residents</span>
+                        </div>
+                        {firstHousehold ? (
+                          <p className="font-semibold text-cyan-900">Unahon: {firstHousehold.household.head_name}</p>
+                        ) : null}
+                        {group.defaultEvacuationSite ? <p>Evacuation: {group.defaultEvacuationSite}</p> : null}
+                        <div className="space-y-2">
+                          {group.households.map((priority, householdIndex) => {
+                            const labels = getVulnerabilityPriorityLabels(priority.flags);
+                            const alreadyVisited = visited.has(priority.household.id);
+                            const canNavigate = priority.household.gps_lat !== undefined && priority.household.gps_long !== undefined;
+                            return (
+                              <div key={priority.household.id} className={`rounded-2xl border px-3 py-3 ${alreadyVisited ? 'border-emerald-200 bg-emerald-50' : 'border-slate-100 bg-slate-50'}`}>
+                                <div className="flex items-start justify-between gap-2">
+                                  <div className="min-w-0">
+                                    <p className="truncate text-sm font-bold text-slate-950">{householdIndex + 1}. {priority.household.head_name}</p>
+                                    <p className="mt-1 truncate text-xs text-slate-500">{priority.household.street_address}</p>
+                                  </div>
+                                  {alreadyVisited ? <CivicBadge label="Visited" tone="emerald" className="text-[10px]" /> : null}
+                                </div>
+                                <div className="mt-2 flex flex-wrap gap-1">
+                                  {labels.map((label) => (
+                                    <CivicBadge key={label} label={label} tone="rose" className="text-[10px]" />
+                                  ))}
+                                  <CivicBadge label={`Score ${priority.score}`} tone="amber" className="text-[10px]" />
+                                  <CivicBadge label={canNavigate ? 'Mapped' : 'No map pin'} tone={canNavigate ? 'emerald' : 'slate'} className="text-[10px]" />
+                                </div>
+                                <div className="mt-3 flex flex-wrap gap-2">
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    onClick={() => {
+                                      setSelectedHousehold(priority.household);
+                                      setSelectedIncident(null);
+                                      setSelectedEvent(null);
+                                      setPriorityOpen(false);
+                                      setSelectionOpen(true);
+                                    }}
+                                    className="h-9 rounded-full border-slate-200 px-3 text-xs font-semibold text-slate-700"
+                                  >
+                                    Inspect
+                                  </Button>
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    disabled={!canNavigate}
+                                    onClick={() => openResponderMapLocation(
+                                      priority.household.gps_lat,
+                                      priority.household.gps_long,
+                                      `${priority.household.street_address}, ${priority.household.purok_sitio}`,
+                                    )}
+                                    className="h-9 rounded-full border-slate-200 px-3 text-xs font-semibold text-slate-700"
+                                  >
+                                    Navigate
+                                  </Button>
+                                  <Button
+                                    type="button"
+                                    variant={alreadyVisited ? 'default' : 'outline'}
+                                    onClick={() => toggleVisited(priority.household.id)}
+                                    className="h-9 rounded-full px-3 text-xs font-semibold"
+                                  >
+                                    {alreadyVisited ? 'Visited' : 'Check-in'}
+                                  </Button>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
                       </div>
-                    )}
-                    actions={(
-                      <>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          onClick={() => {
-                            setSelectedHousehold(priority.household);
-                            setSelectedIncident(null);
-                            setPriorityOpen(false);
-                            setSelectionOpen(true);
-                          }}
-                          className="h-10 rounded-full border-slate-200 px-4 text-xs font-semibold text-slate-700"
-                        >
-                          Inspect
-                        </Button>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          disabled={!canNavigate}
-                          onClick={() => openResponderMapLocation(
-                            priority.household.gps_lat,
-                            priority.household.gps_long,
-                            `${priority.household.street_address}, ${priority.household.purok_sitio}`,
-                          )}
-                          className="h-10 rounded-full border-slate-200 px-4 text-xs font-semibold text-slate-700"
-                        >
-                          Navigate
-                        </Button>
-                        <Button
-                          type="button"
-                          variant={alreadyVisited ? 'default' : 'outline'}
-                          onClick={() => toggleVisited(priority.household.id)}
-                          className="h-10 rounded-full px-4 text-xs font-semibold"
-                        >
-                          {alreadyVisited ? 'Visited' : 'Check-in'}
-                        </Button>
-                      </>
                     )}
                   />
                 );
-              })
+              })}
+              </>
             )}
           </div>
         </DrawerContent>
@@ -610,7 +677,7 @@ export default function ResponderMobile() {
         <div className="grid grid-cols-3 gap-2">
           {[
             { label: 'Active', value: activeIncidents.length },
-            { label: 'Priority', value: filteredPriorities.length },
+            { label: 'Priority', value: filteredPriorityGroups.length },
             { label: 'Resolved', value: resolvedCount },
           ].map((metric) => (
             <CivicPanel key={metric.label} className="rounded-[22px] p-3 text-center">
@@ -619,6 +686,57 @@ export default function ResponderMobile() {
             </CivicPanel>
           ))}
         </div>
+
+        {topPriorityGroup && topPriorityHousehold ? (() => {
+          const levelTone = topPriorityGroup.level === 'critical' ? 'rose' : topPriorityGroup.level === 'high' ? 'amber' : topPriorityGroup.level === 'medium' ? 'navy' : 'slate';
+          return (
+            <CivicPanel className="space-y-3 rounded-[24px] border-cyan-200 bg-cyan-50/80 p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-cyan-700">Recommended first response</p>
+                  <h2 className="mt-1 text-base font-black text-slate-950">{topPriorityGroup.purokSitio}</h2>
+                  <p className="mt-1 text-sm text-slate-600">
+                    Unahon si <span className="font-bold text-slate-950">{topPriorityHousehold.household.head_name}</span>
+                  </p>
+                </div>
+                <CivicBadge label={topPriorityGroup.level.toUpperCase()} tone={levelTone} className="text-[10px]" />
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                <CivicBadge label={`Score ${topPriorityGroup.score}`} tone="amber" className="text-[10px]" />
+                <CivicBadge label={`${topPriorityGroup.vulnerableResidentCount} vulnerable`} tone="rose" className="text-[10px]" />
+                {topPriorityGroup.reasons.slice(0, 3).map((reason) => (
+                  <CivicBadge key={reason} label={reason} tone="navy" className="text-[10px]" />
+                ))}
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  onClick={() => {
+                    setSelectedHousehold(topPriorityHousehold.household);
+                    setSelectedIncident(null);
+                    setSelectedEvent(null);
+                    setSelectionOpen(true);
+                  }}
+                  className="h-9 rounded-full px-3 text-xs font-semibold"
+                >
+                  View priority
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => openResponderMapLocation(
+                    topPriorityHousehold.household.gps_lat,
+                    topPriorityHousehold.household.gps_long,
+                    `${topPriorityHousehold.household.street_address}, ${topPriorityHousehold.household.purok_sitio}`,
+                  )}
+                  className="h-9 rounded-full border-cyan-200 bg-white px-3 text-xs font-semibold text-cyan-900"
+                >
+                  Navigate
+                </Button>
+              </div>
+            </CivicPanel>
+          );
+        })() : null}
 
         <CivicPanel className="space-y-3 rounded-[24px] p-4">
           <div className="flex items-start justify-between gap-3">
@@ -673,7 +791,8 @@ export default function ResponderMobile() {
 
           <div className="flex flex-wrap gap-2">
             <CivicBadge label={`${filteredMapHouseholds.length} mapped households`} tone="emerald" className="text-[10px]" />
-            <CivicBadge label={`${filteredPriorities.length} priority check-ins`} tone="amber" className="text-[10px]" />
+            <CivicBadge label={`${filteredPriorityGroups.length} priority puroks`} tone="amber" className="text-[10px]" />
+            <CivicBadge label={`${filteredPriorityHouseholdCount} households queued`} tone="slate" className="text-[10px]" />
             {filterFloodProne !== 'all' ? (
               <CivicBadge
                 label={filterFloodProne === 'flood_prone' ? 'Flood-prone puroks' : 'Not flood-prone'}
@@ -700,6 +819,7 @@ export default function ResponderMobile() {
             </div>
             <div className="flex flex-col items-end gap-1">
               <CivicBadge label={`${filteredMapHouseholds.length} verified pins`} tone="emerald" className="text-[10px]" />
+              <CivicBadge label={`${mappedEventCount} event pins`} tone="navy" className="text-[10px]" />
               <CivicBadge label={`${visibleFloodZoneCount} risk zones`} tone="amber" className="text-[10px]" />
               <CivicBadge label={mapControls.activeBaseLayer.label} tone="navy" className="text-[10px]" />
             </div>
@@ -708,6 +828,7 @@ export default function ResponderMobile() {
           <ResponderLeafletMap
             households={filteredMapHouseholds}
             incidents={incidents}
+            events={events}
             purokRiskProfiles={purokRiskProfiles}
             alertRules={alertRules}
             selectedHousehold={selectedHousehold}
@@ -715,6 +836,7 @@ export default function ResponderMobile() {
               setSelectedHousehold(household);
               if (household) {
                 setSelectedIncident(null);
+                setSelectedEvent(null);
                 setSelectionOpen(true);
               }
             }}
@@ -723,6 +845,16 @@ export default function ResponderMobile() {
               setSelectedIncident(incident);
               if (incident) {
                 setSelectedHousehold(null);
+                setSelectedEvent(null);
+                setSelectionOpen(true);
+              }
+            }}
+            selectedEvent={selectedEvent}
+            onSelectEvent={(event) => {
+              setSelectedEvent(event);
+              if (event) {
+                setSelectedHousehold(null);
+                setSelectedIncident(null);
                 setSelectionOpen(true);
               }
             }}
@@ -807,7 +939,7 @@ export default function ResponderMobile() {
             className="h-12 rounded-[20px] border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700"
           >
             <ShieldAlert className="h-4 w-4" />
-            {loading ? '--' : filteredPriorities.length}
+            {loading ? '--' : filteredPriorityGroups.length}
           </Button>
         )}
       />

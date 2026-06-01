@@ -12,6 +12,7 @@ import {
   type SupabaseBootstrapTable,
 } from '@/lib/supabase/row-mapper';
 import { buildDistributionNotificationBody } from '@/lib/distribution-notifications';
+import { isLegacySampleIncident } from '@/lib/incident-filters';
 
 export const runtime = 'nodejs';
 
@@ -341,7 +342,12 @@ async function loadIncidents() {
     .order('reported_at', { ascending: false });
 
   if (error) throw new Error(error.message);
-  return data ?? [];
+  return (data ?? []).filter((incident) => !isLegacySampleIncident({
+    id: typeof incident.id === 'string' ? incident.id : '',
+    type: incident.type,
+    location: incident.location,
+    description: incident.description,
+  }));
 }
 
 async function loadAuditLogs(remoteUserId: string | null, role: User['role']) {

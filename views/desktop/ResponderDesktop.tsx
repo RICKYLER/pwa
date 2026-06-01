@@ -56,6 +56,12 @@ import {
 } from '@/lib/responder-households';
 import { fetchJsonWithCache } from '@/lib/client-fetch-cache';
 import type { FieldResponseWeatherPayload } from '@/lib/weather';
+import {
+  buildPurokPriorityGroups,
+  getVulnerabilityPriorityLabels,
+  matchesPurokPriorityFilters,
+  type PurokPriorityGroup,
+} from '@/lib/responder-priorities';
 
 declare global {
   interface WindowEventMap {
@@ -93,13 +99,6 @@ const INCIDENT_TYPE_ICONS: Record<string, string> = {
 const PUROK_FLOOD_CONTROL_OPTIONS: PurokFloodControlStatus[] = ['protected', 'partial', 'none', 'unknown'];
 type PurokFloodProneFilter = 'all' | 'flood_prone' | 'not_flood_prone';
 
-interface PriorityHousehold {
-  household: Household;
-  residents: Resident[];
-  flags: VulnerabilityFlags[];
-  score: number;
-}
-
 interface AlertIncidentSuggestion {
   id: string;
   payload: DisasterAlertNotificationPayload;
@@ -118,16 +117,6 @@ function timeAgo(date: Date): string {
   const hrs = Math.floor(mins / 60);
   if (hrs < 24) return `${hrs}h ago`;
   return `${Math.floor(hrs / 24)}d ago`;
-}
-
-function vulnTags(flags: VulnerabilityFlags[]): string[] {
-  const tags: string[] = [];
-  if (flags.some((flag) => flag.is_senior)) tags.push('Senior');
-  if (flags.some((flag) => flag.is_pwd)) tags.push('PWD');
-  if (flags.some((flag) => flag.is_pregnant)) tags.push('Pregnant');
-  if (flags.some((flag) => flag.has_chronic_illness)) tags.push('Chronic');
-  if (flags.some((flag) => flag.is_child)) tags.push('Child');
-  return tags;
 }
 
 function navigateToHousehold(household: Household) {
@@ -160,7 +149,7 @@ export default function ResponderDesktop() {
   const mapControls = useResponderMapControls();
 
   const [incidents, setIncidents] = useState<Incident[]>([]);
-  const [priorities, setPriorities] = useState<PriorityHousehold[]>([]);
+  const [priorityGroups, setPriorityGroups] = useState<PurokPriorityGroup[]>([]);
   const [events, setEvents] = useState<DistributionEvent[]>([]);
   const [mapHouseholds, setMapHouseholds] = useState<Household[]>([]);
   const [purokRiskProfiles, setPurokRiskProfiles] = useState<PurokRiskProfile[]>([]);
@@ -173,6 +162,7 @@ export default function ResponderDesktop() {
   const [loading, setLoading] = useState(true);
   const [selectedHousehold, setSelectedHousehold] = useState<Household | null>(null);
   const [selectedIncident, setSelectedIncident] = useState<Incident | null>(null);
+  const [selectedEvent, setSelectedEvent] = useState<DistributionEvent | null>(null);
   const [activeTab, setActiveTab] = useState<'incidents' | 'suggestions' | 'priorities' | 'events' | 'zones'>('incidents');
   const [updatingId, setUpdatingId] = useState<string | null>(null);
   const [creatingFromAlertId, setCreatingFromAlertId] = useState<string | null>(null);
@@ -248,26 +238,15 @@ export default function ResponderDesktop() {
       setAlerts(latestAlerts);
       setNotifications(latestNotifications);
 
-      const scored: PriorityHousehold[] = households
-        .map((household) => {
-          const residentsInHousehold = residents.filter(
-            (resident) => resident.household_id === household.id && resident.status === 'active',
-          );
-          const householdFlags = flags.filter((flag) => residentsInHousehold.some((resident) => resident.id === flag.resident_id));
-          let score = 0;
-          householdFlags.forEach((flag) => {
-            if (flag.is_senior) score += 3;
-            if (flag.is_pwd) score += 3;
-            if (flag.is_pregnant) score += 3;
-            if (flag.has_chronic_illness) score += 2;
-            if (flag.is_child) score += 1;
-          });
-          return { household, residents: residentsInHousehold, flags: householdFlags, score };
-        })
-        .filter((priority) => priority.score > 0)
-        .sort((a, b) => b.score - a.score);
-
-      setPriorities(scored);
+      setPriorityGroups(buildPurokPriorityGroups({
+        households,
+        residents,
+        flags,
+        purokRiskProfiles: profiles,
+        alertRules: rules,
+        alerts: latestAlerts,
+        incidents: allIncidents,
+      }));
     } catch (error) {
       console.error(error);
     } finally {
@@ -622,6 +601,7 @@ export default function ResponderDesktop() {
       setIncidents((current) => [created, ...current.filter((incident) => incident.id !== created.id)]);
       setSelectedIncident(created);
       setSelectedHousehold(null);
+      setSelectedEvent(null);
       setActiveTab('incidents');
       setSuggestionModal(null);
       await load();
@@ -644,10 +624,22 @@ export default function ResponderDesktop() {
     floodControlStatus: filterFloodControlStatus,
   }));
   const visibleFloodZoneCount = buildFieldResponseZoneMarkers(filteredMapHouseholds, purokRiskProfiles, alertRules).length;
-  const filteredPriorities = priorities.filter((priority) => matchesPurokRiskFilters(priority.household, purokRiskProfileMap, {
+  const filteredPriorityGroups = priorityGroups.filter((group) => matchesPurokPriorityFilters(group, {
     floodProne: filterFloodProne,
     floodControlStatus: filterFloodControlStatus,
   }));
+  const filteredPriorityHouseholdCount = filteredPriorityGroups.reduce(
+    (total, group) => total + group.householdCount,
+    0,
+  );
+  const mappedEventCount = events.filter((event) => (
+    typeof event.gps_lat === 'number' && typeof event.gps_lng === 'number'
+  )).length;
+  const topPriorityGroup = filteredPriorityGroups[0] ?? null;
+  const topPriorityHousehold = topPriorityGroup
+    ? topPriorityGroup.households.find((priority) => !visitedIds.has(priority.household.id)) ?? topPriorityGroup.households[0] ?? null
+    : null;
+  const topPriorityTags = topPriorityHousehold ? getVulnerabilityPriorityLabels(topPriorityHousehold.flags) : [];
   const hasPurokFilters = filterFloodProne !== 'all' || filterFloodControlStatus !== 'all';
 
   return (
@@ -672,7 +664,7 @@ export default function ResponderDesktop() {
             <div className="mt-5 grid grid-cols-3 gap-2">
               {[
                 { label: 'Active', value: activeIncidents.length },
-                { label: 'Priority', value: filteredPriorities.length },
+                { label: 'Priority', value: filteredPriorityGroups.length },
                 { label: 'Resolved', value: resolvedCount },
               ].map((metric) => (
                 <div key={metric.label} className="rounded-[20px] border border-white/10 bg-white/10 px-3 py-3">
@@ -682,6 +674,52 @@ export default function ResponderDesktop() {
               ))}
             </div>
           </CivicPanel>
+
+          {topPriorityGroup && topPriorityHousehold ? (() => {
+            const levelTone = topPriorityGroup.level === 'critical' ? 'rose' : topPriorityGroup.level === 'high' ? 'amber' : topPriorityGroup.level === 'medium' ? 'navy' : 'slate';
+            return (
+              <CivicPanel className="space-y-3 border-cyan-200 bg-cyan-50/80">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-cyan-700">Recommended first response</p>
+                    <h3 className="mt-1 text-base font-black text-slate-950">{topPriorityGroup.purokSitio}</h3>
+                    <p className="mt-1 text-sm text-slate-600">
+                      Unahon si <span className="font-bold text-slate-950">{topPriorityHousehold.household.head_name}</span>
+                    </p>
+                  </div>
+                  <CivicBadge label={topPriorityGroup.level.toUpperCase()} tone={levelTone} className="text-[10px]" />
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  <CivicBadge label={`Score ${topPriorityGroup.score}`} tone="amber" className="text-[10px]" />
+                  <CivicBadge label={`${topPriorityGroup.vulnerableResidentCount} vulnerable`} tone="rose" className="text-[10px]" />
+                  {topPriorityGroup.reasons.slice(0, 3).map((reason) => (
+                    <CivicBadge key={reason} label={reason} tone="navy" className="text-[10px]" />
+                  ))}
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedHousehold(topPriorityHousehold.household);
+                      setSelectedIncident(null);
+                      setSelectedEvent(null);
+                      setActiveTab('priorities');
+                    }}
+                    className="rounded-full bg-cyan-950 px-3 py-2 text-xs font-semibold text-white transition hover:bg-cyan-900"
+                  >
+                    View priority
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => navigateToHousehold(topPriorityHousehold.household)}
+                    className="rounded-full border border-cyan-200 bg-white px-3 py-2 text-xs font-semibold text-cyan-900 transition hover:bg-cyan-50"
+                  >
+                    Navigate
+                  </button>
+                </div>
+              </CivicPanel>
+            );
+          })() : null}
 
           <WeatherWidget
             mode="compact"
@@ -813,12 +851,15 @@ export default function ResponderDesktop() {
           <ResponderSelectionSummary
             household={selectedHousehold}
             incident={selectedIncident}
+            event={selectedEvent}
             onClear={() => {
               setSelectedHousehold(null);
               setSelectedIncident(null);
+              setSelectedEvent(null);
             }}
             onNavigateHousehold={navigateToHousehold}
             onNavigateIncident={navigateToIncident}
+            onNavigateEvent={navigateToEvent}
           />
 
           <CivicPanel className="space-y-4">
@@ -870,7 +911,8 @@ export default function ResponderDesktop() {
             </div>
             <div className="flex flex-wrap gap-2">
               <CivicBadge label={`${filteredMapHouseholds.length} mapped households`} tone="emerald" />
-              <CivicBadge label={`${filteredPriorities.length} priority check-ins`} tone="amber" />
+              <CivicBadge label={`${filteredPriorityGroups.length} priority puroks`} tone="amber" />
+              <CivicBadge label={`${filteredPriorityHouseholdCount} households queued`} tone="slate" />
               {filterFloodProne !== 'all' ? (
                 <CivicBadge label={filterFloodProne === 'flood_prone' ? 'Flood-prone puroks' : 'Not flood-prone'} tone="rose" />
               ) : null}
@@ -885,7 +927,7 @@ export default function ResponderDesktop() {
               {([
                 { key: 'incidents', label: 'Incidents', count: activeIncidents.length },
                 { key: 'suggestions', label: 'Alert Suggestions', count: actionableAlertSuggestionCount },
-                { key: 'priorities', label: 'Check-ins', count: filteredPriorities.length },
+                { key: 'priorities', label: 'Priority Queue', count: filteredPriorityGroups.length },
                 { key: 'events', label: 'Events', count: events.length },
                 { key: 'zones', label: 'Flood Zones', count: purokRiskProfiles.length },
               ] as const).map((tab) => (
@@ -928,6 +970,7 @@ export default function ResponderDesktop() {
                     const selectIncident = () => {
                       setSelectedIncident(incident);
                       setSelectedHousehold(null);
+                      setSelectedEvent(null);
                     };
                     return (
                       <div
@@ -1083,6 +1126,7 @@ export default function ResponderDesktop() {
                               onClick={() => {
                                 setSelectedIncident(suggestion.linkedIncident ?? null);
                                 setSelectedHousehold(null);
+                                setSelectedEvent(null);
                                 setActiveTab('incidents');
                               }}
                               className="rounded-full border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50"
@@ -1099,7 +1143,7 @@ export default function ResponderDesktop() {
                   <>
                     <div className="rounded-[20px] border border-slate-200 bg-slate-50 px-4 py-3 text-center">
                       <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">Monitoring — no alert yet</p>
-                      <p className="mt-1 text-xs text-slate-500">Weather hasn't crossed any threshold. Rules below are actively watching.</p>
+                      <p className="mt-1 text-xs text-slate-500">Weather hasn&apos;t crossed any threshold. Rules below are actively watching.</p>
                     </div>
                     {alertRules
                       .filter((r) => r.enabled)
@@ -1153,53 +1197,106 @@ export default function ResponderDesktop() {
                   [...Array(4)].map((_, index) => (
                     <div key={index} className="h-24 animate-pulse rounded-[24px] bg-slate-100" />
                   ))
-                ) : filteredPriorities.length === 0 ? (
+                ) : filteredPriorityGroups.length === 0 ? (
                   <div className="rounded-[24px] border border-dashed border-slate-300 bg-slate-50 px-5 py-10 text-center">
                     <Users className="mx-auto h-8 w-8 text-slate-400" />
-                    <p className="mt-3 text-sm font-semibold text-slate-900">No priority households</p>
+                    <p className="mt-3 text-sm font-semibold text-slate-900">No priority puroks</p>
+                    <p className="mt-1 text-xs text-slate-500">Flood risk, vulnerability, and live alerts did not surface a queue right now.</p>
                   </div>
                 ) : (
-                  filteredPriorities.map((priority, index) => {
-                    const tags = vulnTags(priority.flags);
+                  <>
+                  {topPriorityGroup && topPriorityHousehold ? (() => {
+                    const levelTone = topPriorityGroup.level === 'critical' ? 'rose' : topPriorityGroup.level === 'high' ? 'amber' : topPriorityGroup.level === 'medium' ? 'navy' : 'slate';
+                    return (
+                      <div className="rounded-[24px] border border-cyan-200 bg-cyan-50/60 px-4 py-4 shadow-sm shadow-cyan-100/50">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-cyan-700">Recommended first response</p>
+                            <h4 className="mt-1 text-base font-black text-slate-950">{topPriorityGroup.purokSitio}</h4>
+                            <p className="mt-1 text-sm text-slate-600">
+                              Start with <span className="font-bold text-slate-950">{topPriorityHousehold.household.head_name}</span>
+                            </p>
+                          </div>
+                          <CivicBadge label={topPriorityGroup.level.toUpperCase()} tone={levelTone} className="text-[10px]" />
+                        </div>
+                        <div className="mt-3 flex flex-wrap gap-1.5">
+                          <CivicBadge label={`Score ${topPriorityGroup.score}`} tone="amber" className="text-[10px]" />
+                          <CivicBadge label={`${topPriorityGroup.vulnerableResidentCount} vulnerable`} tone="rose" className="text-[10px]" />
+                          <CivicBadge label={`${topPriorityGroup.householdCount} households`} tone="slate" className="text-[10px]" />
+                          {topPriorityGroup.reasons.slice(0, 4).map((reason) => (
+                            <CivicBadge key={reason} label={reason} tone="navy" className="text-[10px]" />
+                          ))}
+                          {topPriorityTags.slice(0, 4).map((tag) => (
+                            <CivicBadge key={tag} label={tag} tone="rose" className="text-[10px]" />
+                          ))}
+                        </div>
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSelectedHousehold(topPriorityHousehold.household);
+                              setSelectedIncident(null);
+                              setSelectedEvent(null);
+                            }}
+                            className="rounded-full bg-cyan-950 px-3 py-2 text-xs font-semibold text-white transition hover:bg-cyan-900"
+                          >
+                            Inspect first household
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => navigateToHousehold(topPriorityHousehold.household)}
+                            className="rounded-full border border-cyan-200 bg-white px-3 py-2 text-xs font-semibold text-cyan-900 transition hover:bg-cyan-50"
+                          >
+                            Navigate
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })() : null}
+
+                  {filteredPriorityGroups.map((group, index) => {
+                    const levelTone = group.level === 'critical' ? 'rose' : group.level === 'high' ? 'amber' : group.level === 'medium' ? 'navy' : 'slate';
+                    const firstHousehold = group.households.find((priority) => !visitedIds.has(priority.household.id)) ?? group.households[0];
+                    if (!firstHousehold) return null;
+                    const priority = firstHousehold;
                     const isVisited = visitedIds.has(priority.household.id);
-                    const purokRiskProfile = getPurokRiskProfileForHousehold(priority.household, purokRiskProfileMap);
-                    const selectHousehold = () => {
-                      setSelectedHousehold(priority.household);
+                    const selectPurok = () => {
+                      if (!firstHousehold) return;
+                      setSelectedHousehold(firstHousehold.household);
                       setSelectedIncident(null);
+                      setSelectedEvent(null);
                     };
                     return (
                       <div
-                        key={priority.household.id}
+                        key={group.id}
                         role="button"
                         tabIndex={0}
-                        onClick={selectHousehold}
-                        onKeyDown={(event) => activateOnEnterOrSpace(event, selectHousehold)}
-                        className={`w-full cursor-pointer rounded-[24px] border px-4 py-4 text-left transition hover:-translate-y-px hover:border-slate-300 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-cyan-900/20 ${
-                          isVisited ? 'border-emerald-200 bg-emerald-50/60' : 'border-slate-200/80 bg-white'
-                        }`}
+                        onClick={selectPurok}
+                        onKeyDown={(event) => activateOnEnterOrSpace(event, selectPurok)}
+                        className="w-full cursor-pointer rounded-[24px] border border-slate-200/80 bg-white px-4 py-4 text-left transition hover:-translate-y-px hover:border-slate-300 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-cyan-900/20"
                       >
                         <div className="flex items-start gap-3">
                           <div className="flex h-8 w-8 items-center justify-center rounded-2xl bg-slate-100 text-xs font-black text-slate-600">
                             {index + 1}
                           </div>
                           <div className="min-w-0 flex-1">
-                            <p className="truncate text-sm font-bold text-slate-950">{priority.household.head_name}</p>
-                            <p className="mt-1 truncate text-xs text-slate-500">{priority.household.purok_sitio} · {priority.household.street_address}</p>
+                            <div className="flex flex-wrap items-start justify-between gap-2">
+                              <div className="min-w-0">
+                                <p className="truncate text-sm font-bold text-slate-950">{group.purokSitio}</p>
+                                <p className="mt-1 truncate text-xs text-slate-500">{group.barangayLabel}</p>
+                                <p className="mt-1 truncate text-xs font-semibold text-cyan-900">Unahon: {firstHousehold.household.head_name}</p>
+                              </div>
+                              <CivicBadge label={group.level.toUpperCase()} tone={levelTone} className="text-[10px]" />
+                            </div>
                             <div className="mt-2 flex flex-wrap gap-1">
-                              <CivicBadge
-                                label={purokRiskProfile?.flood_prone ? 'Flood-prone purok' : 'Not flood-prone'}
-                                tone={purokRiskProfile?.flood_prone ? 'rose' : 'emerald'}
-                                className="text-[10px]"
-                              />
-                              <CivicBadge
-                                label={PUROK_FLOOD_CONTROL_STATUS_LABELS[purokRiskProfile?.flood_control_status ?? 'unknown']}
-                                tone="slate"
-                                className="text-[10px]"
-                              />
-                              {tags.map((tag) => (
-                                <CivicBadge key={tag} label={tag} tone="rose" className="text-[10px]" />
+                              <CivicBadge label={group.floodProne ? 'Flood-prone purok' : 'Not flood-prone'} tone={group.floodProne ? 'rose' : 'emerald'} className="text-[10px]" />
+                              <CivicBadge label={group.floodControlLabel} tone="slate" className="text-[10px]" />
+                              <CivicBadge label={`${group.householdCount} households`} tone="slate" className="text-[10px]" />
+                              <CivicBadge label={`${group.vulnerableResidentCount} vulnerable`} tone="rose" className="text-[10px]" />
+                              <CivicBadge label={`Score ${group.score}`} tone="amber" className="text-[10px]" />
+                              {group.reasons.slice(0, 4).map((reason) => (
+                                <CivicBadge key={reason} label={reason} tone="navy" className="text-[10px]" />
                               ))}
-                              <CivicBadge label={`${priority.residents.length} residents`} tone="slate" className="text-[10px]" />
                             </div>
                           </div>
                         </div>
@@ -1235,9 +1332,51 @@ export default function ResponderDesktop() {
                             {isVisited ? 'Checked in' : 'Mark check-in'}
                           </button>
                         </div>
+                        {group.households.length > 0 ? (
+                          <div className="mt-3 space-y-2 rounded-[18px] border border-slate-100 bg-slate-50/70 p-3">
+                            <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-slate-400">Households to visit first</p>
+                            {group.households.map((queuedHousehold, householdIndex) => {
+                              const queuedTags = getVulnerabilityPriorityLabels(queuedHousehold.flags);
+                              const queuedVisited = visitedIds.has(queuedHousehold.household.id);
+                              return (
+                                <button
+                                  key={queuedHousehold.household.id}
+                                  type="button"
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                    setSelectedHousehold(queuedHousehold.household);
+                                    setSelectedIncident(null);
+                                    setSelectedEvent(null);
+                                  }}
+                                  className={`w-full rounded-2xl border px-3 py-3 text-left transition hover:border-slate-300 ${
+                                    queuedVisited ? 'border-emerald-200 bg-emerald-50' : 'border-white bg-white'
+                                  }`}
+                                >
+                                  <div className="flex items-start gap-3">
+                                    <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-[11px] font-black text-slate-500">
+                                      {householdIndex + 1}
+                                    </span>
+                                    <span className="min-w-0 flex-1">
+                                      <span className="block truncate text-sm font-bold text-slate-950">{queuedHousehold.household.head_name}</span>
+                                      <span className="mt-1 block truncate text-xs text-slate-500">{queuedHousehold.household.street_address}</span>
+                                      <span className="mt-2 flex flex-wrap gap-1">
+                                        {queuedTags.map((tag) => (
+                                          <CivicBadge key={tag} label={tag} tone="rose" className="text-[10px]" />
+                                        ))}
+                                        <CivicBadge label={`Score ${queuedHousehold.score}`} tone="amber" className="text-[10px]" />
+                                        {queuedVisited ? <CivicBadge label="Visited" tone="emerald" className="text-[10px]" /> : null}
+                                      </span>
+                                    </span>
+                                  </div>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        ) : null}
                       </div>
                     );
-                  })
+                  })}
+                  </>
                 )}
               </div>
             ) : null}
@@ -1254,8 +1393,23 @@ export default function ResponderDesktop() {
                     <p className="mt-3 text-sm font-semibold text-slate-900">No active distribution events</p>
                   </div>
                 ) : (
-                  events.map((event) => (
-                    <div key={event.id} className="rounded-[24px] border border-slate-200/80 bg-white px-4 py-4">
+                  events.map((event) => {
+                    const selectEvent = () => {
+                      setSelectedEvent(event);
+                      setSelectedHousehold(null);
+                      setSelectedIncident(null);
+                    };
+                    return (
+                    <div
+                      key={event.id}
+                      role="button"
+                      tabIndex={0}
+                      onClick={selectEvent}
+                      onKeyDown={(keyboardEvent) => activateOnEnterOrSpace(keyboardEvent, selectEvent)}
+                      className={`cursor-pointer rounded-[24px] border bg-white px-4 py-4 transition hover:-translate-y-px hover:border-slate-300 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-cyan-900/20 ${
+                        selectedEvent?.id === event.id ? 'border-violet-300 shadow-md' : 'border-slate-200/80'
+                      }`}
+                    >
                       <div className="flex items-start justify-between gap-3">
                         <div>
                           <p className="text-sm font-bold text-slate-950">{event.event_name}</p>
@@ -1268,13 +1422,17 @@ export default function ResponderDesktop() {
                       </div>
                       <button
                         type="button"
-                        onClick={() => navigateToEvent(event)}
+                        onClick={(clickEvent) => {
+                          clickEvent.stopPropagation();
+                          navigateToEvent(event);
+                        }}
                         className="mt-3 rounded-full border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50"
                       >
                         Navigate
                       </button>
                     </div>
-                  ))
+                    );
+                  })
                 )}
               </div>
             ) : null}
@@ -1699,6 +1857,7 @@ export default function ResponderDesktop() {
             </div>
             <div className="flex flex-wrap gap-2">
               <CivicBadge label={`${filteredMapHouseholds.length} verified household pins`} tone="emerald" />
+              <CivicBadge label={`${mappedEventCount} event pins`} tone="navy" />
               <CivicBadge label={`${visibleFloodZoneCount} response zones`} tone="amber" />
               <CivicBadge label={`${mapControls.activeBaseLayer.label} base`} tone="navy" />
               <CivicBadge
@@ -1712,17 +1871,32 @@ export default function ResponderDesktop() {
             <ResponderLeafletMap
               households={filteredMapHouseholds}
               incidents={incidents}
+              events={events}
               purokRiskProfiles={purokRiskProfiles}
               alertRules={alertRules}
               selectedHousehold={selectedHousehold}
               onSelectHousehold={(household) => {
                 setSelectedHousehold(household);
-                if (household) setSelectedIncident(null);
+                if (household) {
+                  setSelectedIncident(null);
+                  setSelectedEvent(null);
+                }
               }}
               selectedIncident={selectedIncident}
               onSelectIncident={(incident) => {
                 setSelectedIncident(incident);
-                if (incident) setSelectedHousehold(null);
+                if (incident) {
+                  setSelectedHousehold(null);
+                  setSelectedEvent(null);
+                }
+              }}
+              selectedEvent={selectedEvent}
+              onSelectEvent={(event) => {
+                setSelectedEvent(event);
+                if (event) {
+                  setSelectedHousehold(null);
+                  setSelectedIncident(null);
+                }
               }}
               activeBaseLayerId={mapControls.activeBaseLayerId}
               activeLayerIds={mapControls.activeLayerIds}

@@ -237,7 +237,7 @@ export default function DistributionDesktop() {
                             const hasZeroMatches = zeroMatchEventIds.has(event.id);
                             return (
                                 <div key={event.id} className={`group relative bg-white border border-slate-200/60 rounded-2xl ${cfg.border} hover:shadow-lg transition-all hover:-translate-y-0.5`}>
-                                    <Link href={`/distribution/${event.id}`} prefetch={false} className="block p-5">
+                                    <Link href={`/distribution/${event.id}`} prefetch={false} className={`block p-5 ${canDelete ? 'pb-16' : ''}`}>
                                         <div className="flex items-start gap-3 mb-4">
                                             <div className="w-10 h-10 rounded-xl bg-emerald-50 flex items-center justify-center flex-shrink-0"><Package className="w-5 h-5 text-emerald-600" /></div>
                                             <div className="flex-1 min-w-0">
@@ -264,11 +264,13 @@ export default function DistributionDesktop() {
                                     {/* Delete button — only for users with manage_inventory */}
                                     {canDelete && (
                                         <button
-                                            onClick={e => { e.preventDefault(); setPendingDelete(event); }}
+                                            type="button"
+                                            onClick={() => setPendingDelete(event)}
                                             title="Delete event"
-                                            className="absolute top-3 right-3 opacity-0 group-hover:opacity-100 transition-all p-1.5 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50"
+                                            className="absolute bottom-3 right-3 inline-flex items-center gap-1.5 rounded-full border border-rose-200 bg-white px-3 py-2 text-xs font-semibold text-rose-700 shadow-sm shadow-rose-100 transition hover:bg-rose-50"
                                         >
                                             <Trash2 className="w-3.5 h-3.5" />
+                                            Delete
                                         </button>
                                     )}
                                 </div>
