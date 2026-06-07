@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Bell, CheckCircle2, Clock3, FileText, MapPin, ShieldAlert } from 'lucide-react';
+import { ArrowRight, Bell, CheckCircle2, Clock3, FilePlus2, FileText, MapPin, ShieldAlert, X } from 'lucide-react';
 import { PurokFloodProfileCard } from '@/components/PurokFloodProfileCard';
 import ResidentShell from '@/components/resident/ResidentShell';
 import { getDefaultRouteForUser, getCurrentUser, isResidentUser } from '@/lib/auth';
@@ -83,6 +83,7 @@ export default function ResidentPortalPage() {
   const [liveWeather, setLiveWeather] = useState<FieldResponseWeatherPayload | null>(null);
   const [activeHouseholdResidents, setActiveHouseholdResidents] = useState<Resident[]>([]);
   const [flagsByResidentId, setFlagsByResidentId] = useState<Map<string, VulnerabilityFlags>>(new Map());
+  const [showRegistrationPrompt, setShowRegistrationPrompt] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
@@ -163,6 +164,26 @@ export default function ResidentPortalPage() {
     () => resolveResidentActiveApprovedHousehold(records),
     [records],
   );
+  const shouldShowRegistrationOnboarding = !isLoading && records.length === 0 && !activeHousehold;
+
+  useEffect(() => {
+    if (!user || !isResidentUser(user) || !shouldShowRegistrationOnboarding) {
+      return undefined;
+    }
+
+    const storageKey = `resident-registration-prompt:${user.id}`;
+    if (window.sessionStorage.getItem(storageKey) === 'seen') {
+      return undefined;
+    }
+
+    const frame = window.requestAnimationFrame(() => {
+      setShowRegistrationPrompt(true);
+      window.sessionStorage.setItem(storageKey, 'seen');
+    });
+
+    return () => window.cancelAnimationFrame(frame);
+  }, [shouldShowRegistrationOnboarding, user]);
+
   const visibleNotifications = useMemo(() => {
     return notifications.filter((notification) => {
       const distributionPayload = parseDistributionEventNotification(notification);
@@ -289,6 +310,38 @@ export default function ResidentPortalPage() {
           : 'Create a household registration and track its approval progress.'
       }
     >
+      {shouldShowRegistrationOnboarding ? (
+        <div className="mb-6 overflow-hidden rounded-[30px] border border-cyan-200 bg-[linear-gradient(135deg,#ecfeff,#ffffff_58%,#f0fdfa)] p-5 shadow-[0_22px_58px_-38px_rgba(8,47,73,0.35)] sm:p-6">
+          <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
+            <div className="flex items-start gap-4">
+              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-cyan-950 text-white shadow-sm">
+                <FilePlus2 className="h-6 w-6" />
+              </div>
+              <div>
+                <p className="text-xs font-bold uppercase tracking-[0.2em] text-cyan-800">Next step</p>
+                <h2 className="mt-2 text-2xl font-black tracking-tight text-slate-950">Register your household now</h2>
+                <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">
+                  Wala pa kay submitted household registration. Start here so the admin team can review your record and
+                  activate your approved household profile.
+                </p>
+                <div className="mt-4 flex flex-wrap gap-2 text-xs font-semibold text-slate-600">
+                  <span className="rounded-full border border-cyan-100 bg-white px-3 py-1.5">Step 1: Fill out household details</span>
+                  <span className="rounded-full border border-cyan-100 bg-white px-3 py-1.5">Step 2: Submit for review</span>
+                  <span className="rounded-full border border-cyan-100 bg-white px-3 py-1.5">Step 3: Track approval here</span>
+                </div>
+              </div>
+            </div>
+            <Link
+              href="/households/register"
+              className="inline-flex h-12 items-center justify-center gap-2 rounded-full bg-cyan-950 px-5 text-sm font-bold text-white shadow-sm transition hover:bg-cyan-900"
+            >
+              Register Household Now
+              <ArrowRight className="h-4 w-4" />
+            </Link>
+          </div>
+        </div>
+      ) : null}
+
       <div className="grid gap-4 sm:grid-cols-3">
         {[
           { label: 'My Registrations', value: records.length, icon: FileText, tone: 'bg-cyan-950 text-white' },
@@ -606,6 +659,80 @@ export default function ResidentPortalPage() {
           </div>
         )}
       </CivicPanel>
+
+      {showRegistrationPrompt ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="resident-registration-prompt-title"
+          className="fixed inset-0 z-50 flex items-center justify-center px-4 py-6"
+        >
+          <button
+            type="button"
+            aria-label="Close registration prompt"
+            className="absolute inset-0 cursor-default bg-slate-950/55 backdrop-blur-sm"
+            onClick={() => setShowRegistrationPrompt(false)}
+          />
+          <div className="relative z-10 w-full max-w-lg overflow-hidden rounded-[28px] border border-white/80 bg-white shadow-[0_30px_90px_-36px_rgba(15,23,42,0.6)]">
+            <button
+              type="button"
+              aria-label="Close registration prompt"
+              onClick={() => setShowRegistrationPrompt(false)}
+              className="absolute right-4 top-4 inline-flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:bg-slate-100 hover:text-slate-800"
+            >
+              <X className="h-5 w-5" />
+            </button>
+            <div className="px-6 pb-6 pt-7">
+              <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-cyan-950 text-white shadow-sm">
+                <FilePlus2 className="h-7 w-7" />
+              </div>
+              <p className="mt-5 text-xs font-bold uppercase tracking-[0.2em] text-cyan-800">Household registration needed</p>
+              <h2 id="resident-registration-prompt-title" className="mt-2 text-2xl font-black tracking-tight text-slate-950">
+                Start your household registration
+              </h2>
+              <p className="mt-3 text-sm leading-6 text-slate-600">
+                To have your resident household record reviewed and approved, submit your household registration first.
+                After that, you can see the pending or approved status here.
+              </p>
+
+              <div className="mt-5 rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
+                <p className="font-semibold text-slate-900">What happens next?</p>
+                <div className="mt-3 grid gap-2">
+                  <div className="flex items-center gap-2">
+                    <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+                    Fill out household and address details.
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Clock3 className="h-4 w-4 text-amber-500" />
+                    Wait for admin review and approval.
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Bell className="h-4 w-4 text-cyan-800" />
+                    Track updates from your resident portal.
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+                <button
+                  type="button"
+                  onClick={() => setShowRegistrationPrompt(false)}
+                  className="inline-flex h-11 items-center justify-center rounded-full border border-slate-300 bg-white px-5 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50"
+                >
+                  Later
+                </button>
+                <Link
+                  href="/households/register"
+                  className="inline-flex h-11 items-center justify-center gap-2 rounded-full bg-cyan-950 px-5 text-sm font-semibold text-white shadow-sm transition hover:bg-cyan-900"
+                >
+                  Register Now
+                  <ArrowRight className="h-4 w-4" />
+                </Link>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </ResidentShell>
   );
 }

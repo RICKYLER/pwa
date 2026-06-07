@@ -3,7 +3,7 @@
 import Image from 'next/image';
 import { useEffect, useState } from 'react';
 import QRCode from 'qrcode';
-import { CheckCircle2, Loader2, PackageCheck, QrCode } from 'lucide-react';
+import { CheckCircle2, Download, Loader2, PackageCheck, QrCode } from 'lucide-react';
 
 type DistributionQrPayload = {
   deepLink: string;
@@ -33,6 +33,17 @@ function formatClaimedAt(value?: Date) {
     dateStyle: 'medium',
     timeStyle: 'short',
   }).format(value);
+}
+
+function toQrDownloadFileName(householdName: string) {
+  const safeName = householdName
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    || 'household';
+
+  return `${safeName}-distribution-qr.png`;
 }
 
 export default function DistributionNotificationQr({
@@ -169,36 +180,57 @@ export default function DistributionNotificationQr({
   const matchedNames = qrPayload.matchedResidentNames.length > 0
     ? qrPayload.matchedResidentNames.join(', ')
     : householdHeadName;
+  const downloadFileName = toQrDownloadFileName(qrPayload.householdName);
 
   return (
-    <div className="mt-4 rounded-[24px] border border-emerald-200 bg-emerald-50/80 p-4">
-      <div className="flex flex-wrap items-start gap-4">
-        <Image
-          src={qrImageUrl}
-          alt={`Distribution QR code for ${qrPayload.householdName}`}
-          width={160}
-          height={160}
-          className="h-40 w-40 rounded-2xl border border-emerald-100 bg-white p-2"
-          unoptimized
-        />
+    <div className="mt-4 overflow-hidden rounded-[24px] border border-emerald-200 bg-emerald-50/80 p-4 sm:p-5">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
+        <div className="flex justify-center sm:block">
+          <Image
+            src={qrImageUrl}
+            alt={`Distribution QR code for ${qrPayload.householdName}`}
+            width={192}
+            height={192}
+            className="h-48 w-48 rounded-2xl border border-emerald-100 bg-white p-2 shadow-sm sm:h-40 sm:w-40"
+            unoptimized
+          />
+        </div>
 
         <div className="min-w-0 flex-1">
-          <div className="inline-flex items-center gap-2 rounded-full bg-white px-3 py-1 text-xs font-semibold text-emerald-700">
-            <QrCode className="h-3.5 w-3.5" />
-            Household QR Ready
+          <div className="grid gap-2 sm:flex sm:flex-wrap sm:items-center">
+            <div className="inline-flex min-h-10 items-center justify-center gap-2 rounded-full bg-white px-3 py-1 text-center text-xs font-semibold text-emerald-700 shadow-sm sm:justify-start">
+              <QrCode className="h-3.5 w-3.5 flex-shrink-0" />
+              Household QR Ready
+            </div>
+            <a
+              href={qrImageUrl}
+              download={downloadFileName}
+              className="inline-flex min-h-10 items-center justify-center gap-2 rounded-full border border-emerald-200 bg-white px-3 py-1 text-center text-xs font-semibold text-emerald-800 shadow-sm transition hover:bg-emerald-50 sm:justify-start"
+              aria-label={`Download QR code for ${qrPayload.householdName}`}
+            >
+              <Download className="h-3.5 w-3.5 flex-shrink-0" />
+              Download QR
+            </a>
           </div>
-          <p className="mt-3 text-sm font-semibold text-slate-900">
-            Present this QR during distribution for your {audienceLabel.toLowerCase()} release.
-          </p>
-          <p className="mt-2 text-sm leading-6 text-slate-700">
-            Household account: {qrPayload.householdName}
-          </p>
-          <p className="mt-1 text-sm leading-6 text-slate-700">
-            Qualified member{qrPayload.matchedResidentNames.length === 1 ? '' : 's'}: {matchedNames}
-          </p>
-          <p className="mt-3 text-xs leading-5 text-emerald-800">
-            This QR is event-specific and becomes invalid after the package is released.
-          </p>
+
+          <div className="mt-4 space-y-2 text-left">
+            <p className="text-sm font-semibold leading-6 text-slate-900">
+              Present this QR during distribution for your {audienceLabel.toLowerCase()} release.
+            </p>
+            <p className="break-words text-sm leading-6 text-slate-700">
+              <span className="font-medium text-slate-900">Household account:</span>{' '}
+              {qrPayload.householdName}
+            </p>
+            <p className="break-words text-sm leading-6 text-slate-700">
+              <span className="font-medium text-slate-900">
+                Qualified member{qrPayload.matchedResidentNames.length === 1 ? '' : 's'}:
+              </span>{' '}
+              {matchedNames}
+            </p>
+            <p className="text-xs leading-5 text-emerald-800">
+              This QR is event-specific and becomes invalid after the package is released.
+            </p>
+          </div>
         </div>
       </div>
     </div>

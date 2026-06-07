@@ -6,6 +6,7 @@ import { requireAuthenticatedUser } from '@/lib/server/auth-guards';
 import { createDistributionQrToken } from '@/lib/server/distribution-qr';
 import { fetchDistributionVulnerabilityFlags } from '@/lib/server/distribution-vulnerability-flags';
 import { requireSupabaseUserId } from '@/lib/server/supabase-user-ids';
+import { resolveAppUrl } from '@/lib/server/app-url';
 import type {
   DistributionEventNotificationPayload,
   Resident,
@@ -15,12 +16,6 @@ export const runtime = 'nodejs';
 
 function badRequest(message: string, status = 400) {
   return NextResponse.json({ error: message }, { status });
-}
-
-function getAppUrl(request: NextRequest) {
-  return process.env.NEXT_PUBLIC_APP_URL
-    || process.env.APP_URL
-    || new URL(request.url).origin;
 }
 
 export async function POST(request: NextRequest) {
@@ -133,7 +128,7 @@ export async function POST(request: NextRequest) {
     householdId: household.id,
     userId: remoteUserId,
   });
-  const deepLink = buildDistributionQrDeepLink(getAppUrl(request), event.id, token);
+  const deepLink = buildDistributionQrDeepLink(resolveAppUrl(request.url), event.id, token);
 
   return NextResponse.json({
     token,

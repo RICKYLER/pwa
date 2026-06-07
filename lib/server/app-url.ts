@@ -24,6 +24,10 @@ function isLocalOrigin(origin: string | null) {
   }
 }
 
+function isNonLocalRequestOrigin(origin: string | null) {
+  return Boolean(origin && !isLocalOrigin(origin));
+}
+
 export function resolveAppUrl(requestUrl?: string) {
   const configuredOrigin = normalizeOrigin(process.env.APP_URL) ?? normalizeOrigin(process.env.NEXT_PUBLIC_APP_URL);
   const requestOrigin = normalizeOrigin(requestUrl);
@@ -38,6 +42,10 @@ export function resolveAppUrl(requestUrl?: string) {
     }
 
     return vercelOrigin ?? requestOrigin ?? configuredOrigin ?? 'http://localhost:3000';
+  }
+
+  if (isLocalOrigin(configuredOrigin) && isNonLocalRequestOrigin(requestOrigin)) {
+    return requestOrigin;
   }
 
   return configuredOrigin ?? requestOrigin ?? vercelOrigin ?? 'http://localhost:3000';

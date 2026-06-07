@@ -12,6 +12,22 @@ npm run dev
 
 Open [http://localhost:3000](http://localhost:3000) in your browser. That's it.
 
+For testing from a phone on the same Wi-Fi network, start the network dev server:
+
+```bash
+npm run dev:network
+```
+
+Then open `http://YOUR_COMPUTER_IP:3000` on your phone, for example `http://192.168.1.25:3000`. On Windows, you can find the IP address with `ipconfig` and use the `IPv4 Address` from your Wi-Fi adapter.
+
+If you need the QR camera scanner or PWA install behavior on mobile, use the HTTPS dev server instead:
+
+```bash
+npm run dev:network:https
+```
+
+Then open `https://YOUR_COMPUTER_IP:3000` on your phone and accept the local development certificate warning if your browser shows one. Mobile browsers require HTTPS or true localhost for camera access; `http://192.168.x.x` can load the app but may block the camera.
+
 The first time you log in, the app automatically seeds itself with sample data — two households, seven residents with varied ages, and pre-calculated vulnerability stats — so you don't have to set anything up manually before you can explore.
 
 ---

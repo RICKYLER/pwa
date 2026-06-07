@@ -141,6 +141,8 @@ const DISTRIBUTION_BOOTSTRAP_TABLES = [
   'distribution_records',
   'inventory_items',
 ] as const;
+const QR_SCAN_MAX_WIDTH = 800;
+type QrFeedbackState = 'idle' | 'scanning' | 'detected' | 'resolving' | 'success' | 'error' | 'claimed';
 
 export default function DistributionDetailPage() {
   const router = useRouter();
@@ -176,7 +178,8 @@ export default function DistributionDetailPage() {
   const [isScanningQr, setIsScanningQr] = useState(false);
   const [isProcessingQr, setIsProcessingQr] = useState(false);
   const [qrStatus, setQrStatus] = useState('');
-  const [qrFeedbackState, setQrFeedbackState] = useState<'idle' | 'scanning' | 'detected' | 'success' | 'error' | 'claimed'>('idle');
+  const [cameraAccessMessage, setCameraAccessMessage] = useState('');
+  const [qrFeedbackState, setQrFeedbackState] = useState<QrFeedbackState>('idle');
   const [lastReleasedRecordId, setLastReleasedRecordId] = useState('');
   const qrScannerSectionRef = useRef<HTMLDivElement | null>(null);
 
@@ -197,6 +200,7 @@ export default function DistributionDetailPage() {
   const qrStreamRef = useRef<MediaStream | null>(null);
   const qrAnimationFrameRef = useRef<number | null>(null);
   const qrFeedbackTimeoutRef = useRef<number | null>(null);
+  const qrScanFrameCountRef = useRef(0);
   const recordsSectionRef = useRef<HTMLDivElement | null>(null);
   const [mapsReady, setMapsReady] = useState(false);
 
@@ -228,6 +232,23 @@ export default function DistributionDetailPage() {
     }, 100);
 
     return () => clearInterval(id);
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    if (window.isSecureContext) {
+      setCameraAccessMessage('');
+      return;
+    }
+
+    const httpsUrl = new URL(window.location.href);
+    httpsUrl.protocol = 'https:';
+    setCameraAccessMessage(
+      `Camera is blocked on this HTTP network page. Start with npm run dev:network:https, then open ${httpsUrl.origin}${httpsUrl.pathname}.`,
+    );
   }, []);
 
   const load = useCallback(async (background = false) => {
@@ -520,12 +541,8 @@ export default function DistributionDetailPage() {
       return `${pendingSyncCount} local change${pendingSyncCount === 1 ? ' is' : 's are'} still waiting to sync. Release totals may refresh again after sync completes.`;
     }
 
-    if (!lastBootstrapAt) {
-      return 'Waiting for the latest Supabase refresh. Audience and stock numbers may still update.';
-    }
-
     return null;
-  }, [lastBootstrapAt, pendingSyncCount]);
+  }, [pendingSyncCount]);
 
   useEffect(() => {
     const defaultReceiver =
@@ -572,10 +589,10 @@ export default function DistributionDetailPage() {
   useEffect(() => stopQrScanner, [stopQrScanner]);
 
   const triggerQrFeedback = useCallback((
-    nextState: 'scanning' | 'detected' | 'success' | 'error' | 'claimed',
+    nextState: Exclude<QrFeedbackState, 'idle'>,
     options?: {
       durationMs?: number;
-      resetTo?: 'scanning' | 'idle' | 'error' | 'claimed';
+      resetTo?: QrFeedbackState;
       vibratePattern?: number | number[];
     },
   ) => {
@@ -708,7 +725,8 @@ export default function DistributionDetailPage() {
 
     isProcessingQrRef.current = true;
     setIsProcessingQr(true);
-    setQrStatus('Validating household QR...');
+    triggerQrFeedback('resolving', { vibratePattern: 50 });
+    setQrStatus('QR detected. Getting claim data...');
     setReleaseError('');
     setReleaseSuccess('');
 
@@ -758,6 +776,7 @@ export default function DistributionDetailPage() {
         throw new Error(errorMessage);
       }
 
+      setQrStatus(`Household confirmed: ${payload.householdName || 'ready for release'}. Releasing package...`);
       const released = await completeRelease({
         householdId: payload.householdId,
         receivedByName: payload.receivedByName || payload.householdName,
@@ -778,7 +797,9 @@ export default function DistributionDetailPage() {
         resetTo: 'idle',
         vibratePattern: [60, 40, 120],
       });
-      stopQrScanner({ resetFeedback: false });
+      window.setTimeout(() => {
+        stopQrScanner({ resetFeedback: false });
+      }, 1600);
 
       if (searchParams.get('qr')) {
         router.replace(`/distribution/${event.id}`);
@@ -814,7 +835,14 @@ export default function DistributionDetailPage() {
     }
 
     if (!window.isSecureContext) {
-      setQrStatus('Camera access requires HTTPS or localhost. Open this page in a secure context, or paste the QR link instead.');
+      const message = cameraAccessMessage
+        || 'Camera access requires HTTPS or localhost. Open this page in a secure context, or paste the QR link instead.';
+      setQrStatus(message);
+      toast({
+        title: 'HTTPS required for camera',
+        description: 'Run npm run dev:network:https, then open this page with https:// on your phone.',
+        variant: 'destructive',
+      });
       return;
     }
 
@@ -826,8 +854,9 @@ export default function DistributionDetailPage() {
           {
             video: {
               facingMode: { ideal: 'environment' },
-              width: { ideal: 1280 },
-              height: { ideal: 720 },
+              width: { ideal: 960 },
+              height: { ideal: 540 },
+              frameRate: { ideal: 30, max: 30 },
             },
             audio: false,
           },
@@ -855,6 +884,7 @@ export default function DistributionDetailPage() {
       const stream = await requestStream();
 
       qrStreamRef.current = stream;
+      qrScanFrameCountRef.current = 0;
       setIsScanningQr(true);
       setQrStatus('Camera ready. Point the QR code inside the frame.');
       setQrFeedbackState('scanning');
@@ -901,15 +931,12 @@ export default function DistributionDetailPage() {
           return;
         }
 
-        canvas.width = video.videoWidth;
-        canvas.height = video.videoHeight;
-        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-
+        qrScanFrameCountRef.current += 1;
         let decodedValue = '';
 
         if (detector) {
           try {
-            const barcodes = await detector.detect(canvas);
+            const barcodes = await detector.detect(video);
             decodedValue = barcodes.find((barcode) => typeof barcode.rawValue === 'string' && barcode.rawValue.trim())?.rawValue?.trim() || '';
           } catch {
             decodedValue = '';
@@ -917,17 +944,25 @@ export default function DistributionDetailPage() {
         }
 
         if (!decodedValue) {
+          const scale = Math.min(1, QR_SCAN_MAX_WIDTH / video.videoWidth);
+          canvas.width = Math.max(1, Math.round(video.videoWidth * scale));
+          canvas.height = Math.max(1, Math.round(video.videoHeight * scale));
+          ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
           const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+          const inversionAttempts = qrScanFrameCountRef.current % 6 === 0
+            ? 'attemptBoth'
+            : 'dontInvert';
           const decoded = jsQR(imageData.data, imageData.width, imageData.height, {
-            inversionAttempts: 'attemptBoth',
+            inversionAttempts,
           });
           decodedValue = decoded?.data?.trim() || '';
         }
 
         if (decodedValue) {
           triggerQrFeedback('detected', {
-            durationMs: 700,
-            resetTo: 'scanning',
+            durationMs: 180,
+            resetTo: 'resolving',
             vibratePattern: 50,
           });
           const success = await processDistributionQr(decodedValue, 'camera');
@@ -951,7 +986,7 @@ export default function DistributionDetailPage() {
             : 'Unable to access the camera for QR scanning.',
       );
     }
-  }, [isProcessingQr, isScanningQr, processDistributionQr, stopQrScanner, triggerQrFeedback]);
+  }, [cameraAccessMessage, isProcessingQr, isScanningQr, processDistributionQr, stopQrScanner, triggerQrFeedback]);
 
   useEffect(() => {
     const qrFromUrl = searchParams.get('qr');
@@ -1103,7 +1138,7 @@ export default function DistributionDetailPage() {
         line: 'bg-rose-300/95',
         badge: 'bg-rose-600/95 text-white',
         label: 'ALREADY CLAIMED',
-      }
+    }
     : qrFeedbackState === 'detected'
       ? {
         shell: 'border-amber-200 bg-amber-400/12',
@@ -1113,6 +1148,15 @@ export default function DistributionDetailPage() {
         badge: 'bg-amber-500/90 text-white',
         label: 'QR DETECTED',
       }
+      : qrFeedbackState === 'resolving'
+        ? {
+          shell: 'border-cyan-200 bg-cyan-400/12',
+          frame: 'border-cyan-200 shadow-[0_0_0_9999px_rgba(2,6,23,0.24)]',
+          corner: 'border-cyan-300',
+          line: 'bg-cyan-200/90',
+          badge: 'bg-cyan-600/95 text-white',
+          label: 'GETTING DATA',
+        }
       : qrFeedbackState === 'error'
         ? {
           shell: 'border-rose-200 bg-rose-400/12',
@@ -1132,6 +1176,7 @@ export default function DistributionDetailPage() {
         };
   const shouldAnimateQrSweep = isScanningQr
     && qrFeedbackState !== 'success'
+    && qrFeedbackState !== 'resolving'
     && qrFeedbackState !== 'error'
     && qrFeedbackState !== 'claimed';
   const releaseDisabled =
@@ -1182,7 +1227,7 @@ export default function DistributionDetailPage() {
   return (
     <div className="min-h-screen bg-slate-50">
       <header className="sticky top-0 z-10 border-b border-slate-200/70 bg-white shadow-sm">
-        <div className="mx-auto flex h-14 max-w-5xl items-center gap-3 px-4 sm:px-6">
+        <div className="mx-auto flex h-14 max-w-7xl items-center gap-3 px-4 sm:px-6">
           <Link
             href="/distribution"
             className="-ml-2 rounded-xl p-2 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700"
@@ -1260,8 +1305,8 @@ export default function DistributionDetailPage() {
         </div>
       </header>
 
-      <main className="mx-auto max-w-5xl space-y-4 px-4 py-5 pb-10 sm:px-6">
-        <div className="space-y-4 rounded-2xl border border-slate-200/60 bg-white p-5 shadow-sm">
+      <main className="mx-auto max-w-7xl space-y-3 px-4 py-3 pb-8 sm:px-6">
+        <div className="space-y-3 rounded-2xl border border-slate-200/60 bg-white p-4 shadow-sm">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
               {isEditing ? (
@@ -1308,8 +1353,8 @@ export default function DistributionDetailPage() {
             </div>
           </div>
 
-          <div className="grid gap-3 sm:grid-cols-2">
-            <div className="flex items-start gap-2 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+          <div className="grid gap-3 lg:grid-cols-2">
+            <div className="flex items-start gap-2 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
               <MapPin className="mt-0.5 h-4 w-4 flex-shrink-0 text-slate-400" />
               <div className="flex-1">
                 <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">
@@ -1329,7 +1374,7 @@ export default function DistributionDetailPage() {
               </div>
             </div>
 
-            <div className="flex items-start gap-2 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+            <div className="flex items-start gap-2 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
               <Truck className="mt-0.5 h-4 w-4 flex-shrink-0 text-slate-400" />
               <div className="flex-1">
                 <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">
@@ -1416,9 +1461,9 @@ export default function DistributionDetailPage() {
           ) : null}
         </div>
 
-        <div className="grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
-          <div className="space-y-4">
-            <div className="space-y-2.5 rounded-2xl border border-slate-200/60 bg-white p-4 shadow-sm">
+        <div className="grid items-start gap-3 lg:grid-cols-[minmax(0,0.95fr)_minmax(430px,1.05fr)]">
+          <div className="space-y-3">
+            <div className="space-y-2 rounded-2xl border border-slate-200/60 bg-white p-3 shadow-sm">
               <div className="flex items-center gap-2">
                 <MapPin className="h-4 w-4 text-emerald-600" />
                 <p className="text-xs font-bold uppercase tracking-wider text-slate-600">
@@ -1442,19 +1487,19 @@ export default function DistributionDetailPage() {
                   }}
                 />
               ) : mapCoords ? (
-                <MapView lat={mapCoords.lat} lng={mapCoords.lng} height={280} />
+                <MapView lat={mapCoords.lat} lng={mapCoords.lng} height={220} />
               ) : (
-                <div className="flex h-[280px] items-center justify-center rounded-xl bg-slate-100">
+                <div className="flex h-[220px] items-center justify-center rounded-xl bg-slate-100">
                   <Loader2 className="h-5 w-5 animate-spin text-slate-400" />
                 </div>
               )}
 
-              <p className="text-center text-[11px] text-slate-400">
+              <p className="truncate text-center text-[11px] text-slate-400">
                 {isEditing ? editLocation || event.location : event.location}
               </p>
             </div>
 
-            <div className="space-y-4 rounded-2xl border border-slate-200/60 bg-white p-5 shadow-sm">
+            <div className="space-y-3 rounded-2xl border border-slate-200/60 bg-white p-4 shadow-sm">
               <div className="flex items-center justify-between gap-3">
                 <div>
                   <p className="text-sm font-bold text-slate-800">Package Items</p>
@@ -1520,54 +1565,54 @@ export default function DistributionDetailPage() {
             </div>
           </div>
 
-          <div className="space-y-4">
-            <div className="grid gap-3 sm:grid-cols-2">
-              <div className="flex items-center gap-3 rounded-2xl border border-slate-200/60 bg-white p-4 shadow-sm">
-                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-50">
-                  <Users className="h-5 w-5 text-emerald-600" />
+          <div className="space-y-3 lg:sticky lg:top-[4.25rem]">
+            <div className="grid gap-2 sm:grid-cols-2">
+              <div className="flex items-center gap-3 rounded-2xl border border-slate-200/60 bg-white p-3 shadow-sm">
+                <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-50">
+                  <Users className="h-4 w-4 text-emerald-600" />
                 </div>
                 <div>
-                  <p className="text-2xl font-bold text-slate-900">{servedSummary.households_served}</p>
+                  <p className="text-xl font-bold text-slate-900">{servedSummary.households_served}</p>
                   <p className="text-xs font-medium text-slate-400">Households Served</p>
                 </div>
               </div>
 
-              <div className="flex items-center gap-3 rounded-2xl border border-slate-200/60 bg-white p-4 shadow-sm">
-                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-50">
-                  <UserRound className="h-5 w-5 text-blue-600" />
+              <div className="flex items-center gap-3 rounded-2xl border border-slate-200/60 bg-white p-3 shadow-sm">
+                <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-blue-50">
+                  <UserRound className="h-4 w-4 text-blue-600" />
                 </div>
                 <div>
-                  <p className="text-2xl font-bold text-slate-900">{servedSummary.residents_served}</p>
+                  <p className="text-xl font-bold text-slate-900">{servedSummary.residents_served}</p>
                   <p className="text-xs font-medium text-slate-400">Residents Served</p>
                 </div>
               </div>
 
-              <div className="flex items-center gap-3 rounded-2xl border border-slate-200/60 bg-white p-4 shadow-sm">
-                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-amber-50">
-                  <Package className="h-5 w-5 text-amber-600" />
+              <div className="flex items-center gap-3 rounded-2xl border border-slate-200/60 bg-white p-3 shadow-sm">
+                <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-amber-50">
+                  <Package className="h-4 w-4 text-amber-600" />
                 </div>
                 <div>
-                  <p className="text-2xl font-bold text-slate-900">{servedSummary.units_released}</p>
+                  <p className="text-xl font-bold text-slate-900">{servedSummary.units_released}</p>
                   <p className="text-xs font-medium text-slate-400">Units Released</p>
                 </div>
               </div>
 
-              <div className="flex items-center gap-3 rounded-2xl border border-slate-200/60 bg-white p-4 shadow-sm">
-                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-violet-50">
-                  <ShieldCheck className="h-5 w-5 text-violet-600" />
+              <div className="flex items-center gap-3 rounded-2xl border border-slate-200/60 bg-white p-3 shadow-sm">
+                <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-violet-50">
+                  <ShieldCheck className="h-4 w-4 text-violet-600" />
                 </div>
                 <div>
-                  <p className="text-2xl font-bold text-slate-900">{inventorySummary.available_packages}</p>
+                  <p className="text-xl font-bold text-slate-900">{inventorySummary.available_packages}</p>
                   <p className="text-xs font-medium text-slate-400">Full Packages Left</p>
                 </div>
               </div>
 
-              <div className="flex items-center gap-3 rounded-2xl border border-slate-200/60 bg-white p-4 shadow-sm sm:col-span-2">
-                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-rose-50">
-                  <ShieldCheck className="h-5 w-5 text-rose-600" />
+              <div className="flex items-center gap-3 rounded-2xl border border-slate-200/60 bg-white p-3 shadow-sm sm:col-span-2">
+                <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-rose-50">
+                  <ShieldCheck className="h-4 w-4 text-rose-600" />
                 </div>
                 <div>
-                  <p className="text-2xl font-bold text-slate-900">{audienceMatchCount}</p>
+                  <p className="text-xl font-bold text-slate-900">{audienceMatchCount}</p>
                   <p className="text-xs font-medium text-slate-400">{audienceMatchLabel}</p>
                   <p className="mt-0.5 text-[11px] text-slate-400">{audienceMatchSupport}</p>
                 </div>
@@ -1577,12 +1622,12 @@ export default function DistributionDetailPage() {
             {isHouseholdRelease ? (
               <div
                 ref={qrScannerSectionRef}
-                className="space-y-4 rounded-2xl border border-cyan-200 bg-cyan-50/70 p-5 shadow-sm"
+                className="space-y-3 rounded-2xl border border-cyan-200 bg-cyan-50/70 p-3 shadow-sm"
               >
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
                     <p className="text-sm font-bold text-slate-900">QR Code Scanner</p>
-                    <p className="mt-0.5 text-xs text-slate-500">
+                    <p className="mt-0.5 max-w-md text-xs text-slate-500">
                       Scan or paste the household QR from the resident notification, then release the package directly.
                     </p>
                   </div>
@@ -1591,7 +1636,7 @@ export default function DistributionDetailPage() {
                       type="button"
                       onClick={isScanningQr ? () => stopQrScanner() : () => { void startQrScanner(); }}
                       disabled={event.status === 'completed' || isProcessingQr}
-                      className="inline-flex items-center gap-2 rounded-xl border border-cyan-200 bg-white px-3 py-2 text-xs font-semibold text-cyan-800 transition hover:bg-cyan-50 disabled:cursor-not-allowed disabled:opacity-60"
+                      className="inline-flex items-center gap-2 rounded-xl border border-cyan-200 bg-white px-3 py-1.5 text-xs font-semibold text-cyan-800 transition hover:bg-cyan-50 disabled:cursor-not-allowed disabled:opacity-60"
                     >
                       {isScanningQr ? (
                         <>
@@ -1608,7 +1653,7 @@ export default function DistributionDetailPage() {
                   </div>
                 </div>
 
-                <div className="flex flex-col gap-3 sm:flex-row">
+                <div className="flex flex-col gap-2 sm:flex-row">
                   <div className="relative flex-1">
                     <QrCode className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                     <input
@@ -1622,14 +1667,14 @@ export default function DistributionDetailPage() {
                         }
                       }}
                       placeholder="Paste the QR link or token here"
-                      className="w-full rounded-xl border border-cyan-100 bg-white py-2.5 pl-10 pr-3 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500/30"
+                      className="w-full rounded-xl border border-cyan-100 bg-white py-2 pl-10 pr-3 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500/30"
                     />
                   </div>
                   <button
                     type="button"
                     onClick={() => { void processDistributionQr(qrInputValue, 'manual'); }}
                     disabled={!qrInputValue.trim() || isProcessingQr || event.status === 'completed'}
-                    className="inline-flex items-center justify-center gap-2 rounded-xl bg-cyan-950 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-cyan-900 disabled:cursor-not-allowed disabled:opacity-60"
+                    className="inline-flex items-center justify-center gap-2 rounded-xl bg-cyan-950 px-4 py-2 text-sm font-semibold text-white transition hover:bg-cyan-900 disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     {isProcessingQr ? (
                       <Loader2 className="h-4 w-4 animate-spin" />
@@ -1640,10 +1685,10 @@ export default function DistributionDetailPage() {
                   </button>
                 </div>
 
-                <div className={`relative overflow-hidden rounded-2xl border bg-slate-950 transition-all duration-300 ${qrFrameTone.shell}`}>
+                <div className={`${isScanningQr ? 'block' : 'hidden'} relative overflow-hidden rounded-2xl border bg-slate-950 transition-all duration-300 ${qrFrameTone.shell}`}>
                   <video
                     ref={qrVideoRef}
-                    className={`aspect-[4/3] w-full object-cover ${isScanningQr ? 'block' : 'hidden'}`}
+                    className="aspect-[4/3] w-full object-cover"
                     muted
                     playsInline
                   />
@@ -1657,6 +1702,22 @@ export default function DistributionDetailPage() {
                         <div className={`qr-scanner-grid absolute inset-3 rounded-[22px] transition-opacity duration-300 ${shouldAnimateQrSweep ? 'opacity-100' : 'opacity-0'}`} />
                         <div className={`absolute inset-x-6 top-1/2 h-px -translate-y-1/2 ${qrFrameTone.line} ${qrFeedbackState === 'scanning' ? 'animate-pulse' : ''}`} />
                         <div className={`qr-scanner-sweep absolute inset-x-5 h-1 rounded-full bg-gradient-to-r from-transparent via-emerald-300 to-transparent transition-opacity duration-300 ${shouldAnimateQrSweep ? 'opacity-100' : 'opacity-0'}`} />
+                        {qrFeedbackState === 'success' ? (
+                          <div className="absolute inset-0 flex flex-col items-center justify-center rounded-[24px] bg-emerald-500/20 text-white backdrop-blur-sm">
+                            <div className="flex h-20 w-20 items-center justify-center rounded-full border-4 border-white bg-emerald-500 shadow-lg shadow-emerald-950/30">
+                              <CheckCircle2 className="h-11 w-11" />
+                            </div>
+                            <p className="mt-3 text-sm font-bold tracking-wide">QR Verified</p>
+                          </div>
+                        ) : null}
+                        {qrFeedbackState === 'resolving' ? (
+                          <div className="absolute inset-0 flex flex-col items-center justify-center rounded-[24px] bg-cyan-950/35 text-white backdrop-blur-sm">
+                            <div className="flex h-16 w-16 items-center justify-center rounded-full border-2 border-white/80 bg-cyan-500/90 shadow-lg shadow-cyan-950/30">
+                              <Loader2 className="h-8 w-8 animate-spin" />
+                            </div>
+                            <p className="mt-3 text-sm font-bold tracking-wide">Getting claim data</p>
+                          </div>
+                        ) : null}
                         <div className="absolute inset-x-0 -bottom-12 flex justify-center">
                           <span className={`rounded-full px-3 py-1 text-[11px] font-semibold tracking-[0.18em] backdrop-blur-sm ${qrFrameTone.badge}`}>
                             {qrFrameTone.label}
@@ -1665,27 +1726,22 @@ export default function DistributionDetailPage() {
                       </div>
                     </div>
                   ) : null}
-                  {!isScanningQr ? (
-                    <div className="border border-dashed border-cyan-200 bg-white/80 px-4 py-4 text-sm text-slate-600">
-                      Camera preview appears here after you click <span className="font-semibold text-slate-900">Open Camera</span>.
-                    </div>
-                  ) : null}
                 </div>
                 <canvas ref={qrCanvasRef} className="hidden" />
 
                 {qrStatus ? (
-                  <div className="rounded-xl border border-cyan-200 bg-white px-3 py-3 text-sm text-cyan-900">
+                  <div className="rounded-xl border border-cyan-200 bg-white px-3 py-2 text-sm text-cyan-900">
                     {qrStatus}
                   </div>
                 ) : null}
               </div>
             ) : null}
 
-            <div className="space-y-4 rounded-2xl border border-slate-200/60 bg-white p-5 shadow-sm">
+            <div className="space-y-3 rounded-2xl border border-slate-200/60 bg-white p-4 shadow-sm">
               <div className="flex items-center justify-between gap-3">
                 <div>
                   <p className="text-sm font-bold text-slate-800">Distribution Proper</p>
-                  <p className="mt-0.5 text-xs text-slate-400">
+                  <p className="mt-0.5 max-w-md text-xs text-slate-400">
                     Search the target, confirm the receiver, then release the configured package.
                   </p>
                 </div>
@@ -1723,11 +1779,11 @@ export default function DistributionDetailPage() {
                       ? 'Search head name, purok, or address'
                       : 'Search resident, relationship, or household'
                   }
-                  className="w-full rounded-xl border border-slate-200 bg-slate-50 py-2.5 pl-10 pr-3 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/30"
+                  className="w-full rounded-xl border border-slate-200 bg-slate-50 py-2 pl-10 pr-3 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/30"
                 />
               </div>
 
-              <div className="max-h-72 space-y-2 overflow-y-auto pr-1">
+              <div className="max-h-48 space-y-2 overflow-y-auto pr-1">
                 {event.target_scope === 'household'
                   ? filteredHouseholds.map((household) => {
                       const matchedResidents = matchedResidentsByHouseholdId.get(household.id) ?? [];
@@ -1739,7 +1795,7 @@ export default function DistributionDetailPage() {
                           key={household.id}
                           type="button"
                           onClick={() => setSelectedHouseholdId(household.id)}
-                          className={`w-full rounded-2xl border px-4 py-3 text-left transition-all ${
+                          className={`w-full rounded-2xl border px-3 py-2.5 text-left transition-all ${
                             selected
                               ? 'border-emerald-300 bg-emerald-50 shadow-sm'
                               : 'border-slate-200 bg-slate-50 hover:border-slate-300'
@@ -1788,7 +1844,7 @@ export default function DistributionDetailPage() {
                           key={resident.id}
                           type="button"
                           onClick={() => setSelectedResidentId(resident.id)}
-                          className={`w-full rounded-2xl border px-4 py-3 text-left transition-all ${
+                          className={`w-full rounded-2xl border px-3 py-2.5 text-left transition-all ${
                             selected
                               ? 'border-emerald-300 bg-emerald-50 shadow-sm'
                               : 'border-slate-200 bg-slate-50 hover:border-slate-300'
@@ -1822,7 +1878,7 @@ export default function DistributionDetailPage() {
               </div>
 
               {event.target_scope === 'household' && selectedHousehold ? (
-                <div className="space-y-3 rounded-2xl border border-emerald-200 bg-emerald-50/60 p-4">
+                <div className="space-y-3 rounded-2xl border border-emerald-200 bg-emerald-50/60 p-3">
                   <div className="flex items-start justify-between gap-3">
                     <div>
                       <p className="text-sm font-bold text-slate-900">{selectedHousehold.head_name}</p>
@@ -1853,7 +1909,7 @@ export default function DistributionDetailPage() {
                         type="text"
                         value={receivedByName}
                         onChange={(e) => setReceivedByName(e.target.value)}
-                        className="w-full rounded-xl border border-emerald-100 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/30"
+                        className="w-full rounded-xl border border-emerald-100 bg-white px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/30"
                       />
                     </div>
                     <div>
@@ -1865,7 +1921,7 @@ export default function DistributionDetailPage() {
                         value={releaseNotes}
                         onChange={(e) => setReleaseNotes(e.target.value)}
                         placeholder="Optional notes"
-                        className="w-full rounded-xl border border-emerald-100 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/30"
+                        className="w-full rounded-xl border border-emerald-100 bg-white px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/30"
                       />
                     </div>
                   </div>
@@ -1873,7 +1929,7 @@ export default function DistributionDetailPage() {
               ) : null}
 
               {event.target_scope === 'resident' && selectedResident ? (
-                <div className="space-y-3 rounded-2xl border border-emerald-200 bg-emerald-50/60 p-4">
+                <div className="space-y-3 rounded-2xl border border-emerald-200 bg-emerald-50/60 p-3">
                   <div className="flex items-start justify-between gap-3">
                     <div>
                       <p className="text-sm font-bold text-slate-900">{selectedResident.full_name}</p>
@@ -1901,7 +1957,7 @@ export default function DistributionDetailPage() {
                         type="text"
                         value={receivedByName}
                         onChange={(e) => setReceivedByName(e.target.value)}
-                        className="w-full rounded-xl border border-emerald-100 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/30"
+                        className="w-full rounded-xl border border-emerald-100 bg-white px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/30"
                       />
                     </div>
                     <div>
@@ -1913,7 +1969,7 @@ export default function DistributionDetailPage() {
                         value={releaseNotes}
                         onChange={(e) => setReleaseNotes(e.target.value)}
                         placeholder="Optional notes"
-                        className="w-full rounded-xl border border-emerald-100 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/30"
+                        className="w-full rounded-xl border border-emerald-100 bg-white px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/30"
                       />
                     </div>
                   </div>
@@ -1921,7 +1977,7 @@ export default function DistributionDetailPage() {
               ) : null}
 
               {selectionPreview ? (
-                <div className="space-y-3 rounded-2xl border border-slate-200 bg-slate-50/90 p-4">
+                <div className="space-y-2 rounded-2xl border border-slate-200 bg-slate-50/90 p-3">
                   <div className="flex items-start justify-between gap-3">
                     <div>
                       <p className="text-xs font-bold uppercase tracking-wider text-slate-500">
@@ -1940,11 +1996,11 @@ export default function DistributionDetailPage() {
                   </div>
 
                   {selectionPreview.qualification ? (
-                    <div className="rounded-xl border border-emerald-100 bg-white px-3 py-3 text-sm text-slate-700">
+                    <div className="rounded-xl border border-emerald-100 bg-white px-3 py-2 text-sm text-slate-700">
                       <p className="text-[11px] font-semibold uppercase tracking-wide text-emerald-700">
                         Why this target qualifies
                       </p>
-                      <p className="mt-1 leading-6">{selectionPreview.qualification}</p>
+                      <p className="mt-1 leading-5">{selectionPreview.qualification}</p>
                     </div>
                   ) : null}
 
@@ -1973,7 +2029,7 @@ export default function DistributionDetailPage() {
                     {selectionPreview.packagePreview.map((line) => (
                       <div
                         key={line.item_id}
-                        className="flex items-start justify-between gap-3 rounded-xl border border-slate-200 bg-white px-3 py-3"
+                        className="flex items-start justify-between gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2"
                       >
                         <div>
                           <p className="text-sm font-semibold text-slate-900">{line.item_name}</p>
@@ -1983,10 +2039,11 @@ export default function DistributionDetailPage() {
                         </div>
                         <div className="text-right">
                           <p className={`text-sm font-bold ${line.is_blocking ? 'text-rose-600' : 'text-emerald-600'}`}>
-                            {line.stock_after_release} {line.unit}
+                            {line.current_stock} {line.unit}
                           </p>
                           <p className="text-[11px] text-slate-400">
-                            after release · {line.packages_left_after_release} package
+                            after release: {line.stock_after_release} {line.unit} ·{' '}
+                            {line.packages_left_after_release} package
                             {line.packages_left_after_release === 1 ? '' : 's'} left
                           </p>
                         </div>
@@ -2042,7 +2099,7 @@ export default function DistributionDetailPage() {
                 type="button"
                 onClick={handleRelease}
                 disabled={releaseDisabled || isReleasing}
-                className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-600 px-4 py-3 text-sm font-bold text-white shadow-lg shadow-emerald-500/20 transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
+                className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-600 px-4 py-2.5 text-sm font-bold text-white shadow-lg shadow-emerald-500/20 transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {isReleasing ? (
                   <>

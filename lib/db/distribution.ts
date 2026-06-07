@@ -1,6 +1,7 @@
 import { db, STORE_NAMES } from './indexeddb';
 import { runServerMutation } from '@/lib/mutations';
 import { bootstrapCurrentPathData } from '@/lib/supabase/route-bootstrap';
+import { mapSupabaseRow } from '@/lib/supabase/row-mapper';
 import {
   coerceDistributionTargetScope,
   resolveDistributionAudienceMatches,
@@ -27,6 +28,13 @@ import type {
   Resident,
   VulnerabilityFlags,
 } from './schema';
+
+type ReleaseDistributionMutationPayload = {
+  distribution_record?: Record<string, unknown>;
+  distribution_record_id?: string;
+  inventory_items?: Array<Record<string, unknown>>;
+  inventory_movements?: Array<Record<string, unknown>>;
+};
 
 export type DistributionAudienceContext = {
   households: Household[];
@@ -133,6 +141,33 @@ function normalizeDistributionRecord(record: DistributionRecord): DistributionRe
     items_distributed: normalizeDistributedItems(record.items_distributed),
     timestamp: record.timestamp instanceof Date ? record.timestamp : new Date(record.timestamp),
   };
+}
+
+async function hydrateReleaseMutationPayload(payload: ReleaseDistributionMutationPayload) {
+  if (payload.distribution_record && typeof payload.distribution_record === 'object') {
+    await db.put(
+      STORE_NAMES.distribution_records,
+      mapSupabaseRow('distribution_records', payload.distribution_record),
+    );
+  }
+
+  await Promise.all(
+    (payload.inventory_items ?? [])
+      .filter((row): row is Record<string, unknown> => Boolean(row && typeof row === 'object'))
+      .map((row) => db.put(
+        STORE_NAMES.inventory_items,
+        mapSupabaseRow('inventory_items', row),
+      )),
+  );
+
+  await Promise.all(
+    (payload.inventory_movements ?? [])
+      .filter((row): row is Record<string, unknown> => Boolean(row && typeof row === 'object'))
+      .map((row) => db.put(
+        STORE_NAMES.inventory_movements,
+        mapSupabaseRow('inventory_movements', row),
+      )),
+  );
 }
 
 function countDistributedUnits(items: DistributedItem[]): number {
@@ -671,7 +706,7 @@ export async function releaseDistributionPackage(params: {
     throw new Error(releasePreview.errors[0]);
   }
 
-  await runServerMutation({
+  const payload = await runServerMutation<ReleaseDistributionMutationPayload>({
     action: 'release_distribution_package',
     params: {
       event_id: event.id,
@@ -682,10 +717,17 @@ export async function releaseDistributionPackage(params: {
     },
   });
 
-  await bootstrapCurrentPathData(true);
+  await hydrateReleaseMutationPayload(payload);
+  void bootstrapCurrentPathData(true).catch((error) => {
+    console.warn('Failed to refresh distribution data after release:', error);
+  });
 
-  const records = await getDistributionRecords(event.id);
-  const latestRecord = records.find((record) =>
+  const hydratedRecord = payload.distribution_record
+    ? normalizeDistributionRecord(mapSupabaseRow('distribution_records', payload.distribution_record) as DistributionRecord)
+    : null;
+  const latestRecord = hydratedRecord ?? (
+    await getDistributionRecords(event.id)
+  ).find((record) =>
     event.target_scope === 'household'
       ? record.household_id === params.household_id
       : record.resident_id === params.resident_id,
