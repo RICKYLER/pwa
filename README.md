@@ -311,15 +311,7 @@ npm install
 npm run dev
 ```
 
-Open `http://localhost:3000` after the dev server starts.
 
-### Default Admin Credentials
-
-| Role | Email | Password |
-|------|-------|----------|
-| Admin | `MSWDOOO2017@gmail.com` | `mswdoooadmin123` |
-
-The local fallback auth store seeds this admin account automatically when the auth store file is created for the first time.
 
 ---
 
