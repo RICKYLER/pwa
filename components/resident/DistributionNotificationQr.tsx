@@ -4,6 +4,7 @@ import Image from 'next/image';
 import { useEffect, useState } from 'react';
 import QRCode from 'qrcode';
 import { CheckCircle2, Download, Loader2, PackageCheck, QrCode } from 'lucide-react';
+import { extractDistributionQrToken } from '@/lib/distribution-qr';
 
 type DistributionQrPayload = {
   deepLink: string;
@@ -23,6 +24,13 @@ type DistributionNotificationQrProps = {
   matchedResidentNames: string[];
   claimedRelease?: ClaimedRelease | null;
 };
+
+const QR_LOGO_SRC = '/dswd-logo.png';
+const QR_IMAGE_SIZE = 1024;
+const QR_LOGO_BACKING_RATIO = 0.155;
+const QR_LOGO_RATIO = 0.095;
+const QR_POSTER_WIDTH = 1200;
+const QR_POSTER_HEIGHT = 1600;
 
 function formatClaimedAt(value?: Date) {
   if (!value) {
@@ -46,6 +54,244 @@ function toQrDownloadFileName(householdName: string) {
   return `${safeName}-distribution-qr.png`;
 }
 
+function loadQrLogo() {
+  return new Promise<HTMLImageElement>((resolve, reject) => {
+    const image = new window.Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error('Unable to load the QR logo.'));
+    image.src = QR_LOGO_SRC;
+  });
+}
+
+function fillRoundedRect(
+  context: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  radius: number,
+) {
+  context.beginPath();
+  context.moveTo(x + radius, y);
+  context.lineTo(x + width - radius, y);
+  context.quadraticCurveTo(x + width, y, x + width, y + radius);
+  context.lineTo(x + width, y + height - radius);
+  context.quadraticCurveTo(x + width, y + height, x + width - radius, y + height);
+  context.lineTo(x + radius, y + height);
+  context.quadraticCurveTo(x, y + height, x, y + height - radius);
+  context.lineTo(x, y + radius);
+  context.quadraticCurveTo(x, y, x + radius, y);
+  context.closePath();
+  context.fill();
+}
+
+function drawWrappedText(
+  context: CanvasRenderingContext2D,
+  text: string,
+  x: number,
+  y: number,
+  maxWidth: number,
+  lineHeight: number,
+  maxLines = 2,
+) {
+  const words = text.split(/\s+/).filter(Boolean);
+  const lines: string[] = [];
+  let currentLine = '';
+
+  for (const word of words) {
+    const nextLine = currentLine ? `${currentLine} ${word}` : word;
+    if (context.measureText(nextLine).width <= maxWidth) {
+      currentLine = nextLine;
+      continue;
+    }
+
+    if (currentLine) {
+      lines.push(currentLine);
+    }
+    currentLine = word;
+
+    if (lines.length === maxLines) {
+      break;
+    }
+  }
+
+  if (currentLine && lines.length < maxLines) {
+    lines.push(currentLine);
+  }
+
+  lines.forEach((line, index) => {
+    context.fillText(line, x, y + (index * lineHeight));
+  });
+}
+
+async function createBrandedQrCanvas(value: string) {
+  const canvas = document.createElement('canvas');
+  await QRCode.toCanvas(canvas, value, {
+    errorCorrectionLevel: 'H',
+    width: QR_IMAGE_SIZE,
+    margin: 4,
+    color: {
+      dark: '#000000',
+      light: '#ffffff',
+    },
+  });
+
+  const context = canvas.getContext('2d');
+  if (!context) {
+    return {
+      qrCanvas: canvas,
+      displayUrl: canvas.toDataURL('image/png'),
+    };
+  }
+
+  const logo = await loadQrLogo();
+  const backingSize = Math.round(QR_IMAGE_SIZE * QR_LOGO_BACKING_RATIO);
+  const backingX = Math.round((QR_IMAGE_SIZE - backingSize) / 2);
+  const backingY = backingX;
+  const logoSize = Math.round(QR_IMAGE_SIZE * QR_LOGO_RATIO);
+  const logoX = Math.round((QR_IMAGE_SIZE - logoSize) / 2);
+  const logoY = logoX;
+
+  context.save();
+  context.shadowColor = 'rgba(15, 118, 110, 0.14)';
+  context.shadowBlur = 18;
+  context.shadowOffsetY = 6;
+  context.fillStyle = '#ffffff';
+  fillRoundedRect(
+    context,
+    backingX,
+    backingY,
+    backingSize,
+    backingSize,
+    Math.round(backingSize * 0.22),
+  );
+  context.restore();
+
+  context.strokeStyle = '#bbf7d0';
+  context.lineWidth = 4;
+  fillRoundedRect(
+    context,
+    backingX,
+    backingY,
+    backingSize,
+    backingSize,
+    Math.round(backingSize * 0.22),
+  );
+  context.stroke();
+  context.drawImage(logo, logoX, logoY, logoSize, logoSize);
+
+  const outputPadding = 24;
+  const outputSize = QR_IMAGE_SIZE + (outputPadding * 2);
+  const outputCanvas = document.createElement('canvas');
+  outputCanvas.width = outputSize;
+  outputCanvas.height = outputSize;
+  const outputContext = outputCanvas.getContext('2d');
+
+  if (!outputContext) {
+    return {
+      qrCanvas: canvas,
+      displayUrl: canvas.toDataURL('image/png'),
+    };
+  }
+
+  outputContext.drawImage(canvas, outputPadding, outputPadding);
+
+  return {
+    qrCanvas: canvas,
+    displayUrl: outputCanvas.toDataURL('image/png'),
+  };
+}
+
+async function createQrDownloadPosterDataUrl(input: {
+  qrCanvas: HTMLCanvasElement;
+  householdName: string;
+  audienceLabel: string;
+  matchedNames: string;
+}) {
+  const logo = await loadQrLogo();
+  const poster = document.createElement('canvas');
+  poster.width = QR_POSTER_WIDTH;
+  poster.height = QR_POSTER_HEIGHT;
+  const context = poster.getContext('2d');
+
+  if (!context) {
+    return input.qrCanvas.toDataURL('image/png');
+  }
+
+  context.fillStyle = '#ecfdf5';
+  context.fillRect(0, 0, QR_POSTER_WIDTH, QR_POSTER_HEIGHT);
+
+  context.fillStyle = '#ffffff';
+  fillRoundedRect(context, 56, 56, QR_POSTER_WIDTH - 112, QR_POSTER_HEIGHT - 112, 44);
+  context.strokeStyle = '#a7f3d0';
+  context.lineWidth = 4;
+  context.stroke();
+
+  context.drawImage(logo, 96, 88, 88, 88);
+  context.fillStyle = '#064e3b';
+  context.font = '700 44px Arial, sans-serif';
+  context.fillText('MSWDO Relief Distribution QR', 218, 114);
+  context.fillStyle = '#0f766e';
+  context.font = '600 24px Arial, sans-serif';
+  context.fillText(`Present this code for ${input.audienceLabel.toLowerCase()} release`, 220, 154);
+
+  context.save();
+  context.shadowColor = 'rgba(15, 118, 110, 0.16)';
+  context.shadowBlur = 30;
+  context.shadowOffsetY = 12;
+  context.fillStyle = '#ffffff';
+  fillRoundedRect(context, 80, 230, QR_POSTER_WIDTH - 160, 1040, 36);
+  context.restore();
+  context.strokeStyle = '#bbf7d0';
+  context.lineWidth = 4;
+  fillRoundedRect(context, 80, 230, QR_POSTER_WIDTH - 160, 1040, 36);
+  context.stroke();
+  context.drawImage(input.qrCanvas, 120, 270, 960, 960);
+
+  context.fillStyle = '#f0fdfa';
+  fillRoundedRect(context, 80, 1320, QR_POSTER_WIDTH - 160, 220, 30);
+  context.strokeStyle = '#99f6e4';
+  context.lineWidth = 3;
+  context.stroke();
+
+  context.fillStyle = '#064e3b';
+  context.font = '700 28px Arial, sans-serif';
+  context.fillText('Household Account', 120, 1376);
+  context.font = '600 30px Arial, sans-serif';
+  drawWrappedText(context, input.householdName, 120, 1418, 960, 38, 2);
+
+  context.fillStyle = '#115e59';
+  context.font = '600 22px Arial, sans-serif';
+  drawWrappedText(
+    context,
+    `Qualified members: ${input.matchedNames}`,
+    120,
+    1496,
+    960,
+    30,
+    2,
+  );
+
+  return poster.toDataURL('image/png');
+}
+
+async function createQrImageUrls(input: {
+  value: string;
+  householdName: string;
+  audienceLabel: string;
+  matchedNames: string;
+}) {
+  const { qrCanvas, displayUrl } = await createBrandedQrCanvas(input.value);
+  const downloadUrl = await createQrDownloadPosterDataUrl({
+    qrCanvas,
+    householdName: input.householdName,
+    audienceLabel: input.audienceLabel,
+    matchedNames: input.matchedNames,
+  });
+
+  return { displayUrl, downloadUrl };
+}
+
 export default function DistributionNotificationQr({
   eventId,
   householdHeadName,
@@ -55,12 +301,14 @@ export default function DistributionNotificationQr({
 }: DistributionNotificationQrProps) {
   const [qrPayload, setQrPayload] = useState<DistributionQrPayload | null>(null);
   const [qrImageUrl, setQrImageUrl] = useState('');
+  const [qrDownloadUrl, setQrDownloadUrl] = useState('');
   const [error, setError] = useState('');
 
   useEffect(() => {
     if (claimedRelease) {
       setQrPayload(null);
       setQrImageUrl('');
+      setQrDownloadUrl('');
       setError('');
       return;
     }
@@ -92,24 +340,29 @@ export default function DistributionNotificationQr({
           throw new Error(payload?.error || 'Unable to prepare your household QR code.');
         }
 
-        const imageUrl = await QRCode.toDataURL(payload.deepLink, {
-          width: 240,
-          margin: 1,
-          color: {
-            dark: '#0f172a',
-            light: '#ffffff',
-          },
+        const qrCodeValue = extractDistributionQrToken(payload.deepLink)?.token || payload.deepLink;
+        const nextHouseholdName = payload.householdName || householdHeadName;
+        const nextMatchedResidentNames = Array.isArray(payload.matchedResidentNames)
+          ? payload.matchedResidentNames
+          : matchedResidentNames;
+        const nextMatchedNames = nextMatchedResidentNames.length > 0
+          ? nextMatchedResidentNames.join(', ')
+          : householdHeadName;
+        const qrUrls = await createQrImageUrls({
+          value: qrCodeValue,
+          householdName: nextHouseholdName,
+          audienceLabel,
+          matchedNames: nextMatchedNames,
         });
 
         if (!cancelled) {
           setQrPayload({
             deepLink: payload.deepLink,
-            householdName: payload.householdName || householdHeadName,
-            matchedResidentNames: Array.isArray(payload.matchedResidentNames)
-              ? payload.matchedResidentNames
-              : matchedResidentNames,
+            householdName: nextHouseholdName,
+            matchedResidentNames: nextMatchedResidentNames,
           });
-          setQrImageUrl(imageUrl);
+          setQrImageUrl(qrUrls.displayUrl);
+          setQrDownloadUrl(qrUrls.downloadUrl);
         }
       } catch (loadError) {
         if (!cancelled) {
@@ -168,7 +421,7 @@ export default function DistributionNotificationQr({
     );
   }
 
-  if (!qrPayload || !qrImageUrl) {
+  if (!qrPayload || !qrImageUrl || !qrDownloadUrl) {
     return (
       <div className="mt-4 flex items-center gap-3 rounded-[22px] border border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-600">
         <Loader2 className="h-4 w-4 animate-spin text-slate-400" />
@@ -203,7 +456,7 @@ export default function DistributionNotificationQr({
               Household QR Ready
             </div>
             <a
-              href={qrImageUrl}
+              href={qrDownloadUrl}
               download={downloadFileName}
               className="inline-flex min-h-10 items-center justify-center gap-2 rounded-full border border-emerald-200 bg-white px-3 py-1 text-center text-xs font-semibold text-emerald-800 shadow-sm transition hover:bg-emerald-50 sm:justify-start"
               aria-label={`Download QR code for ${qrPayload.householdName}`}

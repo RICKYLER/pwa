@@ -141,7 +141,8 @@ const DISTRIBUTION_BOOTSTRAP_TABLES = [
   'distribution_records',
   'inventory_items',
 ] as const;
-const QR_SCAN_MAX_WIDTH = 800;
+const QR_SCAN_MAX_WIDTH = 1280;
+const QR_SCAN_CENTER_CROP_RATIO = 0.72;
 type QrFeedbackState = 'idle' | 'scanning' | 'detected' | 'resolving' | 'success' | 'error' | 'claimed';
 
 export default function DistributionDetailPage() {
@@ -854,8 +855,17 @@ export default function DistributionDetailPage() {
           {
             video: {
               facingMode: { ideal: 'environment' },
-              width: { ideal: 960 },
-              height: { ideal: 540 },
+              width: { ideal: 1920 },
+              height: { ideal: 1080 },
+              frameRate: { ideal: 30, max: 30 },
+            },
+            audio: false,
+          },
+          {
+            video: {
+              facingMode: { ideal: 'environment' },
+              width: { ideal: 1280 },
+              height: { ideal: 720 },
               frameRate: { ideal: 30, max: 30 },
             },
             audio: false,
@@ -910,6 +920,41 @@ export default function DistributionDetailPage() {
         return;
       }
 
+      const decodeVideoFrame = (cropRatio?: number) => {
+        const sourceWidth = video.videoWidth;
+        const sourceHeight = video.videoHeight;
+        const shouldCrop = Boolean(cropRatio && cropRatio > 0 && cropRatio < 1);
+        const cropWidth = shouldCrop ? Math.round(sourceWidth * cropRatio!) : sourceWidth;
+        const cropHeight = shouldCrop ? Math.round(sourceHeight * cropRatio!) : sourceHeight;
+        const sourceX = shouldCrop ? Math.round((sourceWidth - cropWidth) / 2) : 0;
+        const sourceY = shouldCrop ? Math.round((sourceHeight - cropHeight) / 2) : 0;
+        const scale = Math.min(1, QR_SCAN_MAX_WIDTH / cropWidth);
+
+        canvas.width = Math.max(1, Math.round(cropWidth * scale));
+        canvas.height = Math.max(1, Math.round(cropHeight * scale));
+        ctx.drawImage(
+          video,
+          sourceX,
+          sourceY,
+          cropWidth,
+          cropHeight,
+          0,
+          0,
+          canvas.width,
+          canvas.height,
+        );
+
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const inversionAttempts = qrScanFrameCountRef.current % 3 === 0
+          ? 'attemptBoth'
+          : 'dontInvert';
+        const decoded = jsQR(imageData.data, imageData.width, imageData.height, {
+          inversionAttempts,
+        });
+
+        return decoded?.data?.trim() || '';
+      };
+
       const BarcodeDetectorCtor = (
         window as typeof window & {
           BarcodeDetector?: new (options?: { formats?: string[] }) => {
@@ -944,19 +989,7 @@ export default function DistributionDetailPage() {
         }
 
         if (!decodedValue) {
-          const scale = Math.min(1, QR_SCAN_MAX_WIDTH / video.videoWidth);
-          canvas.width = Math.max(1, Math.round(video.videoWidth * scale));
-          canvas.height = Math.max(1, Math.round(video.videoHeight * scale));
-          ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-
-          const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-          const inversionAttempts = qrScanFrameCountRef.current % 6 === 0
-            ? 'attemptBoth'
-            : 'dontInvert';
-          const decoded = jsQR(imageData.data, imageData.width, imageData.height, {
-            inversionAttempts,
-          });
-          decodedValue = decoded?.data?.trim() || '';
+          decodedValue = decodeVideoFrame(QR_SCAN_CENTER_CROP_RATIO) || decodeVideoFrame();
         }
 
         if (decodedValue) {
