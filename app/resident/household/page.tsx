@@ -206,7 +206,10 @@ export default function ResidentHouseholdPage() {
 
   const loadData = useCallback(async (currentUser: NonNullable<typeof user>) => {
     const [households, inboxItems] = await Promise.all([
-      getHouseholds({ applicant_user_id: currentUser.id }),
+      getHouseholds({
+        applicant_user_id: currentUser.id,
+        applicant_email: currentUser.email,
+      }),
       getUserNotifications(),
     ]);
     const activeHousehold = resolveResidentActiveApprovedHousehold(households);

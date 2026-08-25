@@ -142,6 +142,7 @@ export async function getHouseholds(filters?: {
   barangay_id?: string;
   registration_status?: HouseholdRegistrationStatus | 'all';
   applicant_user_id?: string;
+  applicant_email?: string;
   hazard?: HazardType | 'all';
   disaster_risk_level?: DisasterRiskLevel | 'all';
 }): Promise<Household[]> {
@@ -154,8 +155,12 @@ export async function getHouseholds(filters?: {
       filtered = filtered.filter(h => h.barangay_id === filters.barangay_id);
     }
 
-    if (filters?.applicant_user_id) {
-      filtered = filtered.filter((household) => household.applicant_user_id === filters.applicant_user_id);
+    if (filters?.applicant_user_id || filters?.applicant_email) {
+      filtered = filtered.filter((household) => {
+        const matchesId = filters.applicant_user_id && household.applicant_user_id === filters.applicant_user_id;
+        const matchesEmail = filters.applicant_email && household.applicant_email?.toLowerCase() === filters.applicant_email.toLowerCase();
+        return Boolean(matchesId || matchesEmail);
+      });
     }
 
     if (filters?.status) {

@@ -40,7 +40,10 @@ export default function HouseholdRegistrationPage() {
 
       if (user.role === 'resident') {
         try {
-          const households = await getHouseholds({ applicant_user_id: user.id });
+          const households = await getHouseholds({
+            applicant_user_id: user.id,
+            applicant_email: user.email,
+          });
           const activeHousehold = resolveResidentActiveApprovedHousehold(households);
           if (!cancelled && activeHousehold) {
             router.replace('/resident/household');

@@ -165,35 +165,35 @@ export default function ApiHealthPage() {
   const attentionCount = data ? data.summary.warning + data.summary.error : 0;
   const sortedChecks = data
     ? [...data.checks].sort(
-        (left, right) =>
-          STATUS_PRIORITY[left.status] - STATUS_PRIORITY[right.status] ||
-          left.label.localeCompare(right.label),
-      )
+      (left, right) =>
+        STATUS_PRIORITY[left.status] - STATUS_PRIORITY[right.status] ||
+        left.label.localeCompare(right.label),
+    )
     : [];
 
   const overallBadge = loading
     ? {
-        className: 'border-amber-200 bg-amber-50 text-amber-700',
-        label: 'Running diagnostics',
-        icon: Loader2,
-      }
+      className: 'border-amber-200 bg-amber-50 text-amber-700',
+      label: 'Running diagnostics',
+      icon: Loader2,
+    }
     : error && !data
       ? {
-          className: 'border-rose-200 bg-rose-50 text-rose-700',
-          label: 'Health check unavailable',
-          icon: AlertTriangle,
-        }
+        className: 'border-rose-200 bg-rose-50 text-rose-700',
+        label: 'Health check unavailable',
+        icon: AlertTriangle,
+      }
       : data?.ok
         ? {
-            className: 'border-emerald-200 bg-emerald-50 text-emerald-700',
-            label: 'Critical services operational',
-            icon: CheckCircle2,
-          }
+          className: 'border-emerald-200 bg-emerald-50 text-emerald-700',
+          label: 'Critical services operational',
+          icon: CheckCircle2,
+        }
         : {
-            className: 'border-amber-200 bg-amber-50 text-amber-700',
-            label: 'Attention required',
-            icon: AlertTriangle,
-          };
+          className: 'border-amber-200 bg-amber-50 text-amber-700',
+          label: 'Attention required',
+          icon: AlertTriangle,
+        };
 
   const OverallBadgeIcon = overallBadge.icon;
 
@@ -506,12 +506,12 @@ export default function ApiHealthPage() {
                               <StatusIcon className="h-3.5 w-3.5" />
                               {meta.label}
                             </span>
+
                             <span
-                              className={`inline-flex items-center rounded-full border px-3 py-1.5 text-xs font-semibold ${
-                                check.configured
-                                  ? 'border-sky-200 bg-sky-50 text-sky-700'
-                                  : 'border-slate-200 bg-slate-100 text-slate-600'
-                              }`}
+                              className={`inline-flex items-center rounded-full border px-3 py-1.5 text-xs font-semibold ${check.configured
+                                ? 'border-sky-200 bg-sky-50 text-sky-700'
+                                : 'border-slate-200 bg-slate-100 text-slate-600'
+                                }`}
                             >
                               {check.configured ? 'Configured' : 'Missing config'}
                             </span>
@@ -529,7 +529,7 @@ export default function ApiHealthPage() {
                           <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
                             <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-500">
                               Diagnostic details
-                            </p>
+                            </p>1
                             <p className="mt-2 text-sm leading-6 text-slate-700">
                               {check.details || 'No additional diagnostics were returned for this service.'}
                             </p>

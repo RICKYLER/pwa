@@ -149,7 +149,10 @@ export default function ResidentNotificationsPage() {
 
         const [nextNotifications, households] = await Promise.all([
           getUserNotifications(),
-          getHouseholds({ applicant_user_id: residentUser.id }),
+          getHouseholds({
+            applicant_user_id: residentUser.id,
+            applicant_email: residentUser.email,
+          }),
         ]);
         const nextActiveHousehold = resolveResidentActiveApprovedHousehold(households);
         const nextResidents = nextActiveHousehold

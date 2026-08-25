@@ -85,6 +85,28 @@ function fillRoundedRect(
   context.fill();
 }
 
+function strokeRoundedRect(
+  context: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  radius: number,
+) {
+  context.beginPath();
+  context.moveTo(x + radius, y);
+  context.lineTo(x + width - radius, y);
+  context.quadraticCurveTo(x + width, y, x + width, y + radius);
+  context.lineTo(x + width, y + height - radius);
+  context.quadraticCurveTo(x + width, y + height, x + width - radius, y + height);
+  context.lineTo(x + radius, y + height);
+  context.quadraticCurveTo(x, y + height, x, y + height - radius);
+  context.lineTo(x, y + radius);
+  context.quadraticCurveTo(x, y, x + radius, y);
+  context.closePath();
+  context.stroke();
+}
+
 function drawWrappedText(
   context: CanvasRenderingContext2D,
   text: string,
@@ -169,7 +191,7 @@ async function createBrandedQrCanvas(value: string) {
 
   context.strokeStyle = '#bbf7d0';
   context.lineWidth = 4;
-  fillRoundedRect(
+  strokeRoundedRect(
     context,
     backingX,
     backingY,
@@ -177,7 +199,6 @@ async function createBrandedQrCanvas(value: string) {
     backingSize,
     Math.round(backingSize * 0.22),
   );
-  context.stroke();
   context.drawImage(logo, logoX, logoY, logoSize, logoSize);
 
   const outputPadding = 24;
@@ -239,20 +260,19 @@ async function createQrDownloadPosterDataUrl(input: {
   context.shadowColor = 'rgba(15, 118, 110, 0.16)';
   context.shadowBlur = 30;
   context.shadowOffsetY = 12;
-  context.fillStyle = '#ffffff';
+  context.fillStyle = '#0f766e';
   fillRoundedRect(context, 80, 230, QR_POSTER_WIDTH - 160, 1040, 36);
   context.restore();
   context.strokeStyle = '#bbf7d0';
   context.lineWidth = 4;
-  fillRoundedRect(context, 80, 230, QR_POSTER_WIDTH - 160, 1040, 36);
-  context.stroke();
+  strokeRoundedRect(context, 80, 230, QR_POSTER_WIDTH - 160, 1040, 36);
   context.drawImage(input.qrCanvas, 120, 270, 960, 960);
 
   context.fillStyle = '#f0fdfa';
   fillRoundedRect(context, 80, 1320, QR_POSTER_WIDTH - 160, 220, 30);
   context.strokeStyle = '#99f6e4';
   context.lineWidth = 3;
-  context.stroke();
+  strokeRoundedRect(context, 80, 1320, QR_POSTER_WIDTH - 160, 220, 30);
 
   context.fillStyle = '#064e3b';
   context.font = '700 28px Arial, sans-serif';

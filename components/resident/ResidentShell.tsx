@@ -59,7 +59,10 @@ export default function ResidentShell({ title, subtitle, children }: ResidentShe
 
     async function loadActiveHouseholdState() {
       try {
-        const households = await getHouseholds({ applicant_user_id: residentUser.id });
+        const households = await getHouseholds({
+          applicant_user_id: residentUser.id,
+          applicant_email: residentUser.email,
+        });
         if (!cancelled) {
           setHasActiveHousehold(Boolean(resolveResidentActiveApprovedHousehold(households)));
         }

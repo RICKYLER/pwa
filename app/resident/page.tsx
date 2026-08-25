@@ -45,6 +45,7 @@ import {
 import { evaluateHouseholdDistributionEligibility } from '@/lib/distribution-claims';
 import { resolveResidentActiveApprovedHousehold } from '@/lib/resident-households';
 import { getCurrentVulnerabilityFlagsMapForResidents } from '@/lib/db/vulnerability';
+import { bootstrapPathnameData } from '@/lib/supabase/route-bootstrap';
 
 declare global {
   interface WindowEventMap {
@@ -100,14 +101,29 @@ export default function ResidentPortalPage() {
     const residentUser = user;
     let cancelled = false;
 
-    async function loadRecords() {
+    async function loadRecords(isRetry = false) {
       try {
         setIsLoading(true);
-        const [households, inboxItems, rules] = await Promise.all([
-          getHouseholds({ applicant_user_id: residentUser.id }),
+        let [households, inboxItems, rules] = await Promise.all([
+          getHouseholds({
+            applicant_user_id: residentUser.id,
+            applicant_email: residentUser.email,
+          }),
           getUserNotifications(),
           getDisasterAlertRules(),
         ]);
+
+        // If no households found and this is the first attempt, the IndexedDB may
+        // be stale/empty (e.g. after logout clears it). Force-refresh from Supabase
+        // before deciding to show the registration onboarding modal.
+        if (households.length === 0 && !isRetry) {
+          await bootstrapPathnameData('/resident', true).catch(() => null);
+          [households] = await Promise.all([getHouseholds({
+            applicant_user_id: residentUser.id,
+            applicant_email: residentUser.email,
+          })]);
+        }
+
         const activeHousehold = resolveResidentActiveApprovedHousehold(households);
         const nextResidents = activeHousehold
           ? await getResidents({ household_id: activeHousehold.id, status: 'active' })
@@ -146,7 +162,7 @@ export default function ResidentPortalPage() {
         return;
       }
 
-      void loadRecords();
+      void loadRecords(true);
     }
 
     window.addEventListener('mswdo-data-changed', handleDataChanged);
@@ -167,7 +183,15 @@ export default function ResidentPortalPage() {
   const shouldShowRegistrationOnboarding = !isLoading && records.length === 0 && !activeHousehold;
 
   useEffect(() => {
-    if (!user || !isResidentUser(user) || !shouldShowRegistrationOnboarding) {
+    if (!user || !isResidentUser(user)) {
+      return undefined;
+    }
+
+    // Auto-dismiss the modal when the household records load successfully.
+    // This handles the race condition where IndexedDB is empty on first render
+    // (cleared after logout) but gets populated after bootstrap completes.
+    if (!shouldShowRegistrationOnboarding) {
+      setShowRegistrationPrompt(false);
       return undefined;
     }
 

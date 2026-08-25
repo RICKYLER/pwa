@@ -33,12 +33,15 @@ export default function AuthBootstrap({ children }: { children: ReactNode }) {
         }).catch(() => null);
       }
 
-      if (!cancelled) {
-        setIsReady(true);
+      // Bootstrap first so IndexedDB is populated before child pages render.
+      // This prevents pages from briefly seeing empty records and showing
+      // prompts (e.g. "Household Registration Needed") for already-registered residents.
+      if (user) {
+        await bootstrapCurrentPathData().catch(() => null);
       }
 
-      if (user) {
-        void bootstrapCurrentPathData();
+      if (!cancelled) {
+        setIsReady(true);
       }
     }
 
