@@ -39,7 +39,7 @@ export async function POST(request: NextRequest) {
 
   const { data: event, error: eventError } = await supabase
     .from('distribution_events')
-    .select('id, event_name, target_scope, target_group, status')
+    .select('id, event_name, target_scope, target_group, status, scheduled_date')
     .eq('id', eventId)
     .maybeSingle();
 
@@ -127,6 +127,7 @@ export async function POST(request: NextRequest) {
     eventId: event.id,
     householdId: household.id,
     userId: remoteUserId,
+    eventScheduledDate: typeof event.scheduled_date === 'string' ? event.scheduled_date : null,
   });
   const deepLink = buildDistributionQrDeepLink(resolveAppUrl(request.url), event.id, token);
 

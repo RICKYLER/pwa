@@ -3,11 +3,12 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { Activity, Home, Plus, Users, X } from 'lucide-react';
+import { Activity, Home, Plus, Users, X, type LucideIcon } from 'lucide-react';
 import { getCurrentUser, hasPermission } from '@/lib/auth';
 import { getAllPuroks, getHouseholds } from '@/lib/db/households';
 import { getPurokRiskProfiles } from '@/lib/db/purok-risk-profiles';
 import { getResidentsInHousehold } from '@/lib/db/residents';
+import { isBirthdayThisMonth } from '@/lib/db/vulnerability';
 import type { DisasterRiskLevel, HazardType, Household, PurokFloodControlStatus, PurokRiskProfile } from '@/lib/db/schema';
 import { formatRegistrationStatusLabel, getHouseholdRegistrationStatus } from '@/lib/household-registration';
 import { hasHouseholdPin } from '@/lib/map-pins';
@@ -58,6 +59,42 @@ const DISASTER_RISK_OPTIONS: DisasterRiskLevel[] = ['low', 'medium', 'high'];
 const PUROK_FLOOD_CONTROL_OPTIONS: PurokFloodControlStatus[] = ['protected', 'partial', 'none', 'unknown'];
 type PurokFloodProneFilter = 'all' | 'flood_prone' | 'not_flood_prone';
 
+/**
+ * A KPI stat card that doubles as a filter shortcut. Clicking it applies the
+ * matching status filter (the same one the status tabs set) and shows a ring
+ * while that filter is active — so the top stats are pressable, not just the
+ * "Unverified Members" toggle.
+ */
+function KpiFilterCard({
+  icon,
+  label,
+  value,
+  tone,
+  active,
+  ring,
+  onClick,
+}: {
+  icon: LucideIcon;
+  label: string;
+  value: string | number;
+  tone: 'navy' | 'emerald' | 'amber' | 'rose' | 'slate';
+  active: boolean;
+  ring: string;
+  onClick: () => void;
+}) {
+  return (
+    <button type="button" onClick={onClick} className="text-left">
+      <CivicKpiCard
+        icon={icon}
+        label={label}
+        value={value}
+        tone={tone}
+        className={`transition-shadow hover:shadow-md${active ? ` ring-2 ring-offset-2 ${ring}` : ''}`}
+      />
+    </button>
+  );
+}
+
 export default function HouseholdsDesktop() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -67,21 +104,40 @@ export default function HouseholdsDesktop() {
   const [purokRiskProfiles, setPurokRiskProfiles] = useState<PurokRiskProfile[]>([]);
   const [search, setSearch] = useState('');
   const [filterPurok, setFilterPurok] = useState('all');
+  const [filterBarangay, setFilterBarangay] = useState('all');
   const [filterStatus, setFilterStatus] = useState<'all' | 'active' | 'moved_out' | 'deceased' | 'pending'>('active');
   const [filterHazard, setFilterHazard] = useState<HazardType | 'all'>('all');
   const [filterRiskLevel, setFilterRiskLevel] = useState<DisasterRiskLevel | 'all'>('all');
   const [filterFloodProne, setFilterFloodProne] = useState<PurokFloodProneFilter>('all');
   const [filterFloodControlStatus, setFilterFloodControlStatus] = useState<PurokFloodControlStatus | 'all'>('all');
   const [filterUnverifiedOnly, setFilterUnverifiedOnly] = useState(false);
+  const [filterBirthdayThisMonth, setFilterBirthdayThisMonth] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [memberCounts, setMemberCounts] = useState<Record<string, number>>({});
+  const [activeMemberCount, setActiveMemberCount] = useState(0);
   const [hasUnverifiedMembers, setHasUnverifiedMembers] = useState<Record<string, boolean>>({});
+  const [birthdayMembers, setBirthdayMembers] = useState<Record<string, string[]>>({});
   const issueFilter = searchParams.get('issue');
   const isMissingLocationMode = issueFilter === 'missing_location';
   const purokRiskProfileMap = useMemo(
     () => buildPurokRiskProfileMap(purokRiskProfiles),
     [purokRiskProfiles],
   );
+
+  // Distinct barangays present in the loaded records (admins see many; a
+  // barangay-scoped officer sees one, so the filter hides itself for them).
+  const barangays = useMemo<{ id: string; label: string }[]>(() => {
+    const byId = new Map<string, string>();
+    households.forEach((household) => {
+      if (!household.barangay_id) return;
+      if (!byId.has(household.barangay_id)) {
+        byId.set(household.barangay_id, household.barangay_name || household.barangay_id);
+      }
+    });
+    return [...byId.entries()]
+      .map(([id, label]) => ({ id, label }))
+      .sort((left, right) => left.label.localeCompare(right.label));
+  }, [households]);
 
   const loadHouseholdsData = useCallback(async (background = false) => {
     if (!user || !hasPermission('view_households')) {
@@ -103,13 +159,21 @@ export default function HouseholdsDesktop() {
     setPurokRiskProfiles(profiles);
     const counts: Record<string, number> = {};
     const unverified: Record<string, boolean> = {};
+    const birthdays: Record<string, string[]> = {};
+    let activeMemberTotal = 0;
     for (const household of allHouseholds) {
       const hhResidents = await getResidentsInHousehold(household.id);
       counts[household.id] = hhResidents.length;
+      activeMemberTotal += hhResidents.filter((resident) => resident.status === 'active').length;
       unverified[household.id] = hhResidents.some(r => r.verification_status === 'pending');
+      birthdays[household.id] = hhResidents
+        .filter((resident) => resident.status === 'active' && isBirthdayThisMonth(resident.birthdate))
+        .map((resident) => resident.full_name);
     }
     setMemberCounts(counts);
+    setActiveMemberCount(activeMemberTotal);
     setHasUnverifiedMembers(unverified);
+    setBirthdayMembers(birthdays);
     setPuroks(
       user.role === 'admin'
         ? [...new Set(allHouseholds.map((household) => household.purok_sitio).filter(Boolean))].sort()
@@ -159,6 +223,7 @@ export default function HouseholdsDesktop() {
       }
     }
     if (filterPurok !== 'all') result = result.filter((household) => household.purok_sitio === filterPurok);
+    if (filterBarangay !== 'all') result = result.filter((household) => household.barangay_id === filterBarangay);
     if (filterHazard !== 'all') {
       result = result.filter((household) => parseHazardTags(household.hazard_tags).includes(filterHazard));
     }
@@ -172,6 +237,9 @@ export default function HouseholdsDesktop() {
     if (filterUnverifiedOnly) {
       result = result.filter((household) => hasUnverifiedMembers[household.id]);
     }
+    if (filterBirthdayThisMonth) {
+      result = result.filter((household) => (birthdayMembers[household.id]?.length ?? 0) > 0);
+    }
     if (search) {
       const query = search.toLowerCase();
       result = result.filter((household) =>
@@ -182,7 +250,7 @@ export default function HouseholdsDesktop() {
     }
 
     return result;
-  }, [filterFloodControlStatus, filterFloodProne, filterHazard, filterPurok, filterRiskLevel, filterStatus, filterUnverifiedOnly, hasUnverifiedMembers, households, isMissingLocationMode, purokRiskProfileMap, search]);
+  }, [birthdayMembers, filterBarangay, filterBirthdayThisMonth, filterFloodControlStatus, filterFloodProne, filterHazard, filterPurok, filterRiskLevel, filterStatus, filterUnverifiedOnly, hasUnverifiedMembers, households, isMissingLocationMode, purokRiskProfileMap, search]);
 
   if (!user) return null;
 
@@ -190,15 +258,18 @@ export default function HouseholdsDesktop() {
   const movedCount = households.filter((household) => household.status === 'moved_out').length;
   const pendingCount = households.filter((household) => getHouseholdRegistrationStatus(household) === 'pending').length;
   const unverifiedCount = Object.values(hasUnverifiedMembers).filter(Boolean).length;
+  const birthdayHouseholdCount = Object.values(birthdayMembers).filter((names) => names.length > 0).length;
   const deceasedCount = households.filter((household) => household.status === 'deceased').length;
   const hasFilters = Boolean(search)
     || filterPurok !== 'all'
+    || filterBarangay !== 'all'
     || filterStatus !== 'all'
     || filterHazard !== 'all'
     || filterRiskLevel !== 'all'
     || filterFloodProne !== 'all'
     || filterFloodControlStatus !== 'all'
     || filterUnverifiedOnly
+    || filterBirthdayThisMonth
     || isMissingLocationMode;
 
   return (
@@ -246,17 +317,53 @@ export default function HouseholdsDesktop() {
       ) : null}
 
       <div className="grid grid-cols-5 gap-4">
-        <CivicKpiCard icon={Home} label="Total households" value={isLoading ? '—' : households.length} tone="navy" />
-        <CivicKpiCard icon={Home} label="Active" value={isLoading ? '—' : activeCount} tone="emerald" />
-        <CivicKpiCard icon={Users} label="Moved out" value={isLoading ? '—' : movedCount} tone="amber" />
-        <CivicKpiCard icon={Activity} label="Pending review" value={isLoading ? '—' : pendingCount} tone="rose" />
-        <button onClick={() => setFilterUnverifiedOnly(!filterUnverifiedOnly)} className="text-left">
+        <KpiFilterCard
+          icon={Home}
+          label="Total households"
+          value={isLoading ? '—' : households.length}
+          tone="navy"
+          active={filterStatus === 'all'}
+          ring="ring-cyan-500"
+          onClick={() => setFilterStatus('all')}
+        />
+        <KpiFilterCard
+          icon={Users}
+          label="Active Members"
+          value={isLoading ? '—' : activeMemberCount.toLocaleString()}
+          tone="emerald"
+          active={filterStatus === 'active'}
+          ring="ring-emerald-500"
+          onClick={() => setFilterStatus('active')}
+        />
+        <KpiFilterCard
+          icon={Home}
+          label="Moved out"
+          value={isLoading ? '—' : movedCount}
+          tone="amber"
+          active={filterStatus === 'moved_out'}
+          ring="ring-amber-500"
+          onClick={() => setFilterStatus('moved_out')}
+        />
+        <KpiFilterCard
+          icon={Activity}
+          label="Pending review"
+          value={isLoading ? '—' : pendingCount}
+          tone="rose"
+          active={filterStatus === 'pending'}
+          ring="ring-rose-500"
+          onClick={() => setFilterStatus('pending')}
+        />
+        <button
+          type="button"
+          onClick={() => setFilterUnverifiedOnly(!filterUnverifiedOnly)}
+          className="text-left"
+        >
           <CivicKpiCard
             icon={Users}
             label="Unverified Members"
             value={isLoading ? '—' : unverifiedCount}
             tone={unverifiedCount > 0 ? 'rose' : 'slate'}
-            className={filterUnverifiedOnly ? 'ring-2 ring-rose-500 ring-offset-2' : ''}
+            className={`transition-shadow hover:shadow-md${filterUnverifiedOnly ? ' ring-2 ring-rose-500 ring-offset-2' : ''}`}
           />
         </button>
       </div>
@@ -283,6 +390,18 @@ export default function HouseholdsDesktop() {
             placeholder="Search by household head, address, or ID..."
             className="flex-1"
           />
+          {barangays.length > 1 ? (
+            <select
+              value={filterBarangay}
+              onChange={(event) => setFilterBarangay(event.target.value)}
+              className="h-11 rounded-2xl border border-slate-200 bg-white px-4 text-sm text-slate-700 outline-none focus:border-cyan-900"
+            >
+              <option value="all">All barangays</option>
+              {barangays.map((barangay) => (
+                <option key={barangay.id} value={barangay.id}>{barangay.label}</option>
+              ))}
+            </select>
+          ) : null}
           {puroks.length > 0 ? (
             <select
               value={filterPurok}
@@ -356,18 +475,26 @@ export default function HouseholdsDesktop() {
               {isLoading ? '—' : unverifiedCount}
             </span>
           </CivicChipButton>
+          <CivicChipButton active={filterBirthdayThisMonth} onClick={() => setFilterBirthdayThisMonth(!filterBirthdayThisMonth)}>
+            🎂 Birthdays this month
+            <span className={`rounded-full px-2 py-0.5 text-[10px] ${filterBirthdayThisMonth ? 'bg-white/12 text-white' : 'bg-teal-100 text-teal-700'}`}>
+              {isLoading ? '—' : birthdayHouseholdCount}
+            </span>
+          </CivicChipButton>
           {hasFilters ? (
             <button
               type="button"
               onClick={() => {
                 setSearch('');
                 setFilterPurok('all');
+                setFilterBarangay('all');
                 setFilterStatus('all');
                 setFilterHazard('all');
                 setFilterRiskLevel('all');
                 setFilterFloodProne('all');
                 setFilterFloodControlStatus('all');
                 setFilterUnverifiedOnly(false);
+                setFilterBirthdayThisMonth(false);
               }}
               className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-600"
             >
@@ -413,6 +540,15 @@ export default function HouseholdsDesktop() {
                       <p className="truncate text-sm font-bold text-slate-950">{household.head_name}</p>
                       <p className="mt-1 truncate text-xs text-slate-500">{locationSummary}</p>
                       <div className="mt-2 flex flex-wrap gap-1">
+                        {birthdayMembers[household.id]?.length ? (
+                          <CivicBadge
+                            label={birthdayMembers[household.id].length > 1
+                              ? `🎂 ${birthdayMembers[household.id].length} birthdays this month`
+                              : '🎂 Birthday this month'}
+                            tone="teal"
+                            className="text-[10px]"
+                          />
+                        ) : null}
                         <CivicBadge label={status.label} tone={status.tone} className="text-[10px]" />
                         <CivicBadge
                           label={formatRegistrationStatusLabel(registrationStatus)}

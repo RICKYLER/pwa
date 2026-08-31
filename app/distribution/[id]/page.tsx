@@ -48,6 +48,8 @@ import { getPendingSyncCount } from '@/lib/db/client-sync';
 import { getInventoryItems } from '@/lib/db/inventory';
 import { getLastSupabaseBootstrapCompletedAt } from '@/lib/supabase/bootstrap';
 import { extractDistributionQrToken } from '@/lib/distribution-qr';
+import { describeDistributionQrFailure, isDistributionQrNetworkFailure } from '@/lib/distribution-qr-ui';
+import { playQrSuccessBeep } from '@/lib/distribution-qr-audio';
 import { toast } from '@/hooks/use-toast';
 import type {
   DistributedItem,
@@ -145,6 +147,18 @@ const QR_SCAN_MAX_WIDTH = 1280;
 const QR_SCAN_CENTER_CROP_RATIO = 0.72;
 type QrFeedbackState = 'idle' | 'scanning' | 'detected' | 'resolving' | 'success' | 'error' | 'claimed';
 
+type PendingQrConfirmation = {
+  token: string;
+  eventId: string;
+  householdId: string;
+  householdName: string;
+  receivedByName: string;
+  matchedResidentNames: string[];
+  purokSitio?: string;
+  streetAddress?: string;
+  source: 'camera' | 'manual' | 'link';
+};
+
 export default function DistributionDetailPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -182,6 +196,8 @@ export default function DistributionDetailPage() {
   const [cameraAccessMessage, setCameraAccessMessage] = useState('');
   const [qrFeedbackState, setQrFeedbackState] = useState<QrFeedbackState>('idle');
   const [lastReleasedRecordId, setLastReleasedRecordId] = useState('');
+  const [pendingQrConfirmation, setPendingQrConfirmation] = useState<PendingQrConfirmation | null>(null);
+  const [qrReceiverName, setQrReceiverName] = useState('');
   const qrScannerSectionRef = useRef<HTMLDivElement | null>(null);
 
   const [editStatus, setEditStatus] = useState<DistributionEvent['status']>('planned');
@@ -636,6 +652,7 @@ export default function DistributionDetailPage() {
     receivedByName?: string;
     notes?: string;
     successMessage?: string;
+    scrollToRecords?: boolean;
   }) => {
     if (!user || !event) {
       return null;
@@ -677,9 +694,11 @@ export default function DistributionDetailPage() {
         || `Package released to ${record.received_by_name || record.beneficiary_name || 'beneficiary'}.`,
       );
 
-      window.setTimeout(() => {
-        scrollToDistributionRecords();
-      }, 150);
+      if (input.scrollToRecords !== false) {
+        window.setTimeout(() => {
+          scrollToDistributionRecords();
+        }, 150);
+      }
 
       return record;
     } catch (releaseFailure) {
@@ -696,7 +715,7 @@ export default function DistributionDetailPage() {
     rawValue: string,
     source: 'camera' | 'manual' | 'link' = 'manual',
   ) => {
-    if (!event || isProcessingQrRef.current) {
+    if (!event || isProcessingQrRef.current || pendingQrConfirmation) {
       return false;
     }
 
@@ -752,6 +771,9 @@ export default function DistributionDetailPage() {
         householdId?: string;
         householdName?: string;
         receivedByName?: string;
+        matchedResidentNames?: string[];
+        purokSitio?: string | null;
+        streetAddress?: string | null;
       } | null;
 
       if (!response.ok || !payload?.householdId) {
@@ -777,42 +799,34 @@ export default function DistributionDetailPage() {
         throw new Error(errorMessage);
       }
 
-      setQrStatus(`Household confirmed: ${payload.householdName || 'ready for release'}. Releasing package...`);
-      const released = await completeRelease({
+      // Stop the camera and hold for staff confirmation instead of releasing
+      // immediately — a mis-scan (neighbor's phone, a screenshot) must not hand
+      // out a package before a human confirms who is receiving it.
+      setPendingQrConfirmation({
+        token: extracted.token,
+        eventId: event.id,
         householdId: payload.householdId,
-        receivedByName: payload.receivedByName || payload.householdName,
-        notes: 'Released through household QR scan.',
-        successMessage: `QR release completed for ${payload.householdName || 'the household'}.`,
+        householdName: payload.householdName || '',
+        receivedByName: payload.receivedByName || payload.householdName || '',
+        matchedResidentNames: Array.isArray(payload.matchedResidentNames)
+          ? payload.matchedResidentNames
+          : [],
+        purokSitio: typeof payload.purokSitio === 'string' ? payload.purokSitio : undefined,
+        streetAddress: typeof payload.streetAddress === 'string' ? payload.streetAddress : undefined,
+        source,
       });
-
-      if (!released) {
-        return false;
-      }
-
-      processedQrTokenRef.current = extracted.token;
-      lastRejectedQrRef.current = null;
-      setQrInputValue('');
-      setQrStatus(`QR verified for ${payload.householdName || 'the household'}.`);
-      triggerQrFeedback('success', {
-        durationMs: 1800,
-        resetTo: 'idle',
-        vibratePattern: [60, 40, 120],
-      });
-      window.setTimeout(() => {
-        stopQrScanner({ resetFeedback: false });
-      }, 1600);
-
-      if (searchParams.get('qr')) {
-        router.replace(`/distribution/${event.id}`);
-      }
+      setQrReceiverName(payload.receivedByName || payload.householdName || '');
+      setQrStatus('');
+      setReleaseError('');
+      setReleaseSuccess('');
+      stopQrScanner({ resetFeedback: false });
+      setQrFeedbackState('idle');
       return true;
     } catch (qrError) {
-      const errorMessage = qrError instanceof Error
-        ? qrError.message
-        : 'Unable to process the household QR code.';
+      const errorMessage = describeDistributionQrFailure(qrError);
       setQrStatus(errorMessage);
       toast({
-        title: 'QR Rejected',
+        title: isDistributionQrNetworkFailure(qrError) ? 'Offline at the venue' : 'QR Rejected',
         description: errorMessage,
         variant: 'destructive',
       });
@@ -823,10 +837,84 @@ export default function DistributionDetailPage() {
       isProcessingQrRef.current = false;
       setIsProcessingQr(false);
     }
-  }, [completeRelease, event, router, searchParams, stopQrScanner, triggerQrFeedback]);
+  }, [event, pendingQrConfirmation, router, searchParams, stopQrScanner, triggerQrFeedback]);
+
+  const confirmQrRelease = useCallback(async () => {
+    const pending = pendingQrConfirmation;
+    if (!pending || !event || isReleasing) {
+      return;
+    }
+
+    setQrStatus('');
+    setReleaseError('');
+    setReleaseSuccess('');
+
+    const released = await completeRelease({
+      householdId: pending.householdId,
+      receivedByName: qrReceiverName.trim() || pending.receivedByName,
+      notes: 'Released through household QR scan.',
+      successMessage: `QR release completed for ${pending.householdName || 'the household'}.`,
+      scrollToRecords: false,
+    });
+
+    if (!released) {
+      // completeRelease already surfaced the error; keep the confirmation card
+      // visible so staff can retry.
+      return;
+    }
+
+    processedQrTokenRef.current = pending.token;
+    lastRejectedQrRef.current = null;
+    setPendingQrConfirmation(null);
+    setQrInputValue('');
+    setQrStatus(`QR verified for ${pending.householdName || 'the household'}.`);
+    playQrSuccessBeep();
+    triggerQrFeedback('success', {
+      durationMs: 1800,
+      resetTo: 'idle',
+      vibratePattern: [60, 40, 120],
+    });
+
+    // Best-effort audit entry so the scan log shows resolved -> released. The
+    // release itself is already committed by the RPC; a failure here changes
+    // nothing about the package, so never block the UI on it.
+    void fetch('/api/distribution/qr/released', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+      },
+      credentials: 'same-origin',
+      cache: 'no-store',
+      body: JSON.stringify({
+        token: pending.token,
+        eventId: event.id,
+        source: pending.source,
+      }),
+    }).catch(() => {});
+
+    if (searchParams.get('qr')) {
+      router.replace(`/distribution/${event.id}`);
+    }
+  }, [completeRelease, event, isReleasing, pendingQrConfirmation, qrReceiverName, router, searchParams, triggerQrFeedback]);
+
+  const cancelQrRelease = useCallback(() => {
+    // Keep the processed-token guard set: a cancelled deep-link token must not
+    // auto-retrigger when the callback identity changes. Manual re-scanning is
+    // unaffected — processDistributionQr never consults the guard.
+    if (pendingQrConfirmation) {
+      processedQrTokenRef.current = pendingQrConfirmation.token;
+    }
+    setPendingQrConfirmation(null);
+    setQrReceiverName('');
+    setQrStatus('');
+    setReleaseError('');
+    setReleaseSuccess('');
+    setQrFeedbackState('idle');
+  }, [pendingQrConfirmation]);
 
   const startQrScanner = useCallback(async () => {
-    if (isScanningQr || isProcessingQr) {
+    if (isScanningQr || isProcessingQr || pendingQrConfirmation) {
       return;
     }
 
@@ -1019,7 +1107,7 @@ export default function DistributionDetailPage() {
             : 'Unable to access the camera for QR scanning.',
       );
     }
-  }, [cameraAccessMessage, isProcessingQr, isScanningQr, processDistributionQr, stopQrScanner, triggerQrFeedback]);
+  }, [cameraAccessMessage, isProcessingQr, isScanningQr, pendingQrConfirmation, processDistributionQr, stopQrScanner, triggerQrFeedback]);
 
   useEffect(() => {
     const qrFromUrl = searchParams.get('qr');
@@ -1668,7 +1756,7 @@ export default function DistributionDetailPage() {
                     <button
                       type="button"
                       onClick={isScanningQr ? () => stopQrScanner() : () => { void startQrScanner(); }}
-                      disabled={event.status === 'completed' || isProcessingQr}
+                      disabled={event.status === 'completed' || isProcessingQr || Boolean(pendingQrConfirmation)}
                       className="inline-flex items-center gap-2 rounded-xl border border-cyan-200 bg-white px-3 py-1.5 text-xs font-semibold text-cyan-800 transition hover:bg-cyan-50 disabled:cursor-not-allowed disabled:opacity-60"
                     >
                       {isScanningQr ? (
@@ -1699,14 +1787,15 @@ export default function DistributionDetailPage() {
                           void processDistributionQr(qrInputValue, 'manual');
                         }
                       }}
+                      disabled={Boolean(pendingQrConfirmation)}
                       placeholder="Paste the QR link or token here"
-                      className="w-full rounded-xl border border-cyan-100 bg-white py-2 pl-10 pr-3 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500/30"
+                      className="w-full rounded-xl border border-cyan-100 bg-white py-2 pl-10 pr-3 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500/30 disabled:cursor-not-allowed disabled:opacity-60"
                     />
                   </div>
                   <button
                     type="button"
                     onClick={() => { void processDistributionQr(qrInputValue, 'manual'); }}
-                    disabled={!qrInputValue.trim() || isProcessingQr || event.status === 'completed'}
+                    disabled={!qrInputValue.trim() || isProcessingQr || event.status === 'completed' || Boolean(pendingQrConfirmation)}
                     className="inline-flex items-center justify-center gap-2 rounded-xl bg-cyan-950 px-4 py-2 text-sm font-semibold text-white transition hover:bg-cyan-900 disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     {isProcessingQr ? (
@@ -1717,6 +1806,87 @@ export default function DistributionDetailPage() {
                     Use QR
                   </button>
                 </div>
+
+                {pendingQrConfirmation ? (
+                  <div className="space-y-3 rounded-2xl border border-emerald-200 bg-white p-3 shadow-sm">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                          Confirm before releasing
+                        </p>
+                        <p className="mt-1 truncate text-sm font-bold text-slate-900">
+                          {pendingQrConfirmation.householdName}
+                        </p>
+                        {[pendingQrConfirmation.purokSitio, pendingQrConfirmation.streetAddress]
+                          .filter(Boolean)
+                          .length > 0 ? (
+                          <p className="mt-0.5 text-xs text-slate-500">
+                            {[pendingQrConfirmation.purokSitio, pendingQrConfirmation.streetAddress]
+                              .filter(Boolean)
+                              .join(' · ')}
+                          </p>
+                        ) : null}
+                      </div>
+                      <span className="flex-shrink-0 rounded-full bg-cyan-50 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.16em] text-cyan-700">
+                        QR Match
+                      </span>
+                    </div>
+
+                    {pendingQrConfirmation.matchedResidentNames.length > 0 ? (
+                      <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                        <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                          Qualified member{pendingQrConfirmation.matchedResidentNames.length === 1 ? '' : 's'}
+                        </p>
+                        <p className="mt-1 text-sm text-slate-700">
+                          {pendingQrConfirmation.matchedResidentNames.join(', ')}
+                        </p>
+                      </div>
+                    ) : null}
+
+                    <div>
+                      <label className="mb-1 block text-[11px] font-semibold text-slate-500">
+                        Received By
+                      </label>
+                      <input
+                        type="text"
+                        value={qrReceiverName}
+                        onChange={(e) => setQrReceiverName(e.target.value)}
+                        placeholder={pendingQrConfirmation.receivedByName}
+                        className="w-full rounded-xl border border-emerald-100 bg-white px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/30"
+                      />
+                    </div>
+
+                    {releaseError ? (
+                      <div className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+                        {releaseError}
+                      </div>
+                    ) : null}
+
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => { void confirmQrRelease(); }}
+                        disabled={isReleasing}
+                        className="inline-flex flex-1 items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-600 px-4 py-2 text-sm font-bold text-white shadow-md shadow-emerald-500/20 transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {isReleasing ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <Package className="h-4 w-4" />
+                        )}
+                        Release Package
+                      </button>
+                      <button
+                        type="button"
+                        onClick={cancelQrRelease}
+                        disabled={isReleasing}
+                        className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
 
                 <div className={`${isScanningQr ? 'block' : 'hidden'} relative overflow-hidden rounded-2xl border bg-slate-950 transition-all duration-300 ${qrFrameTone.shell}`}>
                   <video

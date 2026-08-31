@@ -20,7 +20,7 @@ function generateId(): string {
  */
 export async function getResidents(filters?: {
   household_id?: string;
-  status?: ResidentStatus;
+  status?: ResidentStatus | ResidentStatus[];
   search?: string;
 }): Promise<Resident[]> {
   try {
@@ -33,7 +33,9 @@ export async function getResidents(filters?: {
     }
 
     if (filters?.status) {
-      filtered = filtered.filter(r => r.status === filters.status);
+      const statuses = Array.isArray(filters.status) ? filters.status : [filters.status];
+      const allowed = new Set<ResidentStatus>(statuses);
+      filtered = filtered.filter(r => allowed.has(r.status));
     }
 
     if (filters?.search) {
@@ -308,6 +310,32 @@ export async function verifyResident(residentId: string): Promise<Resident> {
     return updatedResident;
   } catch (error) {
     console.error('Error verifying resident:', error);
+    throw error;
+  }
+}
+
+/**
+ * Reject a pending household member.
+ *
+ * Marks a resident-added member as rejected (soft-delete — the row stays as a
+ * `status = 'rejected'` tombstone so the approval history keeps its details)
+ * and notifies the applicant with an optional reason. Mirrors
+ * {@link verifyResident} for the opposite decision. Returns nothing because the
+ * member leaves the pending queue.
+ */
+export async function rejectResident(residentId: string, reason?: string): Promise<void> {
+  try {
+    await runServerMutation({
+      action: 'reject_resident',
+      residentId,
+      reason: reason?.trim() || undefined,
+    });
+
+    await bootstrapCurrentPathData(true);
+
+    console.log('Resident rejected:', residentId);
+  } catch (error) {
+    console.error('Error rejecting resident:', error);
     throw error;
   }
 }

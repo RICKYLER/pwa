@@ -3,7 +3,7 @@
 export type UserRole = 'admin' | 'encoder' | 'health_worker' | 'responder' | 'resident';
 export type UserAccountStatus = 'active' | 'inactive';
 export type HouseholdStatus = 'active' | 'moved_out' | 'deceased';
-export type ResidentStatus = 'active' | 'moved_out' | 'deceased';
+export type ResidentStatus = 'active' | 'moved_out' | 'deceased' | 'rejected';
 export type ResidentVerificationStatus = 'pending' | 'verified';
 export type CivilStatus = 'single' | 'married' | 'widowed' | 'separated';
 export type IncomeLevel = 'low' | 'middle' | 'high';
@@ -15,7 +15,7 @@ export type DistributionType = 'regular' | 'emergency' | 'disaster_relief';
 export type DistributionStatus = 'planned' | 'ongoing' | 'completed';
 export type DistributionTargetScope = 'household' | 'resident';
 export type DistributionTargetGroup = 'all' | 'senior' | 'pwd' | 'pregnant' | 'minor' | 'low_income';
-export type UserNotificationType = 'distribution_event' | 'disaster_alert';
+export type UserNotificationType = 'distribution_event' | 'disaster_alert' | 'member_approval';
 export type InventoryItemStatus = 'active' | 'trashed';
 export type InventoryMovementType =
   | 'stock_in'

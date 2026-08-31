@@ -233,7 +233,7 @@ export default function NewDistributionPage() {
         setPackageTemplates(templates);
         setBarangayOptions(nextBarangayOptions);
         setForm((current) => {
-          const encoderBarangayId = user.role !== 'admin' ? user.barangay_id : '';
+          const encoderBarangayId = user?.role !== 'admin' ? user?.barangay_id : '';
           const defaultBarangayId = encoderBarangayId || current.barangay_id || nextBarangayOptions[0]?.barangay_id || '';
           return defaultBarangayId === current.barangay_id
             ? current

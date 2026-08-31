@@ -75,8 +75,8 @@ export function getInstallManualSteps(platform: InstallPlatform) {
   }
 
   return [
-    'Open your browser menu or address-bar install icon.',
-    'Choose Install App.',
+    'Click the install icon (a monitor with a down arrow) at the top-right of the address bar.',
+    'Choose Install.',
     'Confirm the install to pin it like a desktop app.',
   ];
 }
@@ -88,7 +88,7 @@ export function getInstallFeedbackMessage(status: InstallFeedbackStatus) {
     case 'awaiting_browser_action':
       return 'Check your browser prompt to continue installation.';
     case 'manual_steps_required':
-      return 'No install prompt appeared. Follow the install steps below.';
+      return 'Your browser did not show an automatic install prompt. Use the steps below.';
     case 'installed':
       return 'App installed successfully.';
     case 'dismissed':

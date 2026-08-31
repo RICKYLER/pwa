@@ -42,6 +42,7 @@ function makeResident(overrides: Partial<Resident> = {}): Resident {
     gender: overrides.gender ?? 'F',
     relationship_to_head: overrides.relationship_to_head ?? 'Self',
     status: overrides.status ?? 'active',
+    verification_status: overrides.verification_status ?? 'verified',
     createdAt: overrides.createdAt ?? new Date('2025-01-01T00:00:00.000Z'),
     updatedAt: overrides.updatedAt ?? new Date('2025-01-01T00:00:00.000Z'),
     syncStatus: overrides.syncStatus ?? 'synced',
@@ -197,7 +198,7 @@ test('data-quality summary exposes deep-link issue counts for admin dashboards',
 
   assert.equal(summary.blocking_issues, 5);
   assert.equal(summary.total_issues, 5);
-  assert.ok(summary.issues.some((issue) => issue.href === '/households?issue=missing_location'));
+  assert.ok(summary.issues.some((issue) => issue.href === '/admin/location-review?tab=approved&issue=missing_coordinates'));
   assert.ok(summary.issues.some((issue) => issue.href === '/vulnerability?issue=missing_birthdate'));
   assert.ok(summary.issues.some((issue) => issue.href === '/distribution?issue=zero_matches'));
 });

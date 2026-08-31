@@ -9,7 +9,9 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",
-    "test": "node --import tsx --test \"tests/**/*.test.ts\""
+    "test": "node --import tsx --test \"tests/**/*.test.ts\"",
+    "apk:init": "bubblewrap init --manifest twa-manifest.json",
+    "apk:build": "bubblewrap build"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.9.1",

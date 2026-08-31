@@ -13,6 +13,10 @@ const ROUTE_TABLES: Array<{
     tables: ['households', 'residents', 'location_master_lists', 'purok_risk_profiles'],
   },
   {
+    prefix: '/admin/member-approvals',
+    tables: ['households', 'residents', 'audit_logs'],
+  },
+  {
     prefix: '/dashboard',
     tables: ['households', 'residents', 'vulnerability_flags', 'audit_logs', 'distribution_events', 'inventory_items', 'package_templates'],
   },

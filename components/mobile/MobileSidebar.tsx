@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { getCurrentUser, hasPermission, logout } from '@/lib/auth';
 import { ADMIN_NAV_ITEMS, type AppNavItem, isPathActive, STAFF_NAV_ITEMS } from '@/lib/navigation';
+import { usePendingMemberApprovalCount } from '@/hooks/usePendingMemberApprovalCount';
 import { cn } from '@/lib/utils';
 
 interface MobileSidebarProps {
@@ -19,11 +20,13 @@ function NavSection({
   items,
   pathname,
   onClose,
+  badges,
 }: {
   title: string;
   items: AppNavItem[];
   pathname: string;
   onClose: () => void;
+  badges?: Record<string, number>;
 }) {
   if (items.length === 0) {
     return null;
@@ -36,6 +39,7 @@ function NavSection({
         {items.map((item) => {
           const active = isPathActive(pathname, item.href);
           const Icon = item.icon;
+          const badge = badges?.[item.href] ?? 0;
 
           return (
             <Link
@@ -63,6 +67,16 @@ function NavSection({
                   {item.description}
                 </p>
               </div>
+              {badge > 0 ? (
+                <span
+                  className={cn(
+                    'flex h-5 min-w-[20px] shrink-0 items-center justify-center rounded-full px-1.5 text-[11px] font-bold',
+                    active ? 'bg-white/20 text-white' : 'bg-rose-600 text-white',
+                  )}
+                >
+                  {badge > 99 ? '99+' : badge}
+                </span>
+              ) : null}
               <ChevronRight className={cn('h-4 w-4 shrink-0', active ? 'text-cyan-100/80' : 'text-slate-300')} />
             </Link>
           );
@@ -79,6 +93,7 @@ export default function MobileSidebar({ isOpen, onClose }: MobileSidebarProps) {
 
   const visibleItems = STAFF_NAV_ITEMS.filter((item) => !item.perm || hasPermission(item.perm as never));
   const adminItems = user?.role === 'admin' ? ADMIN_NAV_ITEMS : [];
+  const pendingApprovals = usePendingMemberApprovalCount();
 
   function handleOpenChange(open: boolean) {
     if (!open) {
@@ -102,7 +117,7 @@ export default function MobileSidebar({ isOpen, onClose }: MobileSidebarProps) {
                 <img src="/dswd-logo.png" alt="DSWD Logo" className="h-full w-full object-contain" />
               </div>
               <div className="min-w-0">
-                <SheetTitle className="truncate text-base font-bold text-slate-950">MSWDO Civic Console</SheetTitle>
+                <SheetTitle className="truncate text-base font-bold text-slate-950">MSWDO </SheetTitle>
                 <SheetDescription className="mt-1 truncate text-sm text-slate-500">
                   {user?.barangay_id || 'Municipal workspace'}
                 </SheetDescription>
@@ -120,7 +135,7 @@ export default function MobileSidebar({ isOpen, onClose }: MobileSidebarProps) {
 
           <NavSection title="Core" items={visibleItems.filter((item) => item.group === 'Core')} pathname={pathname} onClose={onClose} />
           <NavSection title="Operations" items={visibleItems.filter((item) => item.group === 'Operations')} pathname={pathname} onClose={onClose} />
-          <NavSection title="Administration" items={adminItems} pathname={pathname} onClose={onClose} />
+          <NavSection title="Administration" items={adminItems} pathname={pathname} onClose={onClose} badges={{ '/admin/member-approvals': pendingApprovals }} />
         </div>
 
         <SheetFooter className="border-t border-slate-200/70 bg-white/70 px-4 pb-[calc(env(safe-area-inset-bottom)+1rem)] pt-4">

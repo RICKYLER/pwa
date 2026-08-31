@@ -267,6 +267,10 @@ The system also exposes internal Next.js API routes for application features:
 - `SMTP_FROM`
 - `NEXT_PUBLIC_THUNDERFOREST_API_KEY`
 - `NEXT_PUBLIC_TRACESTRACK_KEY`
+- `MSWDO_SYNC_BACKUP_STORE_PATH` — filesystem path for the field-sync backup file (defaults to a writable path; see `lib/server/runtime-storage.ts`)
+- `MSWDO_BACKUP_ENCRYPTION_KEY` — passphrase used to AES-256-GCM encrypt the payloads stored in the field-sync backup file at rest. Keep it strong and outside the repo (`.env*.local` is gitignored). Without it the backup file degrades to plaintext with a one-time warning.
+- `DISTRIBUTION_QR_SECRET` — HMAC secret used to sign resident distribution QR tokens (defaults to `AUTH_SESSION_SECRET`, then a dev-only fallback). Set a strong value in production.
+- `DISTRIBUTION_QR_TTL_MS` — base lifetime of a distribution QR token in milliseconds (default 24h). Tokens are automatically extended to the end of the event's scheduled day when that day is within 14 days of generation, so a household that screenshots its QR during the notification window can still redeem it on distribution day.
 
 ---
 

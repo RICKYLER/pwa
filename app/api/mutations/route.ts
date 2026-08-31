@@ -33,6 +33,7 @@ import {
   updateIncidentStatusOnServer,
   updateInventoryItemOnServer,
   updateResidentOnServer,
+  rejectResidentOnServer,
   verifyResidentOnServer,
 } from '@/lib/server/supabase-mutations';
 import {
@@ -186,6 +187,24 @@ export async function POST(request: NextRequest) {
         const data = await verifyResidentOnServer(
           authResult.user,
           residentId,
+        );
+
+        return NextResponse.json(data, {
+          headers: { 'Cache-Control': 'no-store' },
+        });
+      }
+      case 'reject_resident': {
+        const residentId = typeof body.residentId === 'string' ? body.residentId : '';
+        if (!residentId) {
+          return badRequest('residentId is required.');
+        }
+
+        const reason = typeof body.reason === 'string' ? body.reason : undefined;
+
+        const data = await rejectResidentOnServer(
+          authResult.user,
+          residentId,
+          reason,
         );
 
         return NextResponse.json(data, {

@@ -16,6 +16,7 @@ import { getCurrentUser, hasPermission } from '@/lib/auth';
 import { getAllPuroks, getHouseholds } from '@/lib/db/households';
 import { getPurokRiskProfiles } from '@/lib/db/purok-risk-profiles';
 import { getResidentsInHousehold } from '@/lib/db/residents';
+import { isBirthdayThisMonth } from '@/lib/db/vulnerability';
 import type { DisasterRiskLevel, HazardType, Household, PurokFloodControlStatus, PurokRiskProfile } from '@/lib/db/schema';
 import { formatRegistrationStatusLabel, getHouseholdRegistrationStatus } from '@/lib/household-registration';
 import { hasHouseholdPin } from '@/lib/map-pins';
@@ -77,17 +78,20 @@ export default function HouseholdsMobile() {
   const [puroks, setPuroks] = useState<string[]>([]);
   const [search, setSearch] = useState('');
   const [filterPurok, setFilterPurok] = useState('all');
+  const [filterBarangay, setFilterBarangay] = useState('all');
   const [filterStatus, setFilterStatus] = useState<HouseholdFilterStatus>(DEFAULT_STATUS);
   const [filterHazard, setFilterHazard] = useState<HazardType | 'all'>('all');
   const [filterRiskLevel, setFilterRiskLevel] = useState<DisasterRiskLevel | 'all'>('all');
   const [filterFloodProne, setFilterFloodProne] = useState<PurokFloodProneFilter>('all');
   const [filterFloodControlStatus, setFilterFloodControlStatus] = useState<PurokFloodControlStatus | 'all'>('all');
   const [filterUnverifiedOnly, setFilterUnverifiedOnly] = useState(false);
+  const [filterBirthdayThisMonth, setFilterBirthdayThisMonth] = useState(false);
   const [sortBy, setSortBy] = useState<HouseholdSort>('recent');
   const [filterSheetOpen, setFilterSheetOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [memberCounts, setMemberCounts] = useState<Record<string, number>>({});
   const [hasUnverifiedMembers, setHasUnverifiedMembers] = useState<Record<string, boolean>>({});
+  const [birthdayMembers, setBirthdayMembers] = useState<Record<string, string[]>>({});
   const issueFilter = searchParams.get('issue');
   const isMissingLocationMode = issueFilter === 'missing_location';
   const purokRiskProfileMap = buildPurokRiskProfileMap(purokRiskProfiles);
@@ -113,13 +117,18 @@ export default function HouseholdsMobile() {
 
     const counts: Record<string, number> = {};
     const unverified: Record<string, boolean> = {};
+    const birthdays: Record<string, string[]> = {};
     for (const household of allHouseholds) {
       const hhResidents = await getResidentsInHousehold(household.id);
       counts[household.id] = hhResidents.length;
       unverified[household.id] = hhResidents.some(r => r.verification_status === 'pending');
+      birthdays[household.id] = hhResidents
+        .filter((resident) => resident.status === 'active' && isBirthdayThisMonth(resident.birthdate))
+        .map((resident) => resident.full_name);
     }
     setMemberCounts(counts);
     setHasUnverifiedMembers(unverified);
+    setBirthdayMembers(birthdays);
     setPuroks(
       user.role === 'admin'
         ? [...new Set(allHouseholds.map((household) => household.purok_sitio).filter(Boolean))].sort()
@@ -154,6 +163,16 @@ export default function HouseholdsMobile() {
 
   if (!user) return null;
 
+  // Distinct barangays present in the loaded records; the picker hides itself
+  // when there is only one (a barangay-scoped officer's roster).
+  const barangays = [...new Map(
+    households
+      .filter((household) => household.barangay_id)
+      .map((household) => [household.barangay_id, household.barangay_name || household.barangay_id] as const),
+  ).entries()]
+    .map(([id, label]) => ({ id, label }))
+    .sort((left, right) => left.label.localeCompare(right.label));
+
   const filteredHouseholds = households
     .filter((household) => (
       !isMissingLocationMode
@@ -169,6 +188,7 @@ export default function HouseholdsMobile() {
       return household.status === filterStatus;
     })
     .filter((household) => filterPurok === 'all' || household.purok_sitio === filterPurok)
+    .filter((household) => filterBarangay === 'all' || household.barangay_id === filterBarangay)
     .filter((household) => filterHazard === 'all' || parseHazardTags(household.hazard_tags).includes(filterHazard))
     .filter((household) => filterRiskLevel === 'all' || household.disaster_risk_level === filterRiskLevel)
     .filter((household) => matchesPurokRiskFilters(household, purokRiskProfileMap, {
@@ -176,6 +196,7 @@ export default function HouseholdsMobile() {
       floodControlStatus: filterFloodControlStatus,
     }))
     .filter((household) => !filterUnverifiedOnly || hasUnverifiedMembers[household.id])
+    .filter((household) => !filterBirthdayThisMonth || (birthdayMembers[household.id]?.length ?? 0) > 0)
     .filter((household) => {
       if (!search) {
         return true;
@@ -199,14 +220,17 @@ export default function HouseholdsMobile() {
   const pendingCount = households.filter((household) => getHouseholdRegistrationStatus(household) === 'pending').length;
   const hasFilters = Boolean(search)
     || filterPurok !== 'all'
+    || filterBarangay !== 'all'
     || filterStatus !== DEFAULT_STATUS
     || filterHazard !== 'all'
     || filterRiskLevel !== 'all'
     || filterFloodProne !== 'all'
     || filterFloodControlStatus !== 'all'
     || filterUnverifiedOnly
+    || filterBirthdayThisMonth
     || sortBy !== 'recent'
     || isMissingLocationMode;
+  const birthdayHouseholdCount = Object.values(birthdayMembers).filter((names) => names.length > 0).length;
   const statusOptions = [
     { key: 'all' as const, label: 'All', count: households.length },
     { key: 'active' as const, label: 'Active', count: households.filter((household) => household.status === 'active').length },
@@ -264,12 +288,14 @@ export default function HouseholdsMobile() {
         <CivicBadge label={`${filteredHouseholds.length} showing`} tone="slate" />
         {isMissingLocationMode ? <CivicBadge label="Missing coordinates" tone="amber" /> : null}
         {filterStatus !== DEFAULT_STATUS ? <CivicBadge label={STATUS_CFG[filterStatus as keyof typeof STATUS_CFG]?.label || 'All status'} tone="navy" /> : null}
+        {filterBarangay !== 'all' ? <CivicBadge label={barangays.find((barangay) => barangay.id === filterBarangay)?.label || filterBarangay} tone="navy" /> : null}
         {filterPurok !== 'all' ? <CivicBadge label={filterPurok} tone="teal" /> : null}
         {filterHazard !== 'all' ? <CivicBadge label={HAZARD_LABELS[filterHazard]} tone="teal" /> : null}
         {filterRiskLevel !== 'all' ? <CivicBadge label={DISASTER_RISK_LEVEL_LABELS[filterRiskLevel]} tone="amber" /> : null}
         {filterFloodProne !== 'all' ? <CivicBadge label={filterFloodProne === 'flood_prone' ? 'Flood-prone puroks' : 'Not flood-prone'} tone="rose" /> : null}
         {filterFloodControlStatus !== 'all' ? <CivicBadge label={PUROK_FLOOD_CONTROL_STATUS_LABELS[filterFloodControlStatus]} tone="slate" /> : null}
         {filterUnverifiedOnly ? <CivicBadge label="Unverified Members" tone="rose" className="animate-pulse" /> : null}
+        {filterBirthdayThisMonth ? <CivicBadge label="🎂 Birthdays this month" tone="teal" /> : null}
         {sortBy !== 'recent' ? <CivicBadge label={sortBy === 'name' ? 'Sorted by name' : 'Sorted by members'} tone="slate" /> : null}
       </div>
 
@@ -317,6 +343,35 @@ export default function HouseholdsMobile() {
                 </CivicChipButton>
               </div>
             </div>
+
+            <div className="space-y-2">
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Birthdays</p>
+              <div className="flex flex-wrap gap-2">
+                <CivicChipButton active={filterBirthdayThisMonth} onClick={() => setFilterBirthdayThisMonth(!filterBirthdayThisMonth)}>
+                  🎂 Birthdays this month
+                  <span className={`rounded-full px-2 py-0.5 text-[10px] ${filterBirthdayThisMonth ? 'bg-white/12 text-white' : 'bg-teal-100 text-teal-600'}`}>
+                    {isLoading ? '--' : birthdayHouseholdCount}
+                  </span>
+                </CivicChipButton>
+              </div>
+            </div>
+
+            {barangays.length > 1 ? (
+              <div className="space-y-2">
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Barangay</p>
+                <Select value={filterBarangay} onValueChange={setFilterBarangay}>
+                  <SelectTrigger className="h-11 w-full rounded-[18px] border-slate-200 bg-white px-4 text-sm text-slate-700">
+                    <SelectValue placeholder="All barangays" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All barangays</SelectItem>
+                    {barangays.map((barangay) => (
+                      <SelectItem key={barangay.id} value={barangay.id}>{barangay.label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            ) : null}
 
             <div className="space-y-2">
               <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Purok</p>
@@ -399,12 +454,14 @@ export default function HouseholdsMobile() {
                 onClick={() => {
                   setSearch('');
                   setFilterPurok('all');
+                  setFilterBarangay('all');
                   setFilterStatus(DEFAULT_STATUS);
                   setFilterHazard('all');
                   setFilterRiskLevel('all');
                   setFilterFloodProne('all');
                   setFilterFloodControlStatus('all');
                   setFilterUnverifiedOnly(false);
+                  setFilterBirthdayThisMonth(false);
                   setSortBy('recent');
                 }}
                 className="h-11 rounded-[18px] border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700"
@@ -459,6 +516,15 @@ export default function HouseholdsMobile() {
                   trailing={<CivicBadge label={`${memberCount}`} tone="slate" className="text-[10px]" />}
                   status={(
                     <>
+                      {birthdayMembers[household.id]?.length ? (
+                        <CivicBadge
+                          label={birthdayMembers[household.id].length > 1
+                            ? `🎂 ${birthdayMembers[household.id].length} birthdays this month`
+                            : '🎂 Birthday this month'}
+                          tone="teal"
+                          className="text-[10px]"
+                        />
+                      ) : null}
                       <CivicBadge label={status.label} tone={status.tone} className="text-[10px]" />
                       <CivicBadge
                         label={formatRegistrationStatusLabel(registrationStatus)}

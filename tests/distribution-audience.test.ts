@@ -30,6 +30,7 @@ function makeResident(overrides: Partial<Resident> = {}): Resident {
     gender: overrides.gender ?? 'M',
     relationship_to_head: overrides.relationship_to_head ?? 'Self',
     status: overrides.status ?? 'active',
+    verification_status: overrides.verification_status ?? 'verified',
     createdAt: overrides.createdAt ?? new Date('2025-01-01T00:00:00.000Z'),
     updatedAt: overrides.updatedAt ?? new Date('2025-01-01T00:00:00.000Z'),
     syncStatus: overrides.syncStatus ?? 'synced',

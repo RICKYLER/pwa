@@ -27,7 +27,7 @@ test('shouldSuppressInstallPrompt respects the dismissal cooldown', () => {
 test('getInstallManualSteps provides platform-specific instructions', () => {
   assert.equal(getInstallManualSteps('ios')[1], 'Tap the Share button.');
   assert.equal(getInstallManualSteps('android')[1], 'Tap Install app or Add to Home screen.');
-  assert.equal(getInstallManualSteps('desktop')[0], 'Open your browser menu or address-bar install icon.');
+  assert.equal(getInstallManualSteps('desktop')[0], 'Click the install icon (a monitor with a down arrow) at the top-right of the address bar.');
 });
 
 test('isStandaloneDisplayMode is true when either standalone signal is active', () => {

@@ -45,7 +45,7 @@ export function resolveAppUrl(requestUrl?: string) {
   }
 
   if (isLocalOrigin(configuredOrigin) && isNonLocalRequestOrigin(requestOrigin)) {
-    return requestOrigin;
+    return requestOrigin ?? configuredOrigin ?? vercelOrigin ?? 'http://localhost:3000';
   }
 
   return configuredOrigin ?? requestOrigin ?? vercelOrigin ?? 'http://localhost:3000';

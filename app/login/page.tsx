@@ -188,7 +188,7 @@ export default function LoginPage() {
       stats={LOGIN_STATS}
       footer={
         <p className="text-center text-xs text-slate-500">
-          Secure cookie session. Staff land on the civic console, and residents land on their own portal.
+          Secure cookie session. Staff land on the , and residents land on their own portal.
         </p>
       }
     >

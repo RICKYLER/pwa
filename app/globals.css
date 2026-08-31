@@ -463,3 +463,214 @@
     top: 50%;
   }
 }
+
+/* ─── PWA install download animation ────────────────────────────
+   Choreographed "Download App" sequence: an arrow drops into the
+   tray while the progress ring fills, then snaps to a success burst
+   once the browser reports the app is installed. */
+.install-arrow-drop {
+  animation: install-arrow-drop 1.4s cubic-bezier(0.22, 1, 0.36, 1) infinite;
+}
+
+.install-ring-progress {
+  stroke-dasharray: 201;
+  stroke-dashoffset: 201;
+  animation: install-ring-fill 1.5s cubic-bezier(0.22, 1, 0.36, 1) 0.15s forwards;
+}
+
+.install-ring-sweep {
+  stroke-dasharray: 52 201;
+  animation: install-ring-sweep 1.05s linear infinite;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+.install-bar-fill {
+  transform-origin: left;
+  animation: install-bar-fill 1.5s cubic-bezier(0.22, 1, 0.36, 1) 0.15s forwards;
+}
+
+.install-bar-slide {
+  animation: install-bar-slide 1.05s ease-in-out infinite;
+}
+
+.install-check-pop {
+  animation: install-check-pop 0.55s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+.install-burst {
+  animation: install-burst 0.9s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.install-pulse {
+  animation: install-pulse 1.4s ease-in-out infinite;
+}
+
+.install-shake {
+  animation: install-shake 0.5s ease-in-out both;
+}
+
+.install-dot {
+  animation: install-dot 1.2s ease-in-out infinite;
+}
+
+@keyframes install-arrow-drop {
+  0% {
+    transform: translateY(-7px);
+    opacity: 0;
+  }
+
+  22% {
+    opacity: 1;
+  }
+
+  55% {
+    transform: translateY(3px);
+    opacity: 1;
+  }
+
+  72% {
+    transform: translateY(1px);
+  }
+
+  100% {
+    transform: translateY(2px);
+    opacity: 1;
+  }
+}
+
+@keyframes install-ring-fill {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes install-ring-sweep {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes install-bar-fill {
+  from {
+    transform: scaleX(0);
+  }
+
+  to {
+    transform: scaleX(1);
+  }
+}
+
+@keyframes install-bar-slide {
+  0% {
+    transform: translateX(-110%);
+  }
+
+  100% {
+    transform: translateX(260%);
+  }
+}
+
+@keyframes install-check-pop {
+  0% {
+    transform: scale(0.2);
+    opacity: 0;
+  }
+
+  60% {
+    transform: scale(1.18);
+  }
+
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+@keyframes install-burst {
+  0% {
+    transform: translate(0, 0) scale(0.4);
+    opacity: 0;
+  }
+
+  20% {
+    opacity: 1;
+  }
+
+  100% {
+    transform: translate(var(--tx, 0px), var(--ty, 0px)) scale(1);
+    opacity: 0;
+  }
+}
+
+@keyframes install-pulse {
+  0%,
+  100% {
+    transform: scale(0.96);
+    opacity: 0.5;
+  }
+
+  50% {
+    transform: scale(1.06);
+    opacity: 0.9;
+  }
+}
+
+@keyframes install-shake {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+
+  20% {
+    transform: translateX(-5px);
+  }
+
+  40% {
+    transform: translateX(5px);
+  }
+
+  60% {
+    transform: translateX(-3px);
+  }
+
+  80% {
+    transform: translateX(3px);
+  }
+}
+
+@keyframes install-dot {
+  0%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.4;
+  }
+
+  50% {
+    transform: translateY(-5px);
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .install-arrow-drop,
+  .install-ring-sweep,
+  .install-bar-slide,
+  .install-check-pop,
+  .install-burst,
+  .install-pulse,
+  .install-shake,
+  .install-dot {
+    animation: none !important;
+  }
+
+  .install-ring-progress {
+    animation: none !important;
+    stroke-dashoffset: 0;
+  }
+
+  .install-bar-fill {
+    animation: none !important;
+    transform: scaleX(1);
+  }
+}

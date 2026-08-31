@@ -22,10 +22,20 @@ import {
   type InstallPlatform,
   shouldSuppressInstallPrompt,
 } from '@/lib/pwa-install';
+import { useToast } from '@/hooks/use-toast';
 
 type InstallOutcome = 'accepted' | 'dismissed' | 'unavailable';
 
 const INSTALL_PROMPT_OPEN_TIMEOUT_MS = 3500;
+// How long to keep waiting for the browser's `beforeinstallprompt` event when
+// the user taps Download before it has fired. Chrome fires it a beat after the
+// page becomes installable, so this grace period turns "no prompt yet" into an
+// instant install dialog on Chrome/Edge instead of a manual-steps dead end.
+const INSTALL_PROMPT_WAIT_MS = 3500;
+// Optional: when NEXT_PUBLIC_APK_URL is set, Android users get a direct APK
+// download — press Download, the .apk file saves to the phone instantly, tap
+// it to install. No browser install prompt, no manual steps. See APK_BUILD.md.
+const APK_URL = process.env.NEXT_PUBLIC_APK_URL;
 
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string) {
   let timeoutId: number | null = null;
@@ -45,6 +55,7 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string)
 
 type PwaInstallContextValue = {
   platform: InstallPlatform;
+  apkUrl: string | undefined;
   manualSteps: string[];
   isInstalled: boolean;
   isInstallAvailable: boolean;
@@ -92,6 +103,7 @@ function clearDismissal() {
 }
 
 export function PwaInstallProvider({ children }: { children: ReactNode }) {
+  const { toast } = useToast();
   const [platform, setPlatform] = useState<InstallPlatform>('desktop');
   const [isInstalled, setIsInstalled] = useState(false);
   const [isDismissed, setIsDismissed] = useState(true);
@@ -102,6 +114,10 @@ export function PwaInstallProvider({ children }: { children: ReactNode }) {
   const [hasUsedInstallExperienceThisSession, setHasUsedInstallExperienceThisSession] = useState(false);
   const installStateTimerRef = useRef<number | null>(null);
   const feedbackTimerRef = useRef<number | null>(null);
+  const pendingInstallPromptWaitRef = useRef<{
+    resolve: (promptEvent: BeforeInstallPromptEvent) => void;
+    reject: (error: Error) => void;
+  } | null>(null);
 
   function clearInstallStateTimer() {
     if (installStateTimerRef.current) {
@@ -137,7 +153,12 @@ export function PwaInstallProvider({ children }: { children: ReactNode }) {
 
     function handleBeforeInstallPrompt(event: Event) {
       event.preventDefault();
-      setDeferredPrompt(event as BeforeInstallPromptEvent);
+      const promptEvent = event as BeforeInstallPromptEvent;
+      setDeferredPrompt(promptEvent);
+      // If the user already tapped Download and is waiting on the grace
+      // period, hand the freshly-arrived prompt straight over so the browser
+      // install dialog opens the moment the event lands.
+      pendingInstallPromptWaitRef.current?.resolve(promptEvent);
     }
 
     function handleInstalled() {
@@ -148,7 +169,13 @@ export function PwaInstallProvider({ children }: { children: ReactNode }) {
       setIsDismissed(true);
       setInstallFeedbackStatus('installed');
       setIsInstalled(true);
-      setIsDialogOpen(false);
+      // Keep the install dialog open so its success screen can animate and
+      // confirm the download before closing itself. Every entry point also
+      // gets a toast so users never wonder whether the app was installed.
+      toast({
+        title: 'App installed',
+        description: 'E-Mabini is now on your home screen. You can open it anytime.',
+      });
       setHasUsedInstallExperienceThisSession(true);
     }
 
@@ -163,6 +190,7 @@ export function PwaInstallProvider({ children }: { children: ReactNode }) {
     return () => {
       clearInstallStateTimer();
       clearFeedbackTimer();
+      pendingInstallPromptWaitRef.current = null;
       window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
       window.removeEventListener('appinstalled', handleInstalled);
       displayModeQuery.removeEventListener?.('change', handleDisplayModeChange);
@@ -187,6 +215,7 @@ export function PwaInstallProvider({ children }: { children: ReactNode }) {
 
   const isInstallAvailable = Boolean(deferredPrompt);
   const canManualInstall = true;
+  const apkUrl = platform === 'android' ? (APK_URL || undefined) : undefined;
   const manualSteps = useMemo(() => getInstallManualSteps(platform), [platform]);
   const installFeedbackMessage = useMemo(
     () => getInstallFeedbackMessage(installFeedbackStatus),
@@ -220,20 +249,55 @@ export function PwaInstallProvider({ children }: { children: ReactNode }) {
     setIsDialogOpen(false);
   }
 
+  function waitForInstallPrompt(timeoutMs: number): Promise<BeforeInstallPromptEvent> {
+    return new Promise<BeforeInstallPromptEvent>((resolve, reject) => {
+      const timeoutId = window.setTimeout(() => {
+        if (pendingInstallPromptWaitRef.current) {
+          pendingInstallPromptWaitRef.current = null;
+        }
+        reject(new Error('The browser did not provide an install prompt.'));
+      }, timeoutMs);
+
+      pendingInstallPromptWaitRef.current = {
+        resolve: (promptEvent) => {
+          window.clearTimeout(timeoutId);
+          pendingInstallPromptWaitRef.current = null;
+          resolve(promptEvent);
+        },
+        reject: (error) => {
+          window.clearTimeout(timeoutId);
+          pendingInstallPromptWaitRef.current = null;
+          reject(error);
+        },
+      };
+    });
+  }
+
   async function install(): Promise<InstallOutcome> {
     setHasUsedInstallExperienceThisSession(true);
-
-    if (!deferredPrompt) {
-      setInstallFeedbackStatus('manual_steps_required');
-      setIsDialogOpen(true);
-      return 'unavailable';
-    }
-
     clearInstallStateTimer();
     setIsInstalling(true);
-    setInstallFeedbackStatus('opening_prompt');
+
     try {
-      const prompt = deferredPrompt;
+      let prompt = deferredPrompt;
+
+      // The browser fires `beforeinstallprompt` a beat after the page becomes
+      // installable (service worker activation, installability heuristics). If
+      // the user taps Download before it arrives, wait the short grace period
+      // for it so Chrome/Edge opens the install dialog right away — instead of
+      // dropping the user straight into manual steps. iOS never fires it, so
+      // skip straight to the Safari steps there.
+      if (!prompt && platform !== 'ios') {
+        setInstallFeedbackStatus('opening_prompt');
+        prompt = await waitForInstallPrompt(INSTALL_PROMPT_WAIT_MS);
+      }
+
+      if (!prompt) {
+        setInstallFeedbackStatus('manual_steps_required');
+        setIsDialogOpen(true);
+        return 'unavailable';
+      }
+
       setDeferredPrompt(null);
       setInstallFeedbackStatus('awaiting_browser_action');
 
@@ -248,12 +312,11 @@ export function PwaInstallProvider({ children }: { children: ReactNode }) {
 
       if (choice.outcome === 'accepted') {
         clearDismissal();
-        setInstallFeedbackStatus('installed');
         setIsDismissed(true);
-        setIsDialogOpen(false);
-        installStateTimerRef.current = window.setTimeout(() => {
-          setIsInstalled(true);
-        }, 1200);
+        setInstallFeedbackStatus('installed');
+        setIsInstalled(true);
+        // Keep the dialog open so its success screen can animate before the
+        // dialog auto-closes. The `appinstalled` handler does the same.
         return 'accepted';
       }
 
@@ -272,6 +335,7 @@ export function PwaInstallProvider({ children }: { children: ReactNode }) {
 
   const value = useMemo<PwaInstallContextValue>(() => ({
     platform,
+    apkUrl,
     manualSteps,
     isInstalled,
     isInstallAvailable,
@@ -287,6 +351,7 @@ export function PwaInstallProvider({ children }: { children: ReactNode }) {
     dismissPrompt,
     install,
   }), [
+    apkUrl,
     canManualInstall,
     isDialogOpen,
     isInstallAvailable,

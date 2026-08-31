@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createHash } from 'crypto';
 import { evaluateHouseholdDistributionEligibility } from '@/lib/distribution-claims';
 import { verifyDistributionQrToken } from '@/lib/server/distribution-qr';
+import { writeQrScanLog } from '@/lib/server/distribution-qr-log';
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
 import { requireAuthenticatedUser } from '@/lib/server/auth-guards';
 import { fetchDistributionVulnerabilityFlags } from '@/lib/server/distribution-vulnerability-flags';
@@ -14,43 +14,6 @@ export const runtime = 'nodejs';
 
 function badRequest(message: string, status = 400) {
   return NextResponse.json({ error: message }, { status });
-}
-
-async function writeQrScanLog(input: {
-  supabase: ReturnType<typeof getSupabaseAdminClient>;
-  eventId?: string | null;
-  householdId?: string | null;
-  claimantUserId?: string | null;
-  scannedBy?: string | null;
-  source: 'camera' | 'manual' | 'link';
-  status: 'resolved' | 'rejected' | 'released';
-  token?: string | null;
-  notes?: string | null;
-}) {
-  const tokenHash = input.token
-    ? createHash('sha256').update(input.token).digest('hex')
-    : null;
-
-  const { error } = await input.supabase
-    .from('distribution_qr_scan_logs')
-    .insert({
-      id: `qrlog_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`,
-      event_id: input.eventId ?? null,
-      household_id: input.householdId ?? null,
-      claimant_user_id: input.claimantUserId ?? null,
-      scanned_by: input.scannedBy ?? null,
-      source: input.source,
-      status: input.status,
-      token_hash: tokenHash,
-      notes: input.notes ?? null,
-    });
-
-  if (error) {
-    const message = (error.message ?? '').toLowerCase();
-    if (message.includes('distribution_qr_scan_logs') && (message.includes('does not exist') || message.includes('schema cache') || message.includes('could not find'))) {
-      return;
-    }
-  }
 }
 
 export async function POST(request: NextRequest) {
@@ -144,7 +107,7 @@ export async function POST(request: NextRequest) {
 
   const { data: household, error: householdError } = await supabase
     .from('households')
-    .select('id, head_name, barangay_id, status, registration_status, applicant_user_id')
+    .select('id, head_name, barangay_id, purok_sitio, street_address, status, registration_status, applicant_user_id')
     .eq('id', claims.householdId)
     .eq('applicant_user_id', claims.userId)
     .eq('status', 'active')
@@ -267,6 +230,8 @@ export async function POST(request: NextRequest) {
     eventId: event.id,
     householdId: household.id,
     householdName: household.head_name,
+    purokSitio: household.purok_sitio ?? null,
+    streetAddress: household.street_address ?? null,
     receivedByName: household.head_name,
     matchedResidentNames: eligibility.matchedResidents.map((resident) => resident.full_name),
   }, {

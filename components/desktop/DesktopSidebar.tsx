@@ -5,6 +5,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import { ArrowUpRight, LogOut } from 'lucide-react';
 import { getCurrentUser, hasPermission, logout } from '@/lib/auth';
 import { ADMIN_NAV_ITEMS, isPathActive, STAFF_NAV_ITEMS } from '@/lib/navigation';
+import { usePendingMemberApprovalCount } from '@/hooks/usePendingMemberApprovalCount';
 import { cn } from '@/lib/utils';
 
 function SidebarLink({
@@ -13,12 +14,14 @@ function SidebarLink({
   description,
   Icon,
   active,
+  badge,
 }: {
   href: string;
   label: string;
   description: string;
   Icon: React.ComponentType<{ className?: string; strokeWidth?: number }>;
   active: boolean;
+  badge?: number;
 }) {
   return (
     <Link
@@ -46,7 +49,18 @@ function SidebarLink({
           {description}
         </p>
       </div>
-      {active ? <ArrowUpRight className="h-4 w-4 flex-shrink-0 text-cyan-100" /> : null}
+      {badge && badge > 0 ? (
+        <span
+          className={cn(
+            'flex h-5 min-w-[20px] flex-shrink-0 items-center justify-center rounded-full px-1.5 text-[11px] font-bold',
+            active ? 'bg-white/20 text-white' : 'bg-rose-600 text-white',
+          )}
+        >
+          {badge > 99 ? '99+' : badge}
+        </span>
+      ) : active ? (
+        <ArrowUpRight className="h-4 w-4 flex-shrink-0 text-cyan-100" />
+      ) : null}
     </Link>
   );
 }
@@ -58,6 +72,7 @@ export default function DesktopSidebar() {
 
   const visibleItems = STAFF_NAV_ITEMS.filter((item) => !item.perm || hasPermission(item.perm as never));
   const adminItems = user?.role === 'admin' ? ADMIN_NAV_ITEMS : [];
+  const pendingApprovals = usePendingMemberApprovalCount();
 
   function handleLogout() {
     logout();
@@ -72,7 +87,7 @@ export default function DesktopSidebar() {
             <img src="/dswd-logo.png" alt="DSWD Logo" className="h-full w-full object-contain" />
           </div>
           <div className="min-w-0">
-            <p className="text-sm font-bold text-slate-950">MSWDO Civic Console</p>
+            <p className="text-sm font-bold text-slate-950">MSWDO </p>
             <p className="truncate text-[11px] text-slate-500">{user?.barangay_id || 'Municipal workspace'}</p>
           </div>
         </div>
@@ -132,6 +147,7 @@ export default function DesktopSidebar() {
                   description={item.description}
                   Icon={item.icon}
                   active={isPathActive(pathname, item.href)}
+                  badge={item.href === '/admin/member-approvals' ? pendingApprovals : undefined}
                 />
               ))}
             </div>

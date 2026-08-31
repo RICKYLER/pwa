@@ -1025,12 +1025,32 @@ function compareRemoteHouseholdMembershipRows(
   );
 }
 
-async function resolveResidentApprovedActiveHouseholdOnServer(remoteActorId: string) {
+async function resolveResidentApprovedActiveHouseholdOnServer(
+  remoteActorId: string,
+  applicantEmail?: string | null,
+) {
   const supabase = getSupabaseAdminClient();
+
+  // A resident owns a household when it was registered under their Supabase id
+  // OR their account email — the same ownership rule the resident portal applies
+  // client-side (see getHouseholds in lib/db/households.ts). Matching only on the
+  // id here is what triggered "Residents can only add members to their latest
+  // approved active household" for households linked purely by email.
+  const normalizedEmail = toOptionalString(applicantEmail)?.toLowerCase() ?? null;
+
+  const orFilters = [`applicant_user_id.eq.${remoteActorId}`];
+  // Coarse DB prefilter only; exact case-insensitive equality is enforced in JS
+  // below, so ilike wildcard characters ("_"/"%") that are legal in emails can't
+  // cause a false match. Skip the email clause if it carries PostgREST or()
+  // delimiters to avoid corrupting the filter string.
+  if (normalizedEmail && !/[,()]/.test(normalizedEmail)) {
+    orFilters.push(`applicant_email.ilike.${normalizedEmail}`);
+  }
+
   const { data, error } = await supabase
     .from('households')
-    .select('id, barangay_id, applicant_user_id, registration_status, status, registration_reviewed_at, updated_at, created_at')
-    .eq('applicant_user_id', remoteActorId)
+    .select('id, barangay_id, applicant_user_id, applicant_email, registration_status, status, registration_reviewed_at, updated_at, created_at')
+    .or(orFilters.join(','))
     .eq('registration_status', 'approved')
     .eq('status', 'active');
 
@@ -1042,7 +1062,19 @@ async function resolveResidentApprovedActiveHouseholdOnServer(remoteActorId: str
     return null;
   }
 
-  return [...data].sort(compareRemoteHouseholdMembershipRows)[0] ?? null;
+  const owned = data.filter(
+    (row) =>
+      row.applicant_user_id === remoteActorId
+      || (normalizedEmail
+        && typeof row.applicant_email === 'string'
+        && row.applicant_email.toLowerCase() === normalizedEmail),
+  );
+
+  if (!owned.length) {
+    return null;
+  }
+
+  return [...owned].sort(compareRemoteHouseholdMembershipRows)[0] ?? null;
 }
 
 async function createResidentWithoutRpc(
@@ -1080,7 +1112,7 @@ async function createResidentWithoutRpc(
   }
 
   if (user.role === 'resident') {
-    const activeHousehold = await resolveResidentApprovedActiveHouseholdOnServer(remoteActorId);
+    const activeHousehold = await resolveResidentApprovedActiveHouseholdOnServer(remoteActorId, user.email);
     if (!activeHousehold || activeHousehold.id !== household.id) {
       throw new Error('Residents can only add members to their latest approved active household.');
     }
@@ -1458,6 +1490,134 @@ export async function verifyResidentOnServer(
   });
 
   return data;
+}
+
+export async function rejectResidentOnServer(
+  user: User,
+  residentId: string,
+  reason?: string,
+) {
+  if (!['admin', 'encoder'].includes(user.role)) {
+    throw new Error('You are not allowed to reject residents.');
+  }
+
+  const supabase = getSupabaseAdminClient();
+
+  // Gather the member + household details before deleting so we can notify the
+  // applicant and record what was rejected.
+  const { data: residentRow, error: residentError } = await supabase
+    .from('residents')
+    .select('id, full_name, household_id')
+    .eq('id', residentId)
+    .maybeSingle();
+
+  if (residentError) {
+    throw new Error(residentError.message);
+  }
+
+  if (!residentRow) {
+    throw new Error('The member you are trying to reject no longer exists.');
+  }
+
+  const householdId = typeof residentRow.household_id === 'string' ? residentRow.household_id : '';
+  const memberName = typeof residentRow.full_name === 'string' && residentRow.full_name.trim()
+    ? residentRow.full_name.trim()
+    : 'A household member';
+
+  let recipientUserId = '';
+  let householdName = 'your household';
+  if (householdId) {
+    const { data: householdRow, error: householdError } = await supabase
+      .from('households')
+      .select('id, head_name, applicant_user_id')
+      .eq('id', householdId)
+      .maybeSingle();
+
+    if (householdError) {
+      throw new Error(householdError.message);
+    }
+
+    recipientUserId = typeof householdRow?.applicant_user_id === 'string' ? householdRow.applicant_user_id : '';
+    householdName = typeof householdRow?.head_name === 'string' && householdRow.head_name.trim()
+      ? householdRow.head_name.trim()
+      : householdName;
+  }
+
+  // Soft-delete the member instead of removing the row. The tombstone keeps the
+  // full record (birthdate, gender, relationship) so the Member Approvals
+  // history can render the rejection in detail, and matches how households use
+  // `moved_out`/`deceased`. The vulnerability_flags row is left in place; every
+  // report path filters residents by `status`, so a rejected member never
+  // counts toward vulnerable-sector totals.
+  const decidedAt = new Date().toISOString();
+  const { error: rejectError } = await supabase
+    .from('residents')
+    .update({
+      status: 'rejected',
+      updated_at: decidedAt,
+      sync_status: 'synced',
+    })
+    .eq('id', residentId);
+
+  if (rejectError) {
+    throw new Error(rejectError.message);
+  }
+
+  // Best-effort resident notice, idempotent under retries: the notification id
+  // is derived from the resident id, so re-running the reject (or re-rejecting
+  // after an error) updates the existing notice instead of duplicating it.
+  // This requires the user_notifications type CHECK constraint to include
+  // 'member_approval'; if that migration has not been applied yet the upsert is
+  // rejected and we skip the notice — the rejection itself still stands.
+  if (recipientUserId) {
+    const trimmedReason = typeof reason === 'string' ? reason.trim() : '';
+    const body = trimmedReason
+      ? `${memberName} was not approved to be added to ${householdName}. Reason: ${trimmedReason}`
+      : `${memberName} was not approved to be added to ${householdName}.`;
+
+    try {
+      const { error: notifyError } = await supabase
+        .from('user_notifications')
+        .upsert({
+          id: `mbr_rej_${residentId}`,
+          user_id: recipientUserId,
+          type: 'member_approval',
+          title: 'Household member not approved',
+          body,
+          payload: {
+            member_name: memberName,
+            household_id: householdId || null,
+            decision: 'rejected',
+            reason: trimmedReason || null,
+            decided_at: decidedAt,
+          },
+          read_at: null,
+          updated_at: decidedAt,
+        }, {
+          onConflict: 'id',
+        });
+
+      if (notifyError) {
+        console.error('Skipped member rejection notice:', notifyError.message);
+      }
+    } catch (notifyError) {
+      console.error('Failed to send member rejection notice:', notifyError);
+    }
+  }
+
+  await createAuditLogEntry({
+    user,
+    action: 'REJECT',
+    entityType: 'resident',
+    entityId: residentId,
+    changes: {
+      member_name: memberName,
+      household_id: householdId || null,
+      reason: (typeof reason === 'string' ? reason.trim() : '') || null,
+    },
+  });
+
+  return { id: residentId, rejected: true };
 }
 
 export async function createInventoryItemOnServer(

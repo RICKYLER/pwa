@@ -24,7 +24,7 @@ function restoreEnv() {
 test.afterEach(restoreEnv);
 
 test('development requests from a LAN host override localhost app URL config', () => {
-  process.env.NODE_ENV = 'development';
+  (process.env as Record<string, string | undefined>).NODE_ENV = 'development';
   process.env.APP_URL = 'http://localhost:3000';
   process.env.NEXT_PUBLIC_APP_URL = 'http://localhost:3000';
 
@@ -35,7 +35,7 @@ test('development requests from a LAN host override localhost app URL config', (
 });
 
 test('development keeps configured app URL when it is not localhost', () => {
-  process.env.NODE_ENV = 'development';
+  (process.env as Record<string, string | undefined>).NODE_ENV = 'development';
   process.env.APP_URL = 'https://mswdo.example.test';
 
   assert.equal(
@@ -45,7 +45,7 @@ test('development keeps configured app URL when it is not localhost', () => {
 });
 
 test('production prefers configured non-local app URL', () => {
-  process.env.NODE_ENV = 'production';
+  (process.env as Record<string, string | undefined>).NODE_ENV = 'production';
   process.env.APP_URL = 'https://mswdo.example.test';
 
   assert.equal(

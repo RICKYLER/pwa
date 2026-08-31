@@ -11,7 +11,7 @@ import {
   getResidentsInHousehold, createResident, updateResident,
   deleteResident, getResidentVulnerabilityFlags, verifyResident, updateHealthFlags,
 } from '@/lib/db/residents';
-import { calculateAge, getPregnancyProgress } from '@/lib/db/vulnerability';
+import { calculateAge, getBirthdayStatus, getPregnancyProgress } from '@/lib/db/vulnerability';
 import { type DisasterRiskLevel, type FollowUpStatus, type HazardType, type PWDType, Household, PurokRiskProfile, Resident, VulnerabilityFlags } from '@/lib/db/schema';
 import { mergePurokOptions, normalizePurokSitio } from '@/lib/geocoding';
 import {
@@ -410,6 +410,9 @@ export default function HouseholdDetailsPage() {
 
   const canEdit = hasPermission('update_resident');
   const canEditHealth = hasPermission('update_health_flags');
+  const birthdaysToday = residents.filter(
+    ({ resident }) => resident.status === 'active' && getBirthdayStatus(resident.birthdate)?.isToday,
+  ).length;
   const backHref = hasPermission('view_households') ? '/households' : '/vulnerability';
   const backLabel = hasPermission('view_households') ? 'Back to Households' : 'Back to Vulnerability';
 
@@ -887,6 +890,11 @@ export default function HouseholdDetailsPage() {
             <div>
               <h2 className="font-bold text-slate-900">Household Members</h2>
               <p className="text-xs text-slate-400 mt-0.5">{residents.length} member{residents.length !== 1 ? 's' : ''} registered</p>
+              {birthdaysToday > 0 && (
+                <span className="inline-flex items-center gap-1 mt-2 px-2.5 py-1 bg-gradient-to-r from-pink-500 to-rose-500 text-white text-[11px] font-bold rounded-full shadow-sm shadow-rose-500/25">
+                  🎂 {birthdaysToday} birthday{birthdaysToday !== 1 ? 's' : ''} today
+                </span>
+              )}
             </div>
             {canEdit && (
               <button onClick={openAddResident}
@@ -981,6 +989,7 @@ export default function HouseholdDetailsPage() {
             ) : (
               residents.map(({ resident, flags }) => {
                 const age = calculateAge(resident.birthdate);
+                const birthday = resident.status === 'active' ? getBirthdayStatus(resident.birthdate) : null;
                 const vuln: string[] = [];
                 if (flags?.is_child) vuln.push('Child');
                 if (flags?.is_senior) vuln.push('Senior');
@@ -1016,6 +1025,20 @@ export default function HouseholdDetailsPage() {
                             <span className="px-2 py-0.5 bg-amber-100 text-amber-700 text-[10px] font-bold rounded-full animate-pulse">Pending Verification</span>
                           ) : (
                             <span className="px-2 py-0.5 bg-emerald-100 text-emerald-700 text-[10px] font-bold rounded-full">Verified</span>
+                          )}
+                          {birthday?.isToday && (
+                            <span
+                              title={`Birthday today — ${birthday.label}`}
+                              className="inline-flex items-center gap-1 px-2 py-0.5 bg-gradient-to-r from-pink-500 to-rose-500 text-white text-[10px] font-bold rounded-full shadow-sm shadow-rose-500/25">
+                              🎂 {birthday.label}
+                            </span>
+                          )}
+                          {birthday?.isUpcoming && (
+                            <span
+                              title={`Upcoming birthday — ${birthday.label}`}
+                              className="inline-flex items-center gap-1 px-2 py-0.5 bg-pink-100 text-pink-700 text-[10px] font-semibold rounded-full">
+                              🎂 {birthday.label}
+                            </span>
                           )}
                         </div>
                         <p className="text-sm text-slate-500">{resident.relationship_to_head || 'Member'}</p>

@@ -1,25 +1,18 @@
 'use client';
 
-import { Download, Loader2, MonitorSmartphone } from 'lucide-react';
+import { MonitorSmartphone } from 'lucide-react';
 import PwaInstallStatusMessage from '@/components/PwaInstallStatusMessage';
+import InstallDownloadButton from '@/components/InstallDownloadButton';
 import { usePwaInstall } from '@/hooks/usePwaInstall';
-import { getInstallActionLabel } from '@/lib/pwa-install';
 
 export default function PwaInstallPrompt() {
   const {
     showPrompt,
-    isInstalling,
-    install,
     dismissPrompt,
-    installFeedbackStatus,
   } = usePwaInstall();
 
   if (!showPrompt) {
     return null;
-  }
-
-  async function handleDownload() {
-    await install();
   }
 
   return (
@@ -40,15 +33,7 @@ export default function PwaInstallPrompt() {
             <PwaInstallStatusMessage className="mt-3" />
           </div>
           <div className="flex flex-shrink-0 items-center gap-2">
-            <button
-              type="button"
-              onClick={() => { void handleDownload(); }}
-              disabled={isInstalling}
-              className="inline-flex items-center justify-center gap-2 rounded-full bg-cyan-950 px-4 py-2 text-sm font-semibold text-white transition hover:bg-cyan-900 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {isInstalling ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
-              {getInstallActionLabel(installFeedbackStatus, 'Download App')}
-            </button>
+            <InstallDownloadButton />
             <button
               type="button"
               onClick={dismissPrompt}

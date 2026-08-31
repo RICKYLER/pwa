@@ -9,6 +9,7 @@ import {
   Radio,
   ShieldAlert,
   Truck,
+  UserCheck,
   UserCog,
   Users,
 } from 'lucide-react';
@@ -129,6 +130,17 @@ export const STAFF_NAV_ITEMS: AppNavItem[] = [
 ];
 
 export const ADMIN_NAV_ITEMS: AppNavItem[] = [
+  {
+    href: '/admin/member-approvals',
+    label: 'Member Approvals',
+    mobileLabel: 'Approvals',
+    description: 'Review new household members residents added',
+    pageTitle: 'Member Approvals',
+    pageEyebrow: 'Administration',
+    icon: UserCheck,
+    perm: null,
+    group: 'Administration',
+  },
   {
     href: '/admin/users',
     label: 'User Accounts',
