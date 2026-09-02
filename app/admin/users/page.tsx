@@ -6,6 +6,7 @@ import AppShell from '@/components/AppShell';
 import { restoreSession } from '@/lib/auth';
 import { BARANGAY_OPTIONS, getBarangayLabel, normalizeBarangaySelection } from '@/lib/barangays';
 import type { User, UserRole } from '@/lib/db/schema';
+import { purgeHouseholdsByApplicant } from '@/lib/db/households';
 import {
   AlertTriangle,
   Building2,
@@ -66,6 +67,7 @@ export default function AdminUsersPage() {
   const [toast, setToast] = useState<ToastState | null>(null);
   const [actionConfirm, setActionConfirm] = useState<{ userId: string; action: AccountAction } | null>(null);
   const [actionLoadingId, setActionLoadingId] = useState<string | null>(null);
+  const [deleteConfirmText, setDeleteConfirmText] = useState('');
 
   const usersByRole = useMemo(() => (
     ROLES.map((role) => ({
@@ -204,8 +206,23 @@ export default function AdminUsersPage() {
       }
 
       setActionConfirm(null);
+      setDeleteConfirmText('');
+
+      const targetUser = users.find((user) => user.id === userId);
+
+      // The server cascades the deletion in Supabase mode; in local mode this
+      // IndexedDB purge is the only place the linked household data is removed.
+      const purgedHouseholdIds = await purgeHouseholdsByApplicant(userId, targetUser?.email);
+
       await loadUsers();
-      showToast('success', 'Account permanently deleted.');
+
+      const householdCount = payload.deletedHouseholds?.length ?? purgedHouseholdIds.length;
+      showToast(
+        'success',
+        householdCount > 0
+          ? `Account permanently deleted, along with ${householdCount} household${householdCount === 1 ? '' : 's'} and all member data.`
+          : 'Account permanently deleted.',
+      );
     } catch (error) {
       showToast('error', error instanceof Error ? error.message : 'Unable to delete account.');
     } finally {
@@ -529,24 +546,58 @@ export default function AdminUsersPage() {
 
                         <div className="flex flex-shrink-0 items-center gap-1">
                           {confirmAction === 'delete' ? (
-                            <>
-                              <span className="mr-1 text-xs font-semibold text-red-600">Permanent delete?</span>
-                              <button
-                                onClick={() => {
-                                  void handleDelete(user.id);
-                                }}
-                                disabled={isActionLoading}
-                                className="rounded-lg bg-red-600 px-2.5 py-1.5 text-xs font-bold text-white transition hover:bg-red-700"
-                              >
-                                {isActionLoading ? 'Deleting…' : 'Delete forever'}
-                              </button>
-                              <button
-                                onClick={() => setActionConfirm(null)}
-                                className="rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs font-medium text-slate-500"
-                              >
-                                No
-                              </button>
-                            </>
+                            user.role === 'resident' ? (
+                              <>
+                                <div className="mr-2 flex flex-col items-end gap-1.5">
+                                  <span className="text-xs font-semibold text-red-600">
+                                    Deletes their household and all member data.
+                                  </span>
+                                  <input
+                                    type="text"
+                                    value={deleteConfirmText}
+                                    onChange={(event) => setDeleteConfirmText(event.target.value)}
+                                    placeholder="Type DELETE to confirm"
+                                    autoComplete="off"
+                                    className="w-44 rounded-lg border border-red-200 px-2.5 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-red-500/30"
+                                  />
+                                </div>
+                                <button
+                                  onClick={() => {
+                                    void handleDelete(user.id);
+                                  }}
+                                  disabled={isActionLoading || deleteConfirmText.trim().toUpperCase() !== 'DELETE'}
+                                  className="rounded-lg bg-red-600 px-2.5 py-1.5 text-xs font-bold text-white transition hover:bg-red-700 disabled:opacity-40 disabled:cursor-not-allowed"
+                                >
+                                  {isActionLoading ? 'Deleting…' : 'Delete forever'}
+                                </button>
+                                <button
+                                  onClick={() => { setActionConfirm(null); setDeleteConfirmText(''); }}
+                                  disabled={isActionLoading}
+                                  className="rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs font-medium text-slate-500"
+                                >
+                                  No
+                                </button>
+                              </>
+                            ) : (
+                              <>
+                                <span className="mr-1 text-xs font-semibold text-red-600">Permanent delete?</span>
+                                <button
+                                  onClick={() => {
+                                    void handleDelete(user.id);
+                                  }}
+                                  disabled={isActionLoading}
+                                  className="rounded-lg bg-red-600 px-2.5 py-1.5 text-xs font-bold text-white transition hover:bg-red-700"
+                                >
+                                  {isActionLoading ? 'Deleting…' : 'Delete forever'}
+                                </button>
+                                <button
+                                  onClick={() => setActionConfirm(null)}
+                                  className="rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs font-medium text-slate-500"
+                                >
+                                  No
+                                </button>
+                              </>
+                            )
                           ) : confirmAction === 'deactivate' ? (
                             <>
                               <span className="mr-1 text-xs font-semibold text-amber-700">Deactivate?</span>
@@ -612,7 +663,7 @@ export default function AdminUsersPage() {
                               )}
                               {!isMe && (
                                 <button
-                                  onClick={() => setActionConfirm({ userId: user.id, action: 'delete' })}
+                                  onClick={() => { setActionConfirm({ userId: user.id, action: 'delete' }); setDeleteConfirmText(''); }}
                                   className="inline-flex items-center gap-1 rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-semibold text-red-700 transition hover:bg-red-100"
                                   title="Permanently delete account"
                                 >

@@ -1,5 +1,6 @@
 import { db, STORE_NAMES } from './indexeddb';
 import type {
+  AuditLog,
   DisasterRiskLevel,
   Household,
   HazardType,
@@ -7,6 +8,7 @@ import type {
   LocationConfidence,
   HouseholdRegistrationStatus,
   Resident,
+  SyncQueueItem,
   VulnerabilityFlags,
 } from './schema';
 import { createAuditLog } from '../auth';
@@ -438,6 +440,132 @@ export async function deleteHousehold(id: string, reason: 'moved_out' | 'decease
   } catch (error) {
     console.error('Error deleting household:', error);
     throw error;
+  }
+}
+
+/**
+ * Remove households and their member data from the local IndexedDB cache —
+ * residents, vulnerability flags, beneficiaries, and distribution records.
+ * Uses deleteSilently so the removal is not queued for sync — the server-side
+ * deletion (or account deletion) has already happened by the time this runs.
+ */
+async function removeHouseholdDataLocally(householdIds: string[]): Promise<void> {
+  if (!householdIds.length) {
+    return;
+  }
+
+  const householdIdSet = new Set(householdIds);
+  const residents = await db.query<Resident>(
+    STORE_NAMES.residents,
+    (resident) => householdIdSet.has(resident.household_id),
+  );
+  const residentIdSet = new Set(residents.map((resident) => resident.id));
+
+  const flags = await db.query<VulnerabilityFlags>(
+    STORE_NAMES.vulnerability_flags,
+    (flag) => residentIdSet.has(flag.resident_id),
+  );
+  const flagIdSet = new Set(flags.map((flag) => flag.id));
+
+  const beneficiaries = await db.query<{ id: string; resident_id?: string }>(
+    STORE_NAMES.beneficiaries,
+    (beneficiary) => Boolean(beneficiary.resident_id && residentIdSet.has(beneficiary.resident_id)),
+  );
+  const beneficiaryIdSet = new Set(beneficiaries.map((beneficiary) => beneficiary.id));
+
+  const distributionRecords = await db.query<{ id: string; household_id?: string; resident_id?: string }>(
+    STORE_NAMES.distribution_records,
+    (record) =>
+      (Boolean(record.household_id) && householdIdSet.has(record.household_id as string))
+      || (Boolean(record.resident_id) && residentIdSet.has(record.resident_id as string)),
+  );
+  const distributionRecordIdSet = new Set(distributionRecords.map((record) => record.id));
+
+  const auditLogs = await db.query<AuditLog>(
+    STORE_NAMES.audit_logs,
+    (log) =>
+      (log.entity_type === 'household' && householdIdSet.has(log.entity_id))
+      || (log.entity_type === 'resident' && residentIdSet.has(log.entity_id))
+      || (log.entity_type === 'distribution' && distributionRecordIdSet.has(log.entity_id)),
+  );
+
+  const syncQueueItems = await db.query<SyncQueueItem>(
+    STORE_NAMES.sync_queue,
+    (item) =>
+      (item.entity_type === STORE_NAMES.households && householdIdSet.has(item.entity_id))
+      || (item.entity_type === STORE_NAMES.residents && residentIdSet.has(item.entity_id))
+      || (item.entity_type === STORE_NAMES.vulnerability_flags && flagIdSet.has(item.entity_id))
+      || (item.entity_type === STORE_NAMES.beneficiaries && beneficiaryIdSet.has(item.entity_id))
+      || (item.entity_type === STORE_NAMES.distribution_records && distributionRecordIdSet.has(item.entity_id)),
+  );
+
+  for (const householdId of householdIdSet) {
+    await db.deleteSilently(STORE_NAMES.households, householdId);
+  }
+  for (const resident of residents) {
+    await db.deleteSilently(STORE_NAMES.residents, resident.id);
+  }
+  for (const flag of flags) {
+    await db.deleteSilently(STORE_NAMES.vulnerability_flags, flag.id);
+  }
+  for (const beneficiary of beneficiaries) {
+    await db.deleteSilently(STORE_NAMES.beneficiaries, beneficiary.id);
+  }
+  for (const record of distributionRecords) {
+    await db.deleteSilently(STORE_NAMES.distribution_records, record.id);
+  }
+  for (const log of auditLogs) {
+    await db.deleteSilently(STORE_NAMES.audit_logs, log.id);
+  }
+  for (const item of syncQueueItems) {
+    await db.deleteSilently(STORE_NAMES.sync_queue, item.id);
+  }
+}
+
+/**
+ * Permanently delete a household: removes it on the server (which cascades to
+ * residents, vulnerability flags, beneficiaries, distribution records, and QR
+ * scan logs), then clears the local cache. Unlike deleteHousehold, this cannot
+ * be undone.
+ */
+export async function deleteHouseholdPermanently(id: string): Promise<void> {
+  try {
+    await runServerMutation({
+      action: 'delete_household_permanently',
+      householdId: id,
+    });
+
+    await removeHouseholdDataLocally([id]);
+
+    console.log('Household deleted permanently:', id);
+  } catch (error) {
+    console.error('Error permanently deleting household:', error);
+    throw error;
+  }
+}
+
+/**
+ * Purge every household registered by the given account from the local cache.
+ * Used after an account is deleted: in Supabase mode the server already
+ * cascaded the deletion, and in local mode this IndexedDB copy is the only
+ * place the household data lives.
+ */
+export async function purgeHouseholdsByApplicant(applicantUserId: string, applicantEmail?: string): Promise<string[]> {
+  try {
+    const normalizedEmail = applicantEmail?.trim().toLowerCase();
+    const linked = await db.query<Household>(
+      STORE_NAMES.households,
+      (household) =>
+        household.applicant_user_id === applicantUserId
+        || Boolean(normalizedEmail && household.applicant_email?.toLowerCase() === normalizedEmail),
+    );
+
+    await removeHouseholdDataLocally(linked.map((household) => household.id));
+
+    return linked.map((household) => household.id);
+  } catch (error) {
+    console.error('Error purging households by applicant:', error);
+    return [];
   }
 }
 

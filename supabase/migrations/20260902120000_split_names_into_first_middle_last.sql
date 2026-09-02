@@ -73,6 +73,8 @@ begin
     middle_name := array_to_string(tokens[2:token_count - 1], ' ');
     last_name := concat_ws(' ', tokens[token_count], suffix);
   end if;
+
+  return next;
 end;
 $$;
 
@@ -87,10 +89,9 @@ alter table public.residents
 
 update public.residents r
 set
-  first_name = parts.first_name,
-  middle_name = parts.middle_name,
-  last_name = parts.last_name
-from public.split_full_name(r.full_name) as parts;
+  first_name = (select parts.first_name from public.split_full_name(r.full_name) as parts),
+  middle_name = (select parts.middle_name from public.split_full_name(r.full_name) as parts),
+  last_name = (select parts.last_name from public.split_full_name(r.full_name) as parts);
 
 create or replace function public.residents_sync_name_parts()
 returns trigger
@@ -142,10 +143,9 @@ alter table public.users
 
 update public.users u
 set
-  first_name = parts.first_name,
-  middle_name = parts.middle_name,
-  last_name = parts.last_name
-from public.split_full_name(u.name) as parts;
+  first_name = (select parts.first_name from public.split_full_name(u.name) as parts),
+  middle_name = (select parts.middle_name from public.split_full_name(u.name) as parts),
+  last_name = (select parts.last_name from public.split_full_name(u.name) as parts);
 
 create or replace function public.users_sync_name_parts()
 returns trigger

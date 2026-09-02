@@ -334,9 +334,6 @@ async function writeProfile(input: {
   id: string;
   email: string;
   name: string;
-  first_name?: string;
-  middle_name?: string;
-  last_name?: string;
   role: UserRole;
   status: UserAccountStatus;
   barangay_id: string;
@@ -347,22 +344,12 @@ async function writeProfile(input: {
   const supabase = getSupabaseAdminClient();
   const existing = await getProfileById(input.id);
   const timestamp = nowIso();
-  // Only send the part columns when the caller provides them; name-only
-  // writes rely on the users_sync_name_parts trigger to split the name.
-  const nameParts = input.first_name !== undefined
-    || input.middle_name !== undefined
-    || input.last_name !== undefined
-    ? {
-        first_name: input.first_name ?? '',
-        middle_name: input.middle_name ?? '',
-        last_name: input.last_name ?? '',
-      }
-    : {};
+  // The users_sync_name_parts trigger splits `name` into first/middle/last on
+  // the database side, so only the display name is written here.
   const baseRow = {
     id: input.id,
     email: normalizeEmail(input.email),
     name: input.name.trim(),
-    ...nameParts,
     role: input.role,
     barangay_id: input.barangay_id.trim(),
     must_change_password: input.must_change_password,
@@ -634,9 +621,6 @@ export async function createResidentSelfServiceAccount(input: {
     id: data.user.id,
     email: normalizedEmail,
     name: fullName,
-    first_name: firstName,
-    middle_name: middleName,
-    last_name: lastName,
     role: 'resident',
     status: 'active',
     barangay_id: input.barangay_id,
@@ -686,13 +670,304 @@ export async function updateUserAccount(
   return toPublicUser(profile);
 }
 
-export async function deleteUserAccount(userId: string): Promise<void> {
+export type DeletedHouseholdSummary = {
+  id: string;
+  headName: string;
+};
+
+export type DeletedAccountSummary = {
+  deletedHouseholds: DeletedHouseholdSummary[];
+};
+
+export type HouseholdCascadeDeletePlan = {
+  deletedHouseholds: DeletedHouseholdSummary[];
+  householdIds: string[];
+  residentIds: string[];
+  vulnerabilityFlagIds: string[];
+  beneficiaryIds: string[];
+  distributionRecordIds: string[];
+};
+
+function uniqueStrings(values: Array<string | null | undefined>) {
+  return Array.from(new Set(values.filter((value): value is string => Boolean(value))));
+}
+
+function chunkArray<T>(values: T[], size = 100) {
+  const chunks: T[][] = [];
+  for (let index = 0; index < values.length; index += size) {
+    chunks.push(values.slice(index, index + size));
+  }
+  return chunks;
+}
+
+async function deleteRowsByIds(tableName: string, columnName: string, ids: string[]) {
+  if (!ids.length) {
+    return;
+  }
+
+  const supabase = getSupabaseAdminClient();
+  for (const chunk of chunkArray(ids)) {
+    const { error } = await supabase
+      .from(tableName)
+      .delete()
+      .in(columnName, chunk);
+
+    if (error) {
+      throw new Error(`Failed to delete ${tableName}: ${error.message}`);
+    }
+  }
+}
+
+async function deleteAuditLogsForEntities(entityType: string, entityIds: string[]) {
+  if (!entityIds.length) {
+    return;
+  }
+
+  const supabase = getSupabaseAdminClient();
+  for (const chunk of chunkArray(entityIds)) {
+    const { error } = await supabase
+      .from('audit_logs')
+      .delete()
+      .eq('entity_type', entityType)
+      .in('entity_id', chunk);
+
+    if (error) {
+      throw new Error(`Failed to delete audit logs for ${entityType}: ${error.message}`);
+    }
+  }
+}
+
+async function deleteSyncBackupsForEntities(entityType: string, entityIds: string[]) {
+  if (!entityIds.length) {
+    return;
+  }
+
+  const supabase = getSupabaseAdminClient();
+  for (const chunk of chunkArray(entityIds)) {
+    const { error } = await supabase
+      .from('sync_backups')
+      .delete()
+      .eq('entity_type', entityType)
+      .in('entity_id', chunk);
+
+    if (error) {
+      throw new Error(`Failed to delete sync backups for ${entityType}: ${error.message}`);
+    }
+  }
+}
+
+async function getRowsByIds(tableName: string, columnName: string, ids: string[], selectClause = 'id') {
+  if (!ids.length) {
+    return [] as Array<Record<string, unknown>>;
+  }
+
+  const supabase = getSupabaseAdminClient();
+  const rows: Array<Record<string, unknown>> = [];
+  for (const chunk of chunkArray(ids)) {
+    const { data, error } = await supabase
+      .from(tableName)
+      .select(selectClause)
+      .in(columnName, chunk);
+
+    if (error) {
+      throw new Error(`Failed to load ${tableName}: ${error.message}`);
+    }
+
+    rows.push(...((data ?? []) as unknown as Array<Record<string, unknown>>));
+  }
+
+  return rows;
+}
+
+async function buildHouseholdCascadeDeletePlan(
+  householdRows: Array<{ id: string; head_name?: unknown }>,
+): Promise<HouseholdCascadeDeletePlan> {
+  const householdIds = uniqueStrings(householdRows.map((row) => row.id));
+  if (!householdIds.length) {
+    return {
+      deletedHouseholds: [],
+      householdIds: [],
+      residentIds: [],
+      vulnerabilityFlagIds: [],
+      beneficiaryIds: [],
+      distributionRecordIds: [],
+    };
+  }
+
+  const residentRows = await getRowsByIds('residents', 'household_id', householdIds);
+  const residentIds = uniqueStrings(residentRows.map((row) => (typeof row.id === 'string' ? row.id : null)));
+  const vulnerabilityFlagRows = await getRowsByIds('vulnerability_flags', 'resident_id', residentIds);
+  const beneficiaryRows = await getRowsByIds('beneficiaries', 'resident_id', residentIds);
+  const householdDistributionRows = await getRowsByIds('distribution_records', 'household_id', householdIds);
+  const residentDistributionRows = await getRowsByIds('distribution_records', 'resident_id', residentIds);
+
+  return {
+    deletedHouseholds: householdRows.map((row) => ({
+      id: row.id,
+      headName: typeof row.head_name === 'string' ? row.head_name : row.id,
+    })),
+    householdIds,
+    residentIds,
+    vulnerabilityFlagIds: uniqueStrings(
+      vulnerabilityFlagRows.map((row) => (typeof row.id === 'string' ? row.id : null)),
+    ),
+    beneficiaryIds: uniqueStrings(beneficiaryRows.map((row) => (typeof row.id === 'string' ? row.id : null))),
+    distributionRecordIds: uniqueStrings([
+      ...householdDistributionRows.map((row) => (typeof row.id === 'string' ? row.id : null)),
+      ...residentDistributionRows.map((row) => (typeof row.id === 'string' ? row.id : null)),
+    ]),
+  };
+}
+
+export async function buildHouseholdCascadeDeletePlanById(householdId: string): Promise<HouseholdCascadeDeletePlan> {
+  const supabase = getSupabaseAdminClient();
+  const { data, error } = await supabase
+    .from('households')
+    .select('id, head_name')
+    .eq('id', householdId)
+    .limit(1);
+
+  if (error) {
+    throw new Error(`Failed to load household ${householdId}: ${error.message}`);
+  }
+
+  return buildHouseholdCascadeDeletePlan((data ?? []) as Array<{ id: string; head_name?: unknown }>);
+}
+
+/**
+ * Hard-delete every household registered by the given user account.
+ * This explicitly removes records that would otherwise keep private household
+ * payloads through SET NULL foreign keys, audit history, or sync backups.
+ */
+async function deleteHouseholdsLinkedToUser(user: { id: string; email?: string | null }): Promise<DeletedHouseholdSummary[]> {
+  const supabase = getSupabaseAdminClient();
+  const normalizedEmail = user.email?.trim().toLowerCase() ?? null;
+
+  const householdRowsById = await supabase
+    .from('households')
+    .select('id, head_name')
+    .eq('applicant_user_id', user.id);
+
+  if (householdRowsById.error) {
+    throw new Error(`Failed to load households linked to the account: ${householdRowsById.error.message}`);
+  }
+
+  let householdRowsByEmail: Array<{ id: string; head_name?: unknown }> = [];
+  if (normalizedEmail) {
+    const { data, error } = await supabase
+      .from('households')
+      .select('id, head_name')
+      .ilike('applicant_email', normalizedEmail);
+
+    if (error) {
+      throw new Error(`Failed to load households linked to the account email: ${error.message}`);
+    }
+
+    householdRowsByEmail = (data ?? []) as Array<{ id: string; head_name?: unknown }>;
+  }
+
+  const linkedHouseholdsById = new Map<string, { id: string; head_name?: unknown }>();
+  for (const row of [
+    ...((householdRowsById.data ?? []) as Array<{ id: string; head_name?: unknown }>),
+    ...householdRowsByEmail,
+  ]) {
+    linkedHouseholdsById.set(row.id, row);
+  }
+
+  const plan = await buildHouseholdCascadeDeletePlan(Array.from(linkedHouseholdsById.values()));
+  await deleteHouseholdCascadeData(plan, { claimantUserId: user.id });
+
+  return plan.deletedHouseholds;
+}
+
+export async function deleteHouseholdCascadeData(
+  plan: HouseholdCascadeDeletePlan,
+  options: { claimantUserId?: string } = {},
+): Promise<void> {
+  await deleteAuditLogsForEntities('household', plan.householdIds);
+  await deleteAuditLogsForEntities('resident', plan.residentIds);
+  await deleteAuditLogsForEntities('distribution', plan.distributionRecordIds);
+
+  await deleteSyncBackupsForEntities('households', plan.householdIds);
+  await deleteSyncBackupsForEntities('residents', plan.residentIds);
+  await deleteSyncBackupsForEntities('vulnerability_flags', plan.vulnerabilityFlagIds);
+  await deleteSyncBackupsForEntities('beneficiaries', plan.beneficiaryIds);
+  await deleteSyncBackupsForEntities('distribution_records', plan.distributionRecordIds);
+
+  await deleteRowsByIds('distribution_qr_scan_logs', 'household_id', plan.householdIds);
+  if (options.claimantUserId) {
+    await deleteRowsByIds('distribution_qr_scan_logs', 'claimant_user_id', [options.claimantUserId]);
+  }
+
+  if (!plan.householdIds.length) {
+    return;
+  }
+
+  await deleteRowsByIds('distribution_records', 'id', plan.distributionRecordIds);
+  await deleteRowsByIds('households', 'id', plan.householdIds);
+}
+
+/**
+ * Hard-delete the distribution records tied to the given households, both the
+ * records that reference the household directly and the ones that reference a
+ * member resident. This must happen before the households (or their residents)
+ * are deleted: distribution_records has a CHECK constraint requiring exactly
+ * one of household_id / resident_id to be non-null, and the ON DELETE SET NULL
+ * foreign keys would otherwise null out the last remaining reference, violate
+ * that constraint, and block the entire deletion.
+ */
+export async function deleteDistributionRecordsForHouseholds(householdIds: string[]): Promise<void> {
+  if (!householdIds.length) {
+    return;
+  }
+
+  const supabase = getSupabaseAdminClient();
+
+  const { data: memberRows, error: membersError } = await supabase
+    .from('residents')
+    .select('id')
+    .in('household_id', householdIds);
+
+  if (membersError) {
+    throw new Error(`Failed to load household members for distribution cleanup: ${membersError.message}`);
+  }
+
+  const orFilters = [`household_id.in.(${householdIds.join(',')})`];
+  const memberIds = (memberRows ?? [])
+    .map((row) => (typeof row.id === 'string' ? row.id : ''))
+    .filter(Boolean);
+
+  if (memberIds.length > 0) {
+    orFilters.push(`resident_id.in.(${memberIds.join(',')})`);
+  }
+
+  const { error: deleteError } = await supabase
+    .from('distribution_records')
+    .delete()
+    .or(orFilters.join(','));
+
+  if (deleteError) {
+    throw new Error(`Failed to delete distribution records for households: ${deleteError.message}`);
+  }
+}
+
+export async function deleteUserAccount(userId: string): Promise<DeletedAccountSummary> {
   const existing = await getProfileById(userId);
   if (!existing) {
     throw new Error('User not found.');
   }
 
   const supabase = getSupabaseAdminClient();
+
+  // Resident accounts own the household they registered: remove the household
+  // and its cascading data before the auth user disappears.
+  const deletedHouseholds = await deleteHouseholdsLinkedToUser({
+    id: existing.id,
+    email: existing.email,
+  });
+
+  await deleteRowsByIds('user_notifications', 'user_id', [existing.id]);
+  await deleteAuditLogsForEntities('user', [existing.id]);
 
   const attemptDelete = async () => {
     const { error } = await supabase.auth.admin.deleteUser(userId);
@@ -703,7 +978,7 @@ export async function deleteUserAccount(userId: string): Promise<void> {
 
   try {
     await attemptDelete();
-    return;
+    return { deletedHouseholds };
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown delete failure.';
 
@@ -720,7 +995,7 @@ export async function deleteUserAccount(userId: string): Promise<void> {
           }`,
         );
       });
-      return;
+      return { deletedHouseholds };
     }
 
     throw new Error(`Failed to delete the Supabase user: ${message}`);

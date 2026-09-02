@@ -130,7 +130,7 @@ export async function DELETE(
       return NextResponse.json({ error: 'User not found.' }, { status: 404 });
     }
 
-    await deleteUserAccount(id);
+    const { deletedHouseholds } = await deleteUserAccount(id);
 
     if (existingUser.email) {
       try {
@@ -140,9 +140,8 @@ export async function DELETE(
           entity_type: 'user',
           entity_id: id,
           changes: {
-            deleted_user_name: existingUser.name,
-            deleted_user_email: existingUser.email,
             deleted_user_role: existingUser.role,
+            deleted_household_count: deletedHouseholds.length,
             source: 'admin_delete_user',
           },
         });
@@ -151,7 +150,26 @@ export async function DELETE(
       }
     }
 
-    return NextResponse.json({ success: true });
+    // The linked households were hard-deleted along with the account; record
+    // each removal so the audit history can trace where the data went.
+    for (const household of deletedHouseholds) {
+      try {
+        await writeServerAuditLog({
+          actor: guard.user,
+          action: 'DELETE',
+          entity_type: 'household',
+          entity_id: household.id,
+          changes: {
+            reason: 'applicant_account_deleted',
+            source: 'admin_delete_user',
+          },
+        });
+      } catch (error) {
+        console.error('[Supabase Mirror] Failed to audit deleted household:', error);
+      }
+    }
+
+    return NextResponse.json({ success: true, deletedHouseholds });
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : 'Could not delete user.' },

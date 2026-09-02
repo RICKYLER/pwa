@@ -22,6 +22,10 @@ import {
   isPurokFloodControlStatus,
 } from '@/lib/purok-risk-profiles';
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
+import {
+  buildHouseholdCascadeDeletePlanById,
+  deleteHouseholdCascadeData,
+} from '@/lib/server/supabase-auth-store';
 import { requireSupabaseUserId, resolveSupabaseUserId } from '@/lib/server/supabase-user-ids';
 
 type HouseholdMemberDraft = {
@@ -2084,6 +2088,63 @@ export async function updateHouseholdOnServer(
   }
 
   return data;
+}
+
+/**
+ * Permanently delete a household and everything cascading from it (residents,
+ * vulnerability flags, beneficiaries, distribution records, and QR scan logs).
+ * Unlike the soft status change, this cannot be undone.
+ */
+export async function deleteHouseholdPermanentlyOnServer(
+  user: User,
+  householdId: string,
+) {
+  const supabase = getSupabaseAdminClient();
+  const { data: existing, error: existingError } = await supabase
+    .from('households')
+    .select('id, barangay_id, head_name, applicant_user_id, applicant_email')
+    .eq('id', householdId)
+    .limit(1);
+
+  if (existingError) {
+    throw new Error(existingError.message);
+  }
+
+  const current = existing?.[0];
+  if (!current) {
+    throw new Error(`Household ${householdId} not found`);
+  }
+
+  // Residents may soft-update their own household, but a permanent destroy is
+  // restricted to reviewer roles — admin anywhere, encoder within their
+  // barangay.
+  const canDelete =
+    user.role === 'admin'
+    || (user.role === 'encoder' && current.barangay_id === user.barangay_id);
+
+  if (!canDelete) {
+    throw new Error('You are not allowed to permanently delete this household.');
+  }
+
+  const deletePlan = await buildHouseholdCascadeDeletePlanById(householdId);
+  await deleteHouseholdCascadeData(deletePlan);
+
+  await createAuditLogEntry({
+    user,
+    action: 'DELETE',
+    entityType: 'household',
+    entityId: householdId,
+    changes: {
+      member_count: deletePlan.residentIds.length,
+      reason: 'permanent_delete',
+    },
+  });
+
+  return {
+    id: householdId,
+    headName: current.head_name,
+    memberCount: deletePlan.residentIds.length,
+  };
 }
 
 export async function saveLocationMasterListOnServer(

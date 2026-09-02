@@ -5,7 +5,7 @@ import { useRouter, useParams } from 'next/navigation';
 import Link from 'next/link';
 import { PurokFloodProfileCard } from '@/components/PurokFloodProfileCard';
 import { getCurrentUser, hasPermission } from '@/lib/auth';
-import { getAllPuroks, getHousehold, updateHousehold } from '@/lib/db/households';
+import { getAllPuroks, getHousehold, updateHousehold, deleteHouseholdPermanently } from '@/lib/db/households';
 import { getPurokRiskProfile } from '@/lib/db/purok-risk-profiles';
 import {
   getResidentsInHousehold, createResident, updateResident,
@@ -20,6 +20,7 @@ import {
   parseHazardTags,
 } from '@/lib/disaster-alerts';
 import { MABINI_MUNICIPALITY } from '@/lib/barangays';
+import { joinNameParts, splitFullName, type NameParts } from '@/lib/name-parts';
 import {
   ArrowLeft, Plus, Edit2, Trash2, Save, X, User, MapPin,
   Phone, Home, CheckCircle2, AlertTriangle, ChevronDown, Navigation,
@@ -56,7 +57,8 @@ const PWD_TYPE_OPTIONS: Array<{ value: PWDType; label: string }> = [
 type HHStatus = typeof HOUSEHOLD_STATUSES[number];
 
 const emptyResidentForm = {
-  full_name: '', birthdate: '', gender: 'M' as 'M' | 'F',
+  full_name: '', first_name: '', middle_name: '', last_name: '',
+  birthdate: '', gender: 'M' as 'M' | 'F',
   relationship_to_head: '', civil_status: 'single' as const, occupation: '',
 };
 
@@ -99,6 +101,7 @@ export default function HouseholdDetailsPage() {
     special_assistance_notes: '',
   });
   const [isSavingHH, setIsSavingHH] = useState(false);
+  const [headNameParts, setHeadNameParts] = useState<NameParts>(() => splitFullName(''));
   const [purokOptions, setPurokOptions] = useState<string[]>([]);
   const [purokRiskProfile, setPurokRiskProfile] = useState<PurokRiskProfile | null>(null);
 
@@ -115,12 +118,28 @@ export default function HouseholdDetailsPage() {
   const [deletingResidentId, setDeletingResidentId] = useState<string | null>(null);
   const [deleteReason, setDeleteReason] = useState<'moved_out' | 'deceased'>('moved_out');
 
+  // Permanent household delete
+  const [showDeleteHHModal, setShowDeleteHHModal] = useState(false);
+  const [deleteHHConfirmText, setDeleteHHConfirmText] = useState('');
+  const [isDeletingHH, setIsDeletingHH] = useState(false);
+
   // Toast
   const [toast, setToast] = useState<{ msg: string; type: 'success' | 'error' } | null>(null);
 
   function showToast(msg: string, type: 'success' | 'error' = 'success') {
     setToast({ msg, type });
     setTimeout(() => setToast(null), 3200);
+  }
+
+  function updateHeadNamePart(part: keyof NameParts, value: string) {
+    setHeadNameParts((prev) => {
+      const next = { ...prev, [part]: value };
+      setHhForm((current) => ({
+        ...current,
+        head_name: joinNameParts(next.first, next.middle, next.last),
+      }));
+      return next;
+    });
   }
 
   const canViewHouseholdDetails = hasPermission('view_households') || hasPermission('view_residents');
@@ -154,6 +173,7 @@ export default function HouseholdDetailsPage() {
         evacuation_site: hh.evacuation_site ?? '',
         special_assistance_notes: hh.special_assistance_notes ?? '',
       });
+      setHeadNameParts(splitFullName(hh.head_name));
       const list = await getResidentsInHousehold(householdId);
       const withFlags = await Promise.all(list.map(async r => ({ resident: r, flags: await getResidentVulnerabilityFlags(r.id) })));
       setResidents(withFlags);
@@ -234,6 +254,7 @@ export default function HouseholdDetailsPage() {
         evacuation_site: updatedHousehold.evacuation_site ?? '',
         special_assistance_notes: updatedHousehold.special_assistance_notes ?? '',
       });
+      setHeadNameParts(splitFullName(updatedHousehold.head_name));
       setIsEditingHH(false);
       showToast('Household updated successfully.');
     } catch { showToast('Failed to save changes.', 'error'); } finally { setIsSavingHH(false); }
@@ -242,8 +263,12 @@ export default function HouseholdDetailsPage() {
   // ── Resident add / edit ─────────────────────────────────────────────────────
   function openEditResident(r: Resident) {
     setEditingResidentId(r.id);
+    const nameParts = splitFullName(r.full_name);
     setResidentForm({
       full_name: r.full_name,
+      first_name: nameParts.first,
+      middle_name: nameParts.middle,
+      last_name: nameParts.last,
       birthdate: r.birthdate,
       gender: r.gender,
       relationship_to_head: r.relationship_to_head ?? '',
@@ -280,27 +305,29 @@ export default function HouseholdDetailsPage() {
 
   async function handleSaveResident(e: React.FormEvent) {
     e.preventDefault();
-    if (!residentForm.full_name.trim() || !residentForm.birthdate) {
-      showToast('Full name and birthdate are required.', 'error');
+    if (!residentForm.first_name.trim() || !residentForm.last_name.trim() || !residentForm.birthdate) {
+      showToast('First name, last name, and birthdate are required.', 'error');
       return;
     }
+    const fullName = joinNameParts(residentForm.first_name, residentForm.middle_name, residentForm.last_name);
+    const { first_name: _first, middle_name: _middle, last_name: _last, ...residentFields } = residentForm;
     setIsSavingResident(true);
     try {
       if (editingResidentId) {
         await updateResident(editingResidentId, {
-          ...residentForm,
-          full_name: residentForm.full_name.trim(),
+          ...residentFields,
+          full_name: fullName,
         });
         const flags = await getResidentVulnerabilityFlags(editingResidentId);
         setResidents(prev => prev.map(rw =>
           rw.resident.id === editingResidentId
-            ? { resident: { ...rw.resident, ...residentForm }, flags }
+            ? { resident: { ...rw.resident, ...residentFields, full_name: fullName }, flags }
             : rw
         ));
         setEditingResidentId(null);
         showToast('Member updated.');
       } else {
-        const created = await createResident({ household_id: householdId, ...residentForm, status: 'active' });
+        const created = await createResident({ household_id: householdId, ...residentFields, full_name: fullName, status: 'active' });
         const flags = await getResidentVulnerabilityFlags(created.id);
         setResidents(prev => [...prev, { resident: created, flags }]);
         setShowAddResident(false);
@@ -376,6 +403,20 @@ export default function HouseholdDetailsPage() {
       setDeletingResidentId(null);
       showToast('Member removed.');
     } catch { showToast('Failed to delete member.', 'error'); }
+  }
+
+  // ── Permanent household delete ──────────────────────────────────────────────
+  async function handleDeleteHouseholdPermanently() {
+    try {
+      setIsDeletingHH(true);
+      await deleteHouseholdPermanently(householdId);
+      showToast('Household and all member data permanently deleted.');
+      router.push(hasPermission('view_households') ? '/households' : '/dashboard');
+    } catch (error) {
+      console.error(error);
+      showToast('Failed to permanently delete household.', 'error');
+      setIsDeletingHH(false);
+    }
   }
 
   async function handleVerifyResident(id: string) {
@@ -459,6 +500,52 @@ export default function HouseholdDetailsPage() {
         </div>
       )}
 
+      {/* Permanent Household Delete Modal */}
+      {showDeleteHHModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+          <div className="bg-white rounded-3xl shadow-2xl p-6 w-full max-w-md mx-4">
+            <div className="w-12 h-12 bg-red-100 rounded-2xl flex items-center justify-center mx-auto mb-4">
+              <AlertTriangle className="w-5 h-5 text-red-600" />
+            </div>
+            <h3 className="text-lg font-bold text-slate-900 text-center mb-1">Permanently Delete Household?</h3>
+            <p className="text-sm text-slate-500 text-center mb-4">
+              This will erase <span className="font-semibold text-slate-700">{household.head_name}&apos;s</span> household
+              and all {residents.length} member{residents.length === 1 ? '' : 's'}&apos; records — residents, health and
+              vulnerability data, beneficiary records, and distribution history. This <span className="font-semibold text-red-600">cannot be undone</span>.
+            </p>
+            <div className="mb-5">
+              <label className="block text-xs font-semibold text-slate-500 mb-1.5 uppercase tracking-wide">
+                Type DELETE to confirm
+              </label>
+              <input
+                type="text"
+                value={deleteHHConfirmText}
+                onChange={(e) => setDeleteHHConfirmText(e.target.value)}
+                placeholder="DELETE"
+                autoComplete="off"
+                className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm bg-white focus:outline-none focus:ring-2 focus:ring-red-500/30"
+              />
+            </div>
+            <div className="flex gap-3">
+              <button
+                onClick={() => { setShowDeleteHHModal(false); setDeleteHHConfirmText(''); }}
+                disabled={isDeletingHH}
+                className="flex-1 px-4 py-2.5 border border-slate-200 rounded-xl text-slate-600 text-sm font-medium hover:bg-slate-50 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => handleDeleteHouseholdPermanently()}
+                disabled={isDeletingHH || deleteHHConfirmText.trim().toUpperCase() !== 'DELETE'}
+                className="flex-1 px-4 py-2.5 bg-red-600 text-white rounded-xl text-sm font-medium hover:bg-red-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                {isDeletingHH ? 'Deleting…' : 'Delete Forever'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <header className="sticky top-0 z-30 border-b border-slate-200/60 bg-white/80 backdrop-blur-xl">
         <div className="max-w-5xl mx-auto px-4 sm:px-6 py-4 flex items-center justify-between gap-4">
@@ -497,14 +584,30 @@ export default function HouseholdDetailsPage() {
                 <h2 className="font-semibold text-slate-700 text-sm uppercase tracking-wide">Edit Household Information</h2>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   {/* Household Head */}
-                  <div className="sm:col-span-2">
-                    <label className="block text-xs font-semibold text-slate-500 mb-1.5 uppercase tracking-wide">Household Head *</label>
-                    <div className="relative">
-                      <User className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-                      <input type="text" value={hhForm.head_name}
-                        onChange={e => setHhForm(f => ({ ...f, head_name: e.target.value }))}
-                        className="w-full pl-9 pr-4 py-2.5 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-400 transition-all"
-                        placeholder="Full name of household head" />
+                  <div className="sm:col-span-2 grid grid-cols-1 sm:grid-cols-3 gap-4">
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-500 mb-1.5 uppercase tracking-wide">Head First Name *</label>
+                      <div className="relative">
+                        <User className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                        <input type="text" value={headNameParts.first}
+                          onChange={e => updateHeadNamePart('first', e.target.value)}
+                          className="w-full pl-9 pr-4 py-2.5 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-400 transition-all"
+                          placeholder="Juan" />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-500 mb-1.5 uppercase tracking-wide">Head Middle Name</label>
+                      <input type="text" value={headNameParts.middle}
+                        onChange={e => updateHeadNamePart('middle', e.target.value)}
+                        className="w-full px-4 py-2.5 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-400 transition-all"
+                        placeholder="Reyes" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-500 mb-1.5 uppercase tracking-wide">Head Last Name *</label>
+                      <input type="text" value={headNameParts.last}
+                        onChange={e => updateHeadNamePart('last', e.target.value)}
+                        className="w-full px-4 py-2.5 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-400 transition-all"
+                        placeholder="Dela Cruz" />
                     </div>
                   </div>
 
@@ -914,11 +1017,25 @@ export default function HouseholdDetailsPage() {
                   {editingResidentId ? '✏️ Edit Member' : '➕ Add New Member'}
                 </h3>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div className="sm:col-span-2">
-                    <label className="block text-xs font-semibold text-slate-500 mb-1 uppercase tracking-wide">Full Name *</label>
-                    <input type="text" placeholder="Full name" required
-                      value={residentForm.full_name}
-                      onChange={e => setResidentForm(f => ({ ...f, full_name: e.target.value }))}
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-500 mb-1 uppercase tracking-wide">First Name *</label>
+                    <input type="text" placeholder="First name" required
+                      value={residentForm.first_name}
+                      onChange={e => setResidentForm(f => ({ ...f, first_name: e.target.value }))}
+                      className="w-full px-4 py-2.5 border border-slate-200 rounded-xl text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-400" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-500 mb-1 uppercase tracking-wide">Middle Name</label>
+                    <input type="text" placeholder="Middle name"
+                      value={residentForm.middle_name}
+                      onChange={e => setResidentForm(f => ({ ...f, middle_name: e.target.value }))}
+                      className="w-full px-4 py-2.5 border border-slate-200 rounded-xl text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-400" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-500 mb-1 uppercase tracking-wide">Last Name *</label>
+                    <input type="text" placeholder="Last name" required
+                      value={residentForm.last_name}
+                      onChange={e => setResidentForm(f => ({ ...f, last_name: e.target.value }))}
                       className="w-full px-4 py-2.5 border border-slate-200 rounded-xl text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-400" />
                   </div>
                   <div>
@@ -1278,6 +1395,27 @@ export default function HouseholdDetailsPage() {
             )}
           </div>
         </div>
+
+        {/* ── Danger Zone ────────────────────────────────────────────── */}
+        {(user.role === 'admin' || user.role === 'encoder') && !isEditingHH && (
+          <div className="border border-red-200 bg-red-50/50 rounded-3xl px-6 py-5">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h3 className="text-sm font-bold text-red-700">Danger Zone</h3>
+                <p className="mt-0.5 text-xs text-red-600/80">
+                  Permanently deletes this household and all member data. To record a household that
+                  moved out or is deceased, use Edit Household and change the status instead.
+                </p>
+              </div>
+              <button
+                onClick={() => { setShowDeleteHHModal(true); setDeleteHHConfirmText(''); }}
+                className="flex items-center gap-1.5 px-3.5 py-2 text-sm border border-red-300 text-red-700 rounded-xl font-medium hover:bg-red-100 transition-colors flex-shrink-0"
+              >
+                <Trash2 className="w-3.5 h-3.5" /> Delete Household Permanently
+              </button>
+            </div>
+          </div>
+        )}
       </main>
     </div>
   );

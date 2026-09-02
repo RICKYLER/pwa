@@ -85,3 +85,46 @@ test('staff accounts can also be permanently deleted when needed', async () => {
     await rm(tempDir, { recursive: true, force: true });
   }
 });
+
+test('resident account deletion permanently purges linked user and credentials', async () => {
+  const tempDir = await mkdtemp(path.join(tmpdir(), 'mswdo-auth-store-'));
+  const previousStorePath = process.env.MSWDO_AUTH_STORE_PATH;
+  process.env.MSWDO_AUTH_STORE_PATH = path.join(tempDir, 'auth-store.json');
+
+  try {
+    const authStore = await import('../lib/server/auth-store');
+    const resident = await authStore.createResidentSelfServiceAccount({
+      first_name: 'Maria',
+      last_name: 'Santos',
+      email: 'maria.santos@example.com',
+      password: 'password123',
+      barangay_id: 'anitapan',
+    });
+
+    assert.equal(resident.email, 'maria.santos@example.com');
+    assert.equal(resident.role, 'resident');
+
+    const verifyToken = await authStore.createEmailVerificationToken(resident.id);
+    await authStore.completeEmailVerification(verifyToken);
+
+    const activeLogin = await authStore.authenticateUser('maria.santos@example.com', 'password123');
+    assert.equal(activeLogin.status, 'success');
+
+    await authStore.deleteUserAccount(resident.id);
+
+    const deletedUser = await authStore.getStoredUserById(resident.id);
+    assert.equal(deletedUser, null);
+
+    const deletedLogin = await authStore.authenticateUser('maria.santos@example.com', 'password123');
+    assert.equal(deletedLogin.status, 'invalid_credentials');
+  } finally {
+    if (previousStorePath) {
+      process.env.MSWDO_AUTH_STORE_PATH = previousStorePath;
+    } else {
+      delete process.env.MSWDO_AUTH_STORE_PATH;
+    }
+
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+

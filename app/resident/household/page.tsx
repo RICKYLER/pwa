@@ -87,7 +87,6 @@ const RELATIONSHIP_OPTIONS = [
 type MemberBadgeTone = 'slate' | 'teal' | 'emerald' | 'amber' | 'rose' | 'navy';
 
 type MemberFormState = {
-  full_name: string;
   first_name: string;
   middle_name: string;
   last_name: string;
@@ -106,7 +105,6 @@ type MemberFormState = {
 };
 
 const EMPTY_MEMBER_FORM: MemberFormState = {
-  full_name: '',
   first_name: '',
   middle_name: '',
   last_name: '',

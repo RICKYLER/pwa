@@ -20,6 +20,7 @@ import {
   createInventoryItemOnServer,
   createPackageTemplateOnServer,
   createResidentOnServer,
+  deleteHouseholdPermanentlyOnServer,
   deleteInventoryItemPermanentlyOnServer,
   deletePackageTemplateOnServer,
   deleteDistributionEventOnServer,
@@ -224,6 +225,17 @@ export async function POST(request: NextRequest) {
           updates as Partial<Household>,
         );
 
+        return NextResponse.json(data, {
+          headers: { 'Cache-Control': 'no-store' },
+        });
+      }
+      case 'delete_household_permanently': {
+        const householdId = typeof body.householdId === 'string' ? body.householdId : '';
+        if (!householdId) {
+          return badRequest('householdId is required.');
+        }
+
+        const data = await deleteHouseholdPermanentlyOnServer(authResult.user, householdId);
         return NextResponse.json(data, {
           headers: { 'Cache-Control': 'no-store' },
         });

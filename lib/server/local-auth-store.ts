@@ -6,6 +6,7 @@ import { DEFAULT_BARANGAY_ID } from '@/lib/barangays';
 import type { User, UserAccountStatus, UserRole } from '@/lib/db/schema';
 import { joinNameParts, splitFullName } from '@/lib/name-parts';
 import { resolveWritableFilePath } from '@/lib/server/runtime-storage';
+import type { DeletedAccountSummary } from '@/lib/server/supabase-auth-store';
 
 const scrypt = promisify(scryptCallback);
 
@@ -374,7 +375,7 @@ export async function updateUserAccount(
   });
 }
 
-export async function deleteUserAccount(userId: string): Promise<void> {
+export async function deleteUserAccount(userId: string): Promise<DeletedAccountSummary> {
   await withStoreWrite(async (store) => {
     const nextUsers = store.users.filter((user) => user.id !== userId);
     if (nextUsers.length === store.users.length) {
@@ -385,6 +386,11 @@ export async function deleteUserAccount(userId: string): Promise<void> {
     store.password_setup_tokens = store.password_setup_tokens.filter((token) => token.user_id !== userId);
     store.email_verification_tokens = store.email_verification_tokens.filter((token) => token.user_id !== userId);
   });
+
+  // In local mode, household data lives in each client's IndexedDB, not on the
+  // server. The client purges linked households after the account deletion
+  // succeeds (see purgeHouseholdsByApplicant in lib/db/households.ts).
+  return { deletedHouseholds: [] };
 }
 
 export async function createPasswordSetupToken(userId: string): Promise<string> {
