@@ -23,6 +23,7 @@ import {
 } from 'lucide-react';
 import { LocationPicker } from '@/components/LocationPicker';
 import type { MemberDraft } from '@/components/forms/household-form';
+import { joinNameParts, splitFullName } from '@/lib/name-parts';
 import { useGoogleMaps } from '@/components/GoogleMapsProvider';
 import {
   Dialog,
@@ -75,6 +76,9 @@ export interface HeadProfileDraft {
 
 interface RegistrationFormState {
   head_name: string;
+  head_first_name: string;
+  head_middle_name: string;
+  head_last_name: string;
   head_birthdate: string;
   head_gender: 'M' | 'F';
   head_civil_status: MemberDraft['civil_status'];
@@ -118,6 +122,9 @@ const OFFICE_REQUIREMENTS = [
 
 const EMPTY_FORM: RegistrationFormState = {
   head_name: '',
+  head_first_name: '',
+  head_middle_name: '',
+  head_last_name: '',
   head_birthdate: '',
   head_gender: 'M',
   head_civil_status: 'single',
@@ -141,6 +148,9 @@ const EMPTY_FORM: RegistrationFormState = {
 
 const EMPTY_MEMBER: MemberDraft = {
   full_name: '',
+  first_name: '',
+  middle_name: '',
+  last_name: '',
   birthdate: '',
   gender: 'M',
   relationship_to_head: '',
@@ -207,9 +217,13 @@ function safeText(value?: string): string {
 function buildRegistrationFormState(
   initialValues?: Partial<RegistrationFormState>,
 ): RegistrationFormState {
+  const headNameParts = splitFullName(safeText(initialValues?.head_name));
   return {
     ...EMPTY_FORM,
     head_name: safeText(initialValues?.head_name),
+    head_first_name: headNameParts.first,
+    head_middle_name: headNameParts.middle,
+    head_last_name: headNameParts.last,
     head_birthdate: safeText(initialValues?.head_birthdate),
     head_gender: initialValues?.head_gender === 'F' ? 'F' : 'M',
     head_civil_status: initialValues?.head_civil_status ?? EMPTY_FORM.head_civil_status,
@@ -457,6 +471,19 @@ export function HouseholdRegistrationWizard({
     setForm((current) => ({ ...current, [key]: value }));
   }
 
+  function updateHeadNamePart(
+    part: 'head_first_name' | 'head_middle_name' | 'head_last_name',
+    value: string,
+  ) {
+    setForm((current) => {
+      const next = { ...current, [part]: value };
+      return {
+        ...next,
+        head_name: joinNameParts(next.head_first_name, next.head_middle_name, next.head_last_name),
+      };
+    });
+  }
+
   function applyResolvedLocation(
     coords: { lat: number; lng: number },
     source: LocationSource,
@@ -553,8 +580,8 @@ export function HouseholdRegistrationWizard({
   function handleAddMember() {
     setMemberError('');
 
-    if (!memberDraft.full_name.trim()) {
-      setMemberError('Enter the household member name.');
+    if (!memberDraft.first_name?.trim() || !memberDraft.last_name?.trim()) {
+      setMemberError('Enter the household member first name and last name.');
       return;
     }
 
@@ -594,7 +621,14 @@ export function HouseholdRegistrationWizard({
       ...current,
       {
         ...memberDraft,
-        full_name: memberDraft.full_name.trim(),
+        first_name: memberDraft.first_name?.trim() ?? '',
+        middle_name: memberDraft.middle_name?.trim() ?? '',
+        last_name: memberDraft.last_name?.trim() ?? '',
+        full_name: joinNameParts(
+          memberDraft.first_name ?? '',
+          memberDraft.middle_name ?? '',
+          memberDraft.last_name ?? '',
+        ),
         relationship_to_head: formatRelationshipLabel(memberDraft.relationship_to_head),
         occupation: memberDraft.occupation.trim(),
       },
@@ -785,15 +819,41 @@ export function HouseholdRegistrationWizard({
 
           <div className="mt-6 grid gap-4 md:grid-cols-2">
             <div>
-              <label className="mb-2 block text-sm font-medium text-slate-700">Full name *</label>
+              <label className="mb-2 block text-sm font-medium text-slate-700">First name *</label>
               <div className="relative">
                 <User className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                 <input
                   type="text"
-                  value={form.head_name}
-                  onChange={(event) => updateForm('head_name', event.target.value)}
+                  value={form.head_first_name}
+                  onChange={(event) => updateHeadNamePart('head_first_name', event.target.value)}
                   className="w-full rounded-2xl border border-slate-200 bg-slate-50 py-3 pl-10 pr-4 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
-                  placeholder="Enter the applicant or household head name"
+                  placeholder="Juan"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="mb-2 block text-sm font-medium text-slate-700">Middle name</label>
+              <div className="relative">
+                <input
+                  type="text"
+                  value={form.head_middle_name}
+                  onChange={(event) => updateHeadNamePart('head_middle_name', event.target.value)}
+                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 py-3 px-4 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
+                  placeholder="Reyes"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="mb-2 block text-sm font-medium text-slate-700">Last name *</label>
+              <div className="relative">
+                <input
+                  type="text"
+                  value={form.head_last_name}
+                  onChange={(event) => updateHeadNamePart('head_last_name', event.target.value)}
+                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 py-3 px-4 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
+                  placeholder="Dela Cruz"
                 />
               </div>
             </div>
@@ -1248,13 +1308,35 @@ export function HouseholdRegistrationWizard({
 
                     <div className="grid gap-4 md:grid-cols-2">
                       <div>
-                        <label className="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-500">Full name *</label>
+                        <label className="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-500">First name *</label>
                         <input
                           type="text"
-                          value={memberDraft.full_name}
-                          onChange={(event) => setMemberDraft((current) => ({ ...current, full_name: event.target.value }))}
+                          value={memberDraft.first_name ?? ''}
+                          onChange={(event) => setMemberDraft((current) => ({ ...current, first_name: event.target.value }))}
                           className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
-                          placeholder="e.g., Maria Dela Cruz"
+                          placeholder="e.g., Maria"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-500">Middle name</label>
+                        <input
+                          type="text"
+                          value={memberDraft.middle_name ?? ''}
+                          onChange={(event) => setMemberDraft((current) => ({ ...current, middle_name: event.target.value }))}
+                          className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
+                          placeholder="e.g., Santos"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-500">Last name *</label>
+                        <input
+                          type="text"
+                          value={memberDraft.last_name ?? ''}
+                          onChange={(event) => setMemberDraft((current) => ({ ...current, last_name: event.target.value }))}
+                          className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
+                          placeholder="e.g., Dela Cruz"
                         />
                       </div>
 

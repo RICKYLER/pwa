@@ -3,6 +3,7 @@ import 'server-only';
 import { createHash, createHmac, randomBytes, randomUUID } from 'node:crypto';
 import { createClient } from '@supabase/supabase-js';
 import type { User, UserAccountStatus, UserRole } from '@/lib/db/schema';
+import { joinNameParts } from '@/lib/name-parts';
 import type { AuthenticationResult, StoredUserRecord } from '@/lib/server/local-auth-store';
 import { getSupabaseAdminClient, getSupabaseAdminConfig } from '@/lib/server/supabase-admin';
 
@@ -333,6 +334,9 @@ async function writeProfile(input: {
   id: string;
   email: string;
   name: string;
+  first_name?: string;
+  middle_name?: string;
+  last_name?: string;
   role: UserRole;
   status: UserAccountStatus;
   barangay_id: string;
@@ -343,10 +347,22 @@ async function writeProfile(input: {
   const supabase = getSupabaseAdminClient();
   const existing = await getProfileById(input.id);
   const timestamp = nowIso();
+  // Only send the part columns when the caller provides them; name-only
+  // writes rely on the users_sync_name_parts trigger to split the name.
+  const nameParts = input.first_name !== undefined
+    || input.middle_name !== undefined
+    || input.last_name !== undefined
+    ? {
+        first_name: input.first_name ?? '',
+        middle_name: input.middle_name ?? '',
+        last_name: input.last_name ?? '',
+      }
+    : {};
   const baseRow = {
     id: input.id,
     email: normalizeEmail(input.email),
     name: input.name.trim(),
+    ...nameParts,
     role: input.role,
     barangay_id: input.barangay_id.trim(),
     must_change_password: input.must_change_password,
@@ -583,19 +599,28 @@ export async function createUserAccount(input: {
 }
 
 export async function createResidentSelfServiceAccount(input: {
-  name: string;
+  first_name: string;
+  middle_name?: string;
+  last_name: string;
   email: string;
   password: string;
   barangay_id: string;
 }): Promise<User> {
   const normalizedEmail = normalizeEmail(input.email);
+  const firstName = input.first_name.trim();
+  const middleName = (input.middle_name ?? '').trim();
+  const lastName = input.last_name.trim();
+  const fullName = joinNameParts(firstName, middleName, lastName);
   const supabase = getSupabaseAdminClient();
   const { data, error } = await supabase.auth.admin.createUser({
     email: normalizedEmail,
     password: input.password,
     email_confirm: false,
     user_metadata: {
-      name: input.name.trim(),
+      name: fullName,
+      first_name: firstName,
+      middle_name: middleName,
+      last_name: lastName,
       role: 'resident',
       barangay_id: input.barangay_id.trim(),
     },
@@ -608,7 +633,10 @@ export async function createResidentSelfServiceAccount(input: {
   const profile = await writeProfile({
     id: data.user.id,
     email: normalizedEmail,
-    name: input.name,
+    name: fullName,
+    first_name: firstName,
+    middle_name: middleName,
+    last_name: lastName,
     role: 'resident',
     status: 'active',
     barangay_id: input.barangay_id,

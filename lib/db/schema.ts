@@ -42,6 +42,9 @@ export interface User {
   email: string;
   password_hash?: string;
   name: string;
+  first_name?: string;
+  middle_name?: string;
+  last_name?: string;
   role: UserRole;
   status: UserAccountStatus;
   barangay_id: string;
@@ -121,6 +124,9 @@ export interface Resident {
   id: string;
   household_id: string;
   full_name: string;
+  first_name?: string;
+  middle_name?: string;
+  last_name?: string;
   birthdate: string; // ISO format: YYYY-MM-DD
   gender: Gender;
   relationship_to_head: string;
@@ -155,6 +161,8 @@ export interface VulnerabilityFlags {
   follow_up_status?: FollowUpStatus;
   medical_notes?: string;
   notes?: string;
+  /** When a health worker last confirmed the manual flags (re-verification stamp). */
+  last_verified_at?: Date;
   updatedAt: Date;
   syncStatus: SyncStatus;
 }

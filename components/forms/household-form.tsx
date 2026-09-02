@@ -43,10 +43,14 @@ import {
   parseHazardTags,
 } from '@/lib/disaster-alerts';
 import { DEFAULT_BARANGAY_ID, MABINI_MUNICIPALITY } from '@/lib/barangays';
+import { joinNameParts, splitFullName, type NameParts } from '@/lib/name-parts';
 
 // Partial resident data collected before the household ID is known
 export interface MemberDraft {
   full_name: string;
+  first_name?: string;
+  middle_name?: string;
+  last_name?: string;
   birthdate: string;
   gender: 'M' | 'F';
   relationship_to_head: string;
@@ -73,6 +77,9 @@ interface HouseholdFormProps {
 
 const EMPTY_MEMBER: MemberDraft = {
   full_name: '',
+  first_name: '',
+  middle_name: '',
+  last_name: '',
   birthdate: '',
   gender: 'M',
   relationship_to_head: '',
@@ -239,6 +246,8 @@ export function HouseholdForm({ initialData, onSubmit, isLoading = false }: Hous
   const { isLoaded: mapsReady } = useGoogleMaps();
   const currentUser = getCurrentUser();
   const addressAutocompleteRef = useRef<google.maps.places.Autocomplete | null>(null);
+  const initialHeadNameParts = splitFullName(initialData?.head_name || '');
+  const [headNameParts, setHeadNameParts] = useState<NameParts>(initialHeadNameParts);
   const [formData, setFormData] = useState({
     head_name: initialData?.head_name || '',
     barangay_id: initialData?.barangay_id || currentUser?.barangay_id || DEFAULT_BARANGAY_ID,
@@ -684,8 +693,8 @@ export function HouseholdForm({ initialData, onSubmit, isLoading = false }: Hous
 
   function handleAddMember() {
     setMemberError('');
-    if (!memberDraft.full_name.trim()) {
-      setMemberError('Full name is required');
+    if (!memberDraft.first_name?.trim() || !memberDraft.last_name?.trim()) {
+      setMemberError('First name and last name are required');
       return;
     }
     if (!memberDraft.birthdate) {
@@ -719,6 +728,14 @@ export function HouseholdForm({ initialData, onSubmit, isLoading = false }: Hous
       ...prev,
       {
         ...memberDraft,
+        first_name: memberDraft.first_name?.trim() ?? '',
+        middle_name: memberDraft.middle_name?.trim() ?? '',
+        last_name: memberDraft.last_name?.trim() ?? '',
+        full_name: joinNameParts(
+          memberDraft.first_name ?? '',
+          memberDraft.middle_name ?? '',
+          memberDraft.last_name ?? '',
+        ),
         relationship_to_head: formatRelationshipLabel(memberDraft.relationship_to_head),
       },
     ]);
@@ -728,6 +745,17 @@ export function HouseholdForm({ initialData, onSubmit, isLoading = false }: Hous
 
   function handleRemoveMember(index: number) {
     setMembers((prev) => prev.filter((_, i) => i !== index));
+  }
+
+  function updateHeadNamePart(part: keyof NameParts, value: string) {
+    setHeadNameParts((prev) => {
+      const next = { ...prev, [part]: value };
+      setFormData((current) => ({
+        ...current,
+        head_name: joinNameParts(next.first, next.middle, next.last),
+      }));
+      return next;
+    });
   }
 
   return (
@@ -745,19 +773,48 @@ export function HouseholdForm({ initialData, onSubmit, isLoading = false }: Hous
         </h2>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {/* Head Name */}
-          <div>
-            <label className="block text-sm font-medium text-foreground mb-2">
-              Household Head Name *
-            </label>
-            <input
-              type="text"
-              required
-              value={formData.head_name}
-              onChange={(e) => setFormData((prev) => ({ ...prev, head_name: e.target.value }))}
-              className="w-full px-3 py-2 border border-input rounded-md bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
-              placeholder="e.g., Juan Dela Cruz"
-              disabled={isLoading}
-            />
+          <div className="md:col-span-2 grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-foreground mb-2">
+                Head First Name *
+              </label>
+              <input
+                type="text"
+                required
+                value={headNameParts.first}
+                onChange={(e) => updateHeadNamePart('first', e.target.value)}
+                className="w-full px-3 py-2 border border-input rounded-md bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                placeholder="e.g., Juan"
+                disabled={isLoading}
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-foreground mb-2">
+                Head Middle Name
+              </label>
+              <input
+                type="text"
+                value={headNameParts.middle}
+                onChange={(e) => updateHeadNamePart('middle', e.target.value)}
+                className="w-full px-3 py-2 border border-input rounded-md bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                placeholder="e.g., Reyes"
+                disabled={isLoading}
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-foreground mb-2">
+                Head Last Name *
+              </label>
+              <input
+                type="text"
+                required
+                value={headNameParts.last}
+                onChange={(e) => updateHeadNamePart('last', e.target.value)}
+                className="w-full px-3 py-2 border border-input rounded-md bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                placeholder="e.g., Dela Cruz"
+                disabled={isLoading}
+              />
+            </div>
           </div>
 
           <div className="md:col-span-2">
@@ -1445,12 +1502,32 @@ export function HouseholdForm({ initialData, onSubmit, isLoading = false }: Hous
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <div>
-                <label className="block text-xs font-medium text-muted-foreground mb-1">Full Name *</label>
+                <label className="block text-xs font-medium text-muted-foreground mb-1">First Name *</label>
                 <input
                   type="text"
-                  placeholder="e.g., Maria Dela Cruz"
-                  value={memberDraft.full_name}
-                  onChange={(e) => setMemberDraft({ ...memberDraft, full_name: e.target.value })}
+                  placeholder="e.g., Maria"
+                  value={memberDraft.first_name ?? ''}
+                  onChange={(e) => setMemberDraft({ ...memberDraft, first_name: e.target.value })}
+                  className="w-full px-3 py-2 border border-input rounded-md bg-background text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-muted-foreground mb-1">Middle Name</label>
+                <input
+                  type="text"
+                  placeholder="e.g., Santos"
+                  value={memberDraft.middle_name ?? ''}
+                  onChange={(e) => setMemberDraft({ ...memberDraft, middle_name: e.target.value })}
+                  className="w-full px-3 py-2 border border-input rounded-md bg-background text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-muted-foreground mb-1">Last Name *</label>
+                <input
+                  type="text"
+                  placeholder="e.g., Dela Cruz"
+                  value={memberDraft.last_name ?? ''}
+                  onChange={(e) => setMemberDraft({ ...memberDraft, last_name: e.target.value })}
                   className="w-full px-3 py-2 border border-input rounded-md bg-background text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary"
                 />
               </div>

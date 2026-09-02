@@ -12,7 +12,9 @@ import {
 export const runtime = 'nodejs';
 
 const registerSchema = z.object({
-  name: z.string().trim().min(2, 'Full name is required.'),
+  first_name: z.string().trim().min(2, 'First name is required.'),
+  middle_name: z.string().trim().optional().default(''),
+  last_name: z.string().trim().min(2, 'Last name is required.'),
   email: z.string().email('Enter a valid email address.'),
   password: z.string().min(8, 'Password must be at least 8 characters long.'),
   barangay_id: z.string()

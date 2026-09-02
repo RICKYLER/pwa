@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { getAnalyticsScopeLabel } from '@/lib/analytics-scope';
 import { getCurrentUser, hasPermission } from '@/lib/auth';
+import AppShell from '@/components/AppShell';
 import MapLocationPicker from '@/components/MapLocationPicker';
 import { buildDistributionInventorySummary } from '@/lib/distribution-insights';
 import {
@@ -481,9 +482,9 @@ export default function NewDistributionPage() {
   if (!user) return null;
 
   return (
-    <div className="min-h-screen bg-slate-50">
-      <header className="sticky top-0 z-10 border-b border-slate-200/70 bg-white shadow-sm">
-        <div className="mx-auto flex h-14 max-w-3xl items-center gap-3 px-4 sm:px-6">
+    <AppShell title="New Distribution Event">
+      <div className="mx-auto max-w-6xl px-4 py-6 sm:px-6">
+        <div className="mb-6 flex items-center gap-3 border-b border-slate-200/70 pb-4">
           <Link
             href="/distribution"
             className="-ml-2 rounded-xl p-2 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700"
@@ -492,18 +493,15 @@ export default function NewDistributionPage() {
             <ArrowLeft className="h-4 w-4" />
           </Link>
           <div className="min-w-0 flex-1">
-            <p className="text-sm font-bold leading-none text-slate-900">New Distribution Event</p>
-            <p className="mt-0.5 text-[11px] text-slate-400">
+            <h1 className="text-lg font-bold leading-none text-slate-900">New Distribution Event</h1>
+            <p className="mt-1 text-sm text-slate-500">
               Configure the target, package, and pinned location before release.
             </p>
           </div>
-          <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-emerald-50">
-            <Package className="h-4 w-4 text-emerald-600" />
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-50">
+            <Package className="h-5 w-5 text-emerald-600" />
           </div>
         </div>
-      </header>
-
-      <main className="mx-auto max-w-3xl px-4 py-6 sm:px-6">
         {success ? (
           <div className="flex flex-col items-center justify-center py-20 text-center">
             <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-emerald-50 shadow-lg shadow-emerald-100">
@@ -513,7 +511,9 @@ export default function NewDistributionPage() {
             <p className="mt-1 text-sm text-slate-400">Redirecting to Distribution…</p>
           </div>
         ) : (
-          <form onSubmit={handleSubmit} className="space-y-4" noValidate>
+          <form onSubmit={handleSubmit} noValidate>
+            <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px] lg:items-start">
+              <div className="min-w-0 space-y-4">
             <div className="space-y-3 rounded-2xl border border-slate-200/60 bg-white p-5 shadow-sm">
               <p className="text-xs font-bold uppercase tracking-wider text-slate-500">Event Type</p>
               <div className="grid gap-2 sm:grid-cols-3">
@@ -706,98 +706,6 @@ export default function NewDistributionPage() {
                   {selectedTargetGroupProgram.program}
                 </p>
               </div>
-
-              <div className="rounded-2xl border border-emerald-200 bg-emerald-50/60 p-4">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <p className="text-xs font-bold uppercase tracking-wider text-emerald-700">
-                      Audience Preview
-                    </p>
-                    <p className="mt-1 text-[11px] leading-5 text-emerald-800/80">
-                      {form.target_group === 'all'
-                          ? `This event will show all ${form.target_scope === 'resident' ? 'residents' : 'eligible households'} in ${selectedAudienceScopeLabel}.`
-                        : form.target_scope === 'household'
-                          ? `This event will show households in ${selectedAudienceScopeLabel} that have at least one ${selectedTargetGroupLabel.toLowerCase()} member.`
-                          : `This event will only show ${selectedTargetGroupLabel.toLowerCase()} ${form.target_scope === 'resident' ? 'residents' : 'households with matching members'} in ${selectedAudienceScopeLabel}.`}
-                    </p>
-                  </div>
-                  {isLoadingAudience ? <Loader2 className="h-4 w-4 animate-spin text-emerald-600" /> : null}
-                </div>
-
-                <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                  <div className="rounded-xl border border-emerald-100 bg-white/80 px-3 py-3">
-                    <p className="text-2xl font-bold text-slate-900">
-                      {audienceStats?.eligibility_summary.eligible_households ?? 0}
-                    </p>
-                    <p className="text-xs font-medium text-slate-500">Matching Households</p>
-                  </div>
-                  <div className="rounded-xl border border-emerald-100 bg-white/80 px-3 py-3">
-                    <p className="text-2xl font-bold text-slate-900">
-                      {audienceStats?.eligibility_summary.eligible_residents ?? 0}
-                    </p>
-                    <p className="text-xs font-medium text-slate-500">
-                      {form.target_group === 'all'
-                        ? 'Residents in Scope'
-                        : `${selectedTargetGroupLabel} Matches`}
-                    </p>
-                  </div>
-                </div>
-
-                {audienceStats?.eligibility_summary.match_support ? (
-                  <p className="mt-3 text-[11px] text-emerald-900/75">
-                    {audienceStats.eligibility_summary.match_support}
-                  </p>
-                ) : null}
-
-                {selectedBarangay ? (
-                  <div className="mt-4 rounded-2xl border border-emerald-100 bg-white/80 p-3">
-                    <p className="text-xs font-bold uppercase tracking-wider text-slate-500">
-                      Selected Barangay
-                    </p>
-                    <div className="mt-3 rounded-xl border border-slate-200 bg-white px-4 py-3">
-                      <p className="text-sm font-semibold text-slate-900">{selectedBarangay.barangay_name}</p>
-                      <p className="mt-1 text-[11px] text-slate-500">
-                        Only households and residents from this barangay will be included in the event audience.
-                      </p>
-                    </div>
-                  </div>
-                ) : null}
-
-                <div className="mt-4 rounded-2xl border border-emerald-100 bg-white/80 p-3">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div>
-                      <p className="text-xs font-bold uppercase tracking-wider text-slate-500">
-                        Master List of Recipients
-                      </p>
-                      <p className="mt-1 text-[11px] text-slate-500">
-                        Preview the exact {form.target_scope === 'household' ? 'households' : 'residents'} currently qualified for this selected barangay and sector.
-                      </p>
-                    </div>
-                    <span className="rounded-full bg-emerald-50 px-3 py-1 text-[11px] font-semibold text-emerald-700">
-                      {audienceStats?.audience_master_list.length ?? 0} record{(audienceStats?.audience_master_list.length ?? 0) === 1 ? '' : 's'}
-                    </span>
-                  </div>
-
-                  {audienceStats?.audience_master_list.length ? (
-                    <div className="mt-3 max-h-72 space-y-2 overflow-y-auto pr-1">
-                      {audienceStats.audience_master_list.map((entry) => (
-                        <div
-                          key={entry.id}
-                          className="rounded-xl border border-slate-200 bg-white px-4 py-3"
-                        >
-                          <p className="text-sm font-semibold text-slate-900">{entry.primary_text}</p>
-                          <p className="mt-1 text-xs text-slate-500">{entry.secondary_text}</p>
-                          <p className="mt-2 text-[11px] text-emerald-800/80">{entry.qualification_text}</p>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="mt-3 rounded-xl border border-dashed border-slate-300 bg-white px-4 py-5 text-sm text-slate-500">
-                      No matching {form.target_scope === 'household' ? 'households' : 'residents'} found yet for this barangay and sector.
-                    </div>
-                  )}
-                </div>
-              </div>
             </div>
 
             <div className="space-y-4 rounded-2xl border border-slate-200/60 bg-white p-5 shadow-sm">
@@ -924,7 +832,137 @@ export default function NewDistributionPage() {
                       </div>
                     );
                   })}
+                </div>
+              ) : (
+                <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-6 text-center text-sm text-slate-400">
+                  No package items yet. Add rice, sardines, noodles, or other supplies from
+                  inventory.
+                </div>
+              )}
+            </div>
 
+            <div className="space-y-3 rounded-2xl border border-slate-200/60 bg-white p-5 shadow-sm">
+              <div>
+                <p className="text-xs font-bold uppercase tracking-wider text-slate-500">
+                  Location <span className="text-red-400">*</span>
+                </p>
+                <p className="mt-0.5 text-[11px] text-slate-400">
+                  Search an address or click the map to drop a pin.
+                </p>
+              </div>
+              <MapLocationPicker onLocationChange={handleLocationChange} />
+            </div>
+
+            <div className="space-y-3 rounded-2xl border border-slate-200/60 bg-white p-5 shadow-sm">
+              <label className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-slate-500">
+                <FileText className="h-3.5 w-3.5" />
+                Notes <span className="normal-case font-normal text-slate-400">(optional)</span>
+              </label>
+              <textarea
+                rows={3}
+                placeholder="Any additional information about this event…"
+                value={form.notes}
+                onChange={(e) => setField('notes', e.target.value)}
+                className="w-full resize-none rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm transition-all focus:border-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/30"
+              />
+            </div>
+
+              </div>
+
+              <aside className="min-w-0 space-y-4 lg:sticky lg:top-20">
+                <div className="rounded-2xl border border-emerald-200 bg-emerald-50/60 p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-xs font-bold uppercase tracking-wider text-emerald-700">
+                        Audience Preview
+                      </p>
+                      <p className="mt-1 text-[11px] leading-5 text-emerald-800/80">
+                        {form.target_group === 'all'
+                            ? `This event will show all ${form.target_scope === 'resident' ? 'residents' : 'eligible households'} in ${selectedAudienceScopeLabel}.`
+                          : form.target_scope === 'household'
+                            ? `This event will show households in ${selectedAudienceScopeLabel} that have at least one ${selectedTargetGroupLabel.toLowerCase()} member.`
+                            : `This event will only show ${selectedTargetGroupLabel.toLowerCase()} ${form.target_scope === 'resident' ? 'residents' : 'households with matching members'} in ${selectedAudienceScopeLabel}.`}
+                      </p>
+                    </div>
+                    {isLoadingAudience ? <Loader2 className="h-4 w-4 animate-spin text-emerald-600" /> : null}
+                  </div>
+
+                  <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                    <div className="rounded-xl border border-emerald-100 bg-white/80 px-3 py-3">
+                      <p className="text-2xl font-bold text-slate-900">
+                        {audienceStats?.eligibility_summary.eligible_households ?? 0}
+                      </p>
+                      <p className="text-xs font-medium text-slate-500">Matching Households</p>
+                    </div>
+                    <div className="rounded-xl border border-emerald-100 bg-white/80 px-3 py-3">
+                      <p className="text-2xl font-bold text-slate-900">
+                        {audienceStats?.eligibility_summary.eligible_residents ?? 0}
+                      </p>
+                      <p className="text-xs font-medium text-slate-500">
+                        {form.target_group === 'all'
+                          ? 'Residents in Scope'
+                          : `${selectedTargetGroupLabel} Matches`}
+                      </p>
+                    </div>
+                  </div>
+
+                  {audienceStats?.eligibility_summary.match_support ? (
+                    <p className="mt-3 text-[11px] text-emerald-900/75">
+                      {audienceStats.eligibility_summary.match_support}
+                    </p>
+                  ) : null}
+
+                  {selectedBarangay ? (
+                    <div className="mt-4 rounded-2xl border border-emerald-100 bg-white/80 p-3">
+                      <p className="text-xs font-bold uppercase tracking-wider text-slate-500">
+                        Selected Barangay
+                      </p>
+                      <div className="mt-3 rounded-xl border border-slate-200 bg-white px-4 py-3">
+                        <p className="text-sm font-semibold text-slate-900">{selectedBarangay.barangay_name}</p>
+                        <p className="mt-1 text-[11px] text-slate-500">
+                          Only households and residents from this barangay will be included in the event audience.
+                        </p>
+                      </div>
+                    </div>
+                  ) : null}
+
+                  <div className="mt-4 rounded-2xl border border-emerald-100 bg-white/80 p-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div>
+                        <p className="text-xs font-bold uppercase tracking-wider text-slate-500">
+                          Master List of Recipients
+                        </p>
+                        <p className="mt-1 text-[11px] text-slate-500">
+                          Preview the exact {form.target_scope === 'household' ? 'households' : 'residents'} currently qualified for this selected barangay and sector.
+                        </p>
+                      </div>
+                      <span className="rounded-full bg-emerald-50 px-3 py-1 text-[11px] font-semibold text-emerald-700">
+                        {audienceStats?.audience_master_list.length ?? 0} record{(audienceStats?.audience_master_list.length ?? 0) === 1 ? '' : 's'}
+                      </span>
+                    </div>
+
+                    {audienceStats?.audience_master_list.length ? (
+                      <div className="mt-3 max-h-72 space-y-2 overflow-y-auto pr-1">
+                        {audienceStats.audience_master_list.map((entry) => (
+                          <div
+                            key={entry.id}
+                            className="rounded-xl border border-slate-200 bg-white px-4 py-3"
+                          >
+                            <p className="text-sm font-semibold text-slate-900">{entry.primary_text}</p>
+                            <p className="mt-1 text-xs text-slate-500">{entry.secondary_text}</p>
+                            <p className="mt-2 text-[11px] text-emerald-800/80">{entry.qualification_text}</p>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="mt-3 rounded-xl border border-dashed border-slate-300 bg-white px-4 py-5 text-sm text-slate-500">
+                        No matching {form.target_scope === 'household' ? 'households' : 'residents'} found yet for this barangay and sector.
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {form.package_items.length > 0 ? (
                   <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-4">
                     <div className="flex flex-wrap items-center justify-between gap-3">
                       <div>
@@ -961,76 +999,57 @@ export default function NewDistributionPage() {
                       </p>
                     ) : null}
                   </div>
+                ) : null}
+
+                {error ? (
+                  <div className="flex items-center gap-2 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700">
+                    <span className="h-1.5 w-1.5 flex-shrink-0 rounded-full bg-red-500" />
+                    {error}
+                  </div>
+                ) : null}
+
+                <div className="rounded-2xl border border-slate-200/60 bg-white p-4 shadow-sm">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-xs font-bold uppercase tracking-wider text-slate-500">
+                      Ready to create?
+                    </p>
+                    <span className={`rounded-full px-2.5 py-1 text-[10px] font-bold ${
+                      packageInventorySummary.blocking_items.length > 0
+                        ? 'bg-rose-100 text-rose-700'
+                        : 'bg-emerald-100 text-emerald-700'
+                    }`}>
+                      {packageInventorySummary.blocking_items.length > 0 ? 'Needs restock' : 'All set'}
+                    </span>
+                  </div>
+                  <button
+                    type="submit"
+                    disabled={isSubmitting || isLoadingInventory || packageInventorySummary.blocking_items.length > 0}
+                    className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-600 py-3 text-sm font-bold text-white shadow-lg shadow-emerald-500/25 transition-all hover:-translate-y-px hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60 disabled:translate-y-0"
+                  >
+                    {isSubmitting ? (
+                      <>
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        Creating…
+                      </>
+                    ) : (
+                      <>
+                        <Package className="h-4 w-4" />
+                        Create Event
+                      </>
+                    )}
+                  </button>
+                  <Link
+                    href="/distribution"
+                    className="mt-2 flex w-full items-center justify-center rounded-xl border border-slate-200 px-5 py-3 text-sm font-semibold text-slate-600 transition-all hover:bg-slate-50"
+                  >
+                    Cancel
+                  </Link>
                 </div>
-              ) : (
-                <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-6 text-center text-sm text-slate-400">
-                  No package items yet. Add rice, sardines, noodles, or other supplies from
-                  inventory.
-                </div>
-              )}
-            </div>
-
-            <div className="space-y-3 rounded-2xl border border-slate-200/60 bg-white p-5 shadow-sm">
-              <div>
-                <p className="text-xs font-bold uppercase tracking-wider text-slate-500">
-                  Location <span className="text-red-400">*</span>
-                </p>
-                <p className="mt-0.5 text-[11px] text-slate-400">
-                  Search an address or click the map to drop a pin.
-                </p>
-              </div>
-              <MapLocationPicker onLocationChange={handleLocationChange} />
-            </div>
-
-            <div className="space-y-3 rounded-2xl border border-slate-200/60 bg-white p-5 shadow-sm">
-              <label className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-slate-500">
-                <FileText className="h-3.5 w-3.5" />
-                Notes <span className="normal-case font-normal text-slate-400">(optional)</span>
-              </label>
-              <textarea
-                rows={3}
-                placeholder="Any additional information about this event…"
-                value={form.notes}
-                onChange={(e) => setField('notes', e.target.value)}
-                className="w-full resize-none rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm transition-all focus:border-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/30"
-              />
-            </div>
-
-            {error ? (
-              <div className="flex items-center gap-2 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700">
-                <span className="h-1.5 w-1.5 flex-shrink-0 rounded-full bg-red-500" />
-                {error}
-              </div>
-            ) : null}
-
-            <div className="flex gap-3 pb-8">
-              <button
-                type="submit"
-                disabled={isSubmitting || isLoadingInventory || packageInventorySummary.blocking_items.length > 0}
-                className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-600 py-3 text-sm font-bold text-white shadow-lg shadow-emerald-500/25 transition-all hover:-translate-y-px hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60 disabled:translate-y-0"
-              >
-                {isSubmitting ? (
-                  <>
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    Creating…
-                  </>
-                ) : (
-                  <>
-                    <Package className="h-4 w-4" />
-                    Create Event
-                  </>
-                )}
-              </button>
-              <Link
-                href="/distribution"
-                className="rounded-xl border border-slate-200 px-5 py-3 text-sm font-semibold text-slate-600 transition-all hover:bg-slate-50"
-              >
-                Cancel
-              </Link>
+              </aside>
             </div>
           </form>
         )}
-      </main>
-    </div>
+      </div>
+    </AppShell>
   );
 }

@@ -15,6 +15,12 @@ const STATUS_CFG = {
     completed: { label: 'Completed', dot: 'bg-emerald-400', badge: 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200', border: 'hover:border-emerald-200' },
 };
 
+const SUMMARY_STRIP = [
+    { key: 'planned' as const, label: 'Planned', icon: Clock, light: 'bg-amber-50 text-amber-600', gradient: 'from-amber-500 to-orange-500' },
+    { key: 'ongoing' as const, label: 'Ongoing', icon: Truck, light: 'bg-blue-50 text-blue-600', gradient: 'from-blue-500 to-cyan-600' },
+    { key: 'completed' as const, label: 'Completed', icon: CheckCircle2, light: 'bg-emerald-50 text-emerald-600', gradient: 'from-emerald-500 to-teal-600' },
+];
+
 // ─── Confirmation Dialog ──────────────────────────────────────────────────────
 interface DeleteDialogProps {
     event: DistributionEvent;
@@ -34,6 +40,9 @@ function DeleteDialog({ event, onConfirm, onCancel, isDeleting }: DeleteDialogPr
 
             {/* Dialog panel */}
             <div
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="delete-dialog-title"
                 className="relative z-10 w-full max-w-md bg-white rounded-2xl shadow-2xl shadow-slate-900/20 border border-slate-200/60 overflow-hidden"
                 onClick={e => e.stopPropagation()}
             >
@@ -47,14 +56,14 @@ function DeleteDialog({ event, onConfirm, onCancel, isDeleting }: DeleteDialogPr
                             <AlertTriangle className="w-5 h-5 text-red-500" />
                         </div>
                         <div className="flex-1 min-w-0">
-                            <h2 className="text-base font-bold text-slate-900">Delete Event?</h2>
+                            <h2 id="delete-dialog-title" className="text-base font-bold text-slate-900">Delete Event?</h2>
                             <p className="text-sm text-slate-500 mt-0.5">
                                 This will permanently delete this distribution event and all its records. This cannot be undone.
                             </p>
                         </div>
                         <button
                             onClick={onCancel}
-                            className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-all flex-shrink-0"
+                            className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-all flex-shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-400/50"
                         >
                             <X className="w-4 h-4" />
                         </button>
@@ -63,7 +72,7 @@ function DeleteDialog({ event, onConfirm, onCancel, isDeleting }: DeleteDialogPr
                     {/* Event summary card */}
                     <div className="flex items-center gap-3 p-3.5 bg-slate-50 rounded-xl border border-slate-200/60 mb-6">
                         <div className="w-9 h-9 rounded-xl bg-emerald-50 flex items-center justify-center flex-shrink-0">
-                            <Package className="w-4.5 h-4.5 text-emerald-600" />
+                            <Package className="w-5 h-5 text-emerald-600" />
                         </div>
                         <div className="min-w-0">
                             <p className="text-sm font-bold text-slate-900 truncate">{event.event_name}</p>
@@ -78,14 +87,14 @@ function DeleteDialog({ event, onConfirm, onCancel, isDeleting }: DeleteDialogPr
                         <button
                             onClick={onCancel}
                             disabled={isDeleting}
-                            className="flex-1 py-2.5 px-4 rounded-xl text-sm font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 transition-all disabled:opacity-50"
+                            className="flex-1 py-2.5 px-4 rounded-xl text-sm font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 transition-all disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400/50"
                         >
                             Cancel
                         </button>
                         <button
                             onClick={onConfirm}
                             disabled={isDeleting}
-                            className="flex-1 py-2.5 px-4 rounded-xl text-sm font-semibold text-white bg-gradient-to-r from-red-500 to-rose-600 hover:opacity-90 transition-all shadow-md shadow-red-500/25 disabled:opacity-60 flex items-center justify-center gap-2"
+                            className="flex-1 py-2.5 px-4 rounded-xl text-sm font-semibold text-white bg-gradient-to-r from-red-500 to-rose-600 hover:opacity-90 transition-all shadow-md shadow-red-500/25 disabled:opacity-60 flex items-center justify-center gap-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-400/50"
                         >
                             {isDeleting ? (
                                 <>
@@ -144,6 +153,7 @@ export default function DistributionDesktop() {
     const filtered = (filterStatus === 'all' ? events : events.filter(e => e.status === filterStatus))
         .filter((event) => !isZeroMatchMode || zeroMatchEventIds.has(event.id));
     const counts = { all: events.length, planned: events.filter(e => e.status === 'planned').length, ongoing: events.filter(e => e.status === 'ongoing').length, completed: events.filter(e => e.status === 'completed').length };
+    const zeroMatchCount = events.filter((event) => zeroMatchEventIds.has(event.id)).length;
 
     async function handleConfirmDelete() {
         if (!pendingDelete) return;
@@ -159,7 +169,9 @@ export default function DistributionDesktop() {
         }
     }
 
-    const canDelete = hasPermission('manage_inventory');
+    const canManage = hasPermission('manage_inventory');
+
+    const focusRing = 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/40 focus-visible:ring-offset-1';
 
     return (
         <>
@@ -173,15 +185,15 @@ export default function DistributionDesktop() {
                 />
             )}
 
-            <div className="p-8 max-w-[1400px] mx-auto space-y-5">
+            <div className="p-6 lg:p-8 max-w-[1400px] mx-auto space-y-5">
                 {/* Header */}
                 <div className="flex items-center justify-between">
                     <div>
                         <h1 className="text-2xl font-bold text-slate-900">Distribution Events</h1>
                         <p className="text-sm text-slate-500 mt-0.5">{counts.all} event{counts.all !== 1 ? 's' : ''} · {counts.ongoing} ongoing · {counts.planned} planned</p>
                     </div>
-                    {canDelete && (
-                        <Link href="/distribution/new" className="inline-flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-emerald-500 to-teal-600 text-white text-sm font-semibold rounded-xl hover:opacity-90 transition-all shadow-md shadow-emerald-500/25 hover:-translate-y-px">
+                    {canManage && (
+                        <Link href="/distribution/new" className={`inline-flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-emerald-500 to-teal-600 text-white text-sm font-semibold rounded-xl hover:opacity-90 transition-all shadow-md shadow-emerald-500/25 hover:-translate-y-px ${focusRing}`}>
                             <Plus className="w-4 h-4" />New Event
                         </Link>
                     )}
@@ -193,21 +205,16 @@ export default function DistributionDesktop() {
                     </div>
                 )}
 
-                {/* Summary Strip */}
+                {/* Summary Strip — informational only; the tab bar below is the single filter */}
                 <div className="grid grid-cols-3 gap-4">
-                    {([
-                        { key: 'planned' as const, label: 'Planned', icon: Clock, light: 'bg-amber-50 text-amber-600', gradient: 'from-amber-500 to-orange-500' },
-                        { key: 'ongoing' as const, label: 'Ongoing', icon: Truck, light: 'bg-blue-50 text-blue-600', gradient: 'from-blue-500 to-cyan-600' },
-                        { key: 'completed' as const, label: 'Completed', icon: CheckCircle2, light: 'bg-emerald-50 text-emerald-600', gradient: 'from-emerald-500 to-teal-600' },
-                    ]).map(s => {
+                    {SUMMARY_STRIP.map(s => {
                         const Icon = s.icon;
                         return (
-                            <button key={s.key} onClick={() => setFilterStatus(filterStatus === s.key ? 'all' : s.key)}
-                                className={`bg-white rounded-2xl border p-5 text-left transition-all hover:shadow-md hover:-translate-y-0.5 ${filterStatus === s.key ? 'border-slate-300 shadow-md' : 'border-slate-200/60'}`}>
+                            <div key={s.key} className="bg-white rounded-2xl border border-slate-200/60 p-5">
                                 <div className={`inline-flex w-8 h-8 items-center justify-center rounded-xl ${s.light} mb-3`}><Icon className="w-4 h-4" /></div>
                                 <p className={`text-3xl font-bold bg-gradient-to-br ${s.gradient} bg-clip-text text-transparent`}>{isLoading ? '—' : counts[s.key]}</p>
                                 <p className="text-xs text-slate-400 font-medium mt-1">{s.label}</p>
-                            </button>
+                            </div>
                         );
                     })}
                 </div>
@@ -216,74 +223,107 @@ export default function DistributionDesktop() {
                 <div className="flex gap-1 bg-white border border-slate-200/60 shadow-sm p-1.5 rounded-xl w-auto inline-flex">
                     {(['all', 'planned', 'ongoing', 'completed'] as const).map(s => (
                         <button key={s} onClick={() => setFilterStatus(s)}
-                            className={`flex items-center gap-2 py-2 px-4 rounded-lg text-sm font-semibold transition-all ${filterStatus === s ? 'bg-slate-900 text-white shadow' : 'text-slate-500 hover:text-slate-800 hover:bg-slate-50'}`}>
+                            className={`flex items-center gap-2 py-2 px-4 rounded-lg text-sm font-semibold transition-all ${filterStatus === s ? 'bg-slate-900 text-white shadow' : 'text-slate-500 hover:text-slate-800 hover:bg-slate-50'} ${focusRing}`}>
                             {s === 'all' ? 'All Events' : s.charAt(0).toUpperCase() + s.slice(1)}
                             <span className={`text-xs px-1.5 py-0.5 rounded-full ${filterStatus === s ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-400'}`}>{counts[s]}</span>
                         </button>
                     ))}
                 </div>
 
-                {/* 3-col Grid */}
+                {!isZeroMatchMode && zeroMatchCount > 0 ? (
+                    <button
+                        type="button"
+                        onClick={() => router.push('/distribution?issue=zero_matches')}
+                        className="flex w-full items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-left text-sm font-semibold text-amber-800 transition hover:bg-amber-100"
+                    >
+                        <AlertTriangle className="w-4 h-4 shrink-0" />
+                        {zeroMatchCount} event{zeroMatchCount !== 1 ? 's' : ''} currently have zero eligible matches — view them
+                    </button>
+                ) : null}
+
+                {/* Responsive event grid */}
                 {isLoading ? (
-                    <div className="grid grid-cols-3 gap-3">
-                        {[...Array(6)].map((_, i) => <div key={i} className="bg-white rounded-2xl border border-slate-200/60 p-5 animate-pulse h-36" />)}
+                    <div className="grid grid-cols-1 md:grid-cols-2 2xl:grid-cols-3 gap-3">
+                        {[...Array(6)].map((_, i) => <div key={i} className="bg-white rounded-2xl border border-slate-200/60 p-5 animate-pulse h-40" />)}
                     </div>
                 ) : filtered.length > 0 ? (
-                    <div className="grid grid-cols-3 gap-3">
+                    <div className="grid grid-cols-1 md:grid-cols-2 2xl:grid-cols-3 gap-3">
                         {filtered.map(event => {
                             const cfg = STATUS_CFG[event.status as keyof typeof STATUS_CFG] || STATUS_CFG.planned;
                             const schedDate = new Date(event.scheduled_date);
                             const isPast = schedDate < new Date() && event.status !== 'completed';
-                            const hasZeroMatches = zeroMatchEventIds.has(event.id);
+                            const packCount = event.package_items.length;
                             return (
-                                <div key={event.id} className={`group relative bg-white border border-slate-200/60 rounded-2xl ${cfg.border} hover:shadow-lg transition-all hover:-translate-y-0.5`}>
-                                    <Link href={`/distribution/${event.id}`} prefetch={false} className={`block p-5 ${canDelete ? 'pb-16' : ''}`}>
-                                        <div className="flex items-start gap-3 mb-4">
-                                            <div className="w-10 h-10 rounded-xl bg-emerald-50 flex items-center justify-center flex-shrink-0"><Package className="w-5 h-5 text-emerald-600" /></div>
+                                <div key={event.id} className="group relative flex flex-col overflow-hidden bg-white border border-slate-200/60 rounded-2xl hover:shadow-lg transition-all hover:-translate-y-0.5">
+                                    <Link
+                                        href={`/distribution/${event.id}`}
+                                        prefetch={false}
+                                        className={`flex-1 p-5 ${focusRing}`}
+                                        aria-label={`Open ${event.event_name}`}
+                                    >
+                                        <div className="flex items-start gap-3">
+                                            <div className="w-10 h-10 rounded-xl bg-slate-50 flex items-center justify-center flex-shrink-0"><Package className="w-5 h-5 text-slate-500" /></div>
                                             <div className="flex-1 min-w-0">
                                                 <p className="font-bold text-slate-900 text-sm truncate">{event.event_name}</p>
-                                                <p className="text-xs text-slate-400 flex items-center gap-1 mt-0.5 truncate"><MapPin className="w-3 h-3 flex-shrink-0" />{event.location}</p>
-                                                {hasZeroMatches ? (
-                                                    <p className="mt-1 text-[11px] font-semibold text-amber-700">0 eligible matches right now</p>
-                                                ) : null}
+                                                <p className="text-xs text-slate-400 flex items-center gap-1 mt-0.5 truncate">
+                                                    <MapPin className="w-3 h-3 flex-shrink-0" />
+                                                    <span className="truncate">{event.location}</span>
+                                                </p>
                                             </div>
                                             <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold flex-shrink-0 ${cfg.badge}`}>
                                                 <span className={`w-1.5 h-1.5 rounded-full ${cfg.dot}`} />{cfg.label}
                                             </span>
                                         </div>
-                                        <div className="flex items-center justify-between">
-                                            <span className={`flex items-center gap-1.5 text-xs ${isPast ? 'text-amber-600 font-semibold' : 'text-slate-500'}`}>
+                                        <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2">
+                                            <span className={`inline-flex items-center gap-1.5 text-xs ${isPast ? 'text-amber-600 font-semibold' : 'text-slate-500'}`}>
                                                 <Calendar className="w-3.5 h-3.5" />
                                                 {schedDate.toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' })}
                                                 {isPast && <span className="text-amber-500">· overdue</span>}
                                             </span>
-                                            <span className="text-xs text-emerald-600 font-semibold opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-0.5">View <ChevronRight className="w-3.5 h-3.5" /></span>
+                                            <span className="inline-flex items-center gap-1.5 text-xs text-slate-500">
+                                                <Package className="w-3.5 h-3.5" />
+                                                {packCount} pack item{packCount !== 1 ? 's' : ''}
+                                            </span>
                                         </div>
                                     </Link>
 
-                                    {/* Delete button — only for users with manage_inventory */}
-                                    {canDelete && (
-                                        <button
-                                            type="button"
-                                            onClick={() => setPendingDelete(event)}
-                                            title="Delete event"
-                                            className="absolute bottom-3 right-3 inline-flex items-center gap-1.5 rounded-full border border-rose-200 bg-white px-3 py-2 text-xs font-semibold text-rose-700 shadow-sm shadow-rose-100 transition hover:bg-rose-50"
-                                        >
-                                            <Trash2 className="w-3.5 h-3.5" />
-                                            Delete
-                                        </button>
-                                    )}
+                                    {/* Action row — keeps delete out of the clickable link and visible without hover */}
+                                    <div className="flex items-center justify-between gap-3 border-t border-slate-100 bg-slate-50/50 px-4 py-2.5">
+                                        <span className="inline-flex items-center gap-0.5 text-xs font-semibold text-emerald-600">
+                                            Manage records
+                                            <ChevronRight className="w-3.5 h-3.5" />
+                                        </span>
+                                        {canManage && (
+                                            <button
+                                                type="button"
+                                                onClick={() => setPendingDelete(event)}
+                                                title="Delete event"
+                                                aria-label="Delete event"
+                                                className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 transition hover:bg-rose-50 hover:text-rose-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-400/50"
+                                            >
+                                                <Trash2 className="w-4 h-4" />
+                                            </button>
+                                        )}
+                                    </div>
                                 </div>
                             );
                         })}
                     </div>
                 ) : (
-                    <div className="text-center py-20 bg-white rounded-2xl border border-dashed border-slate-300">
-                        <Package className="w-8 h-8 text-slate-300 mx-auto mb-3" />
-                        <p className="text-slate-700 font-semibold mb-1">No {filterStatus === 'all' ? '' : filterStatus} events</p>
-                        <p className="text-slate-400 text-sm mb-5">Create your first distribution event</p>
-                        {canDelete && (
-                            <Link href="/distribution/new" className="inline-flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-emerald-500 to-teal-600 text-white text-sm font-medium rounded-xl hover:opacity-90 shadow-md shadow-emerald-500/25">
+                    <div className="text-center py-16 bg-white rounded-2xl border border-dashed border-slate-300">
+                        <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-slate-50 text-slate-400">
+                            <Package className="w-6 h-6" />
+                        </div>
+                        <p className="mt-4 text-slate-900 font-bold">
+                            {filterStatus === 'all' ? 'No events yet' : `No ${filterStatus} events`}
+                        </p>
+                        <p className="mt-1 text-sm text-slate-400">
+                            {filterStatus === 'all'
+                                ? 'Create your first distribution event to start serving households and residents.'
+                                : `There are no ${filterStatus} events right now. Try another status filter.`}
+                        </p>
+                        {canManage && (
+                            <Link href="/distribution/new" className={`mt-5 inline-flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-emerald-500 to-teal-600 text-white text-sm font-medium rounded-xl hover:opacity-90 shadow-md shadow-emerald-500/25 ${focusRing}`}>
                                 <Plus className="w-4 h-4" />New Event
                             </Link>
                         )}

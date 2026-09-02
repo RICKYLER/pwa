@@ -7,6 +7,7 @@ import { createDistributionQrToken } from '@/lib/server/distribution-qr';
 import { fetchDistributionVulnerabilityFlags } from '@/lib/server/distribution-vulnerability-flags';
 import { requireSupabaseUserId } from '@/lib/server/supabase-user-ids';
 import { resolveAppUrl } from '@/lib/server/app-url';
+import { isHouseholdAllowedToClaimFromEvent } from '@/lib/distribution-event-visibility';
 import type {
   DistributionEventNotificationPayload,
   Resident,
@@ -39,7 +40,7 @@ export async function POST(request: NextRequest) {
 
   const { data: event, error: eventError } = await supabase
     .from('distribution_events')
-    .select('id, event_name, target_scope, target_group, status, scheduled_date')
+    .select('id, barangay_id, event_name, target_scope, target_group, status, scheduled_date')
     .eq('id', eventId)
     .maybeSingle();
 
@@ -61,7 +62,7 @@ export async function POST(request: NextRequest) {
 
   const { data: households, error: householdError } = await supabase
     .from('households')
-    .select('id, head_name, status, registration_status, applicant_user_id, registration_reviewed_at, updated_at, created_at')
+    .select('id, barangay_id, head_name, status, registration_status, applicant_user_id, registration_reviewed_at, updated_at, created_at')
     .eq('applicant_user_id', remoteUserId)
     .eq('status', 'active')
     .eq('registration_status', 'approved')
@@ -77,6 +78,13 @@ export async function POST(request: NextRequest) {
   const household = households?.[0];
   if (!household) {
     return badRequest('No approved household account is linked to this resident user.', 404);
+  }
+
+  // Only residents of the event's barangay may claim a package from it. The
+  // event id alone is enough to reach this point, so the notification fan-out
+  // alone cannot be trusted to gate access.
+  if (!isHouseholdAllowedToClaimFromEvent(event.barangay_id, household.barangay_id)) {
+    return badRequest('This distribution event is not available for your barangay.', 403);
   }
 
   const { data: residents, error: residentError } = await supabase

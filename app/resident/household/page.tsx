@@ -42,6 +42,7 @@ import type {
   VulnerabilityFlags,
 } from '@/lib/db/schema';
 import { formatRegistrationStatusLabel, getHouseholdRegistrationStatus } from '@/lib/household-registration';
+import { joinNameParts } from '@/lib/name-parts';
 import { resolveResidentActiveApprovedHousehold } from '@/lib/resident-households';
 import { parseDisasterAlertNotification } from '@/lib/disaster-alerts';
 import { matchesHouseholdAlertScope, mergePurokRiskProfileWithAlertFallback } from '@/lib/purok-risk-profiles';
@@ -87,6 +88,9 @@ type MemberBadgeTone = 'slate' | 'teal' | 'emerald' | 'amber' | 'rose' | 'navy';
 
 type MemberFormState = {
   full_name: string;
+  first_name: string;
+  middle_name: string;
+  last_name: string;
   birthdate: string;
   gender: Gender;
   relationship_to_head: string;
@@ -103,6 +107,9 @@ type MemberFormState = {
 
 const EMPTY_MEMBER_FORM: MemberFormState = {
   full_name: '',
+  first_name: '',
+  middle_name: '',
+  last_name: '',
   birthdate: '',
   gender: 'M',
   relationship_to_head: '',
@@ -368,8 +375,8 @@ export default function ResidentHouseholdPage() {
       return;
     }
 
-    if (!form.full_name.trim() || !form.birthdate || !form.relationship_to_head.trim()) {
-      setMemberError('Enter the member name, birthdate, and relationship to head.');
+    if (!form.first_name.trim() || !form.last_name.trim() || !form.birthdate || !form.relationship_to_head.trim()) {
+      setMemberError('Enter the member first name, last name, birthdate, and relationship to head.');
       return;
     }
 
@@ -401,7 +408,7 @@ export default function ResidentHouseholdPage() {
     try {
       const createdResident = await createResident({
         household_id: household.id,
-        full_name: form.full_name.trim(),
+        full_name: joinNameParts(form.first_name, form.middle_name, form.last_name),
         birthdate: form.birthdate,
         gender: form.gender,
         relationship_to_head: formatRelationshipLabel(form.relationship_to_head),
@@ -548,14 +555,34 @@ export default function ResidentHouseholdPage() {
             {showAddMember ? (
               <form onSubmit={handleAddMember} className="mt-6 rounded-[24px] border border-cyan-200 bg-cyan-50/70 p-5">
                 <div className="grid gap-4 md:grid-cols-2">
-                  <div className="md:col-span-2">
-                    <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">Full Name</label>
+                  <div>
+                    <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">First Name</label>
                     <input
                       type="text"
-                      value={form.full_name}
-                      onChange={(event) => setForm((current) => ({ ...current, full_name: event.target.value }))}
+                      value={form.first_name}
+                      onChange={(event) => setForm((current) => ({ ...current, first_name: event.target.value }))}
                       className="mt-1 h-11 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm text-slate-800 outline-none transition focus:border-cyan-800 focus:ring-4 focus:ring-cyan-900/10"
-                      placeholder="Enter the member's full name"
+                      placeholder="Enter the member's first name"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">Middle Name</label>
+                    <input
+                      type="text"
+                      value={form.middle_name}
+                      onChange={(event) => setForm((current) => ({ ...current, middle_name: event.target.value }))}
+                      className="mt-1 h-11 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm text-slate-800 outline-none transition focus:border-cyan-800 focus:ring-4 focus:ring-cyan-900/10"
+                      placeholder="Enter the member's middle name"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">Last Name</label>
+                    <input
+                      type="text"
+                      value={form.last_name}
+                      onChange={(event) => setForm((current) => ({ ...current, last_name: event.target.value }))}
+                      className="mt-1 h-11 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm text-slate-800 outline-none transition focus:border-cyan-800 focus:ring-4 focus:ring-cyan-900/10"
+                      placeholder="Enter the member's last name"
                     />
                   </div>
                   <div>

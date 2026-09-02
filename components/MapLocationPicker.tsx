@@ -1,10 +1,11 @@
 'use client';
 
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import { GoogleMap, Marker } from '@react-google-maps/api';
 import { MapPin, Crosshair, Loader2, Search, X, AlertCircle, CheckCircle } from 'lucide-react';
 import { resolveLocationFromCoordinates, searchLocation } from '@/lib/geocoding';
 import type { ResolvedLocation } from '@/lib/geocoding';
+import { useGoogleMaps } from '@/components/GoogleMapsProvider';
 
 interface Coords { lat: number; lng: number; }
 
@@ -41,10 +42,11 @@ export default function MapLocationPicker({
     const [searchQuery, setSearchQuery] = useState('');
     const [isReverseGeocoding, setIsReverseGeocoding] = useState(false);
     const [isSearching, setIsSearching] = useState(false);
-    const [ready, setReady] = useState(false);
     const [locationType, setLocationType] = useState<string | null>(null);
     const [addressQuality, setAddressQuality] = useState<'street' | 'neighborhood' | 'city' | null>(null);
     const mapRef = useRef<google.maps.Map | null>(null);
+    // Wait for the Maps SDK to finish loading (GoogleMapsProvider / useJsApiLoader)
+    const { isLoaded } = useGoogleMaps();
 
     // Helper to determine address quality
     function getAddressQuality(resolved: ResolvedLocation | null): 'street' | 'neighborhood' | 'city' | null {
@@ -61,13 +63,6 @@ export default function MapLocationPicker({
         
         return 'city';
     }
-
-    // Wait for window.google (injected by parent LoadScript)
-    useEffect(() => {
-        if (typeof window !== 'undefined' && window.google) {
-            setReady(true);
-        }
-    }, []);
 
     const onMapLoad = useCallback((map: google.maps.Map) => {
         mapRef.current = map;
@@ -153,7 +148,7 @@ export default function MapLocationPicker({
         });
     }
 
-    if (!ready) {
+    if (!isLoaded) {
         return (
             <div className="h-48 flex items-center justify-center bg-slate-100 rounded-xl">
                 <Loader2 className="w-5 h-5 animate-spin text-slate-400" />

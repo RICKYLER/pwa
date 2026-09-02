@@ -1,4 +1,16 @@
-import type { Household, Resident, VulnerabilityFlags } from './schema';
+import type { Household, PurokRiskProfile, Resident, VulnerabilityFlags } from './schema';
+import {
+  calculateResidentRisk,
+  getFloodRiskLevel,
+  getRiskTier,
+  getSectorCompositeScore,
+  type FloodRiskLevel,
+  type RiskTier,
+} from './risk-scoring';
+import {
+  buildPurokRiskProfileMap,
+  getPurokRiskProfileKeyForHousehold,
+} from '@/lib/purok-risk-profiles';
 
 export interface ResidentAnalyticsRecord {
   resident: Resident;
@@ -132,26 +144,128 @@ export function calculateTopPuroksByHouseholds(
     .slice(0, limit);
 }
 
+export interface PurokVulnerabilityRank {
+  purok: string;
+  vulnerable_count: number;
+  /** Total severity-weighted score across vulnerable residents. */
+  score: number;
+  /** Average severity per vulnerable resident — a severity rank, not a count. */
+  average_score: number;
+  tier: RiskTier;
+}
+
 export function calculateTopPuroksByVulnerability(
   records: ResidentAnalyticsRecord[],
   limit = 3,
-): Array<{ purok: string; vulnerable_count: number }> {
-  const counts = new Map<string, number>();
+): PurokVulnerabilityRank[] {
+  const counts = new Map<string, { vulnerable_count: number; score: number }>();
 
   records.forEach((record) => {
     if (!isResidentCountedAsVulnerable(record.flags)) {
       return;
     }
 
-    counts.set(
-      record.household.purok_sitio,
-      (counts.get(record.household.purok_sitio) || 0) + 1,
-    );
+    const risk = calculateResidentRisk(record.flags);
+    const entry = counts.get(record.household.purok_sitio) ?? { vulnerable_count: 0, score: 0 };
+    entry.vulnerable_count += 1;
+    entry.score += risk.score;
+    counts.set(record.household.purok_sitio, entry);
   });
 
   return Array.from(counts.entries())
-    .map(([purok, vulnerable_count]) => ({ purok, vulnerable_count }))
+    .map(([purok, entry]) => {
+      const average_score = entry.vulnerable_count > 0
+        ? Math.round((entry.score / entry.vulnerable_count) * 10) / 10
+        : 0;
+      return {
+        purok,
+        vulnerable_count: entry.vulnerable_count,
+        score: entry.score,
+        average_score,
+        tier: getRiskTier(average_score),
+      };
+    })
     .sort((left, right) => comparePurokCounts(left, right, (item) => item.vulnerable_count))
+    .slice(0, limit);
+}
+
+export interface PurokRiskRanking {
+  purok: string;
+  barangay_id?: string;
+  population: number;
+  vulnerable_count: number;
+  /** Total severity-weighted social score across residents. */
+  score: number;
+  /** Average social severity per resident. */
+  average_score: number;
+  /** Social severity plus flood-exposure bonus. */
+  composite_score: number;
+  tier: RiskTier;
+  flood_prone: boolean;
+  flood_control_status: PurokRiskProfile['flood_control_status'];
+  flood_risk: FloodRiskLevel;
+}
+
+/**
+ * Rank puroks/sectors by risk — social vulnerability score combined with
+ * flood/disaster exposure. Unlike {@link calculateTopPuroksByVulnerability},
+ * this ranks by severity, so a purok with a few severely-vulnerable residents
+ * in a flood-prone area outranks a purok with many mildly-vulnerable ones.
+ */
+export function calculatePurokRiskRankings(
+  records: ResidentAnalyticsRecord[],
+  riskProfiles: PurokRiskProfile[],
+  limit?: number,
+): PurokRiskRanking[] {
+  const profileMap = buildPurokRiskProfileMap(riskProfiles);
+  const byPurok = new Map<string, { population: number; vulnerable: number; score: number }>();
+  const barangayByPurok = new Map<string, string>();
+
+  records.forEach((record) => {
+    const purok = record.household.purok_sitio;
+    const entry = byPurok.get(purok) ?? { population: 0, vulnerable: 0, score: 0 };
+    entry.population += 1;
+    if (isResidentCountedAsVulnerable(record.flags)) {
+      entry.vulnerable += 1;
+    }
+    entry.score += calculateResidentRisk(record.flags).score;
+    byPurok.set(purok, entry);
+    barangayByPurok.set(purok, record.household.barangay_id);
+  });
+
+  const rankings = Array.from(byPurok.entries()).map(([purok, entry]) => {
+    const barangayId = barangayByPurok.get(purok) ?? '';
+    const profile = profileMap.get(getPurokRiskProfileKeyForHousehold({ barangay_id: barangayId, purok_sitio: purok }));
+    const flood_prone = Boolean(profile?.flood_prone);
+    const flood_control_status = profile?.flood_control_status ?? 'unknown';
+    const flood_risk = getFloodRiskLevel(flood_prone, flood_control_status);
+    const average_score = entry.population > 0
+      ? Math.round((entry.score / entry.population) * 10) / 10
+      : 0;
+
+    return {
+      purok,
+      barangay_id: barangayId,
+      population: entry.population,
+      vulnerable_count: entry.vulnerable,
+      score: entry.score,
+      average_score,
+      composite_score: Math.round(getSectorCompositeScore(average_score, flood_risk) * 10) / 10,
+      tier: getRiskTier(getSectorCompositeScore(average_score, flood_risk)),
+      flood_prone,
+      flood_control_status,
+      flood_risk,
+    };
+  });
+
+  return rankings
+    .filter((ranking) => ranking.vulnerable_count > 0 || ranking.flood_prone)
+    .sort((left, right) => {
+      const tierWeight = (tier: RiskTier) => (tier === 'high' ? 2 : tier === 'medium' ? 1 : 0);
+      return tierWeight(right.tier) - tierWeight(left.tier)
+        || right.composite_score - left.composite_score
+        || left.purok.localeCompare(right.purok, undefined, { numeric: true });
+    })
     .slice(0, limit);
 }
 

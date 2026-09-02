@@ -8,6 +8,7 @@ import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetT
 import { getCurrentUser, hasPermission, logout } from '@/lib/auth';
 import { ADMIN_NAV_ITEMS, type AppNavItem, isPathActive, STAFF_NAV_ITEMS } from '@/lib/navigation';
 import { usePendingMemberApprovalCount } from '@/hooks/usePendingMemberApprovalCount';
+import { usePendingLocationReviewCount } from '@/hooks/usePendingLocationReviewCount';
 import { cn } from '@/lib/utils';
 
 interface MobileSidebarProps {
@@ -94,6 +95,7 @@ export default function MobileSidebar({ isOpen, onClose }: MobileSidebarProps) {
   const visibleItems = STAFF_NAV_ITEMS.filter((item) => !item.perm || hasPermission(item.perm as never));
   const adminItems = user?.role === 'admin' ? ADMIN_NAV_ITEMS : [];
   const pendingApprovals = usePendingMemberApprovalCount();
+  const pendingLocationReviews = usePendingLocationReviewCount();
 
   function handleOpenChange(open: boolean) {
     if (!open) {
@@ -135,7 +137,7 @@ export default function MobileSidebar({ isOpen, onClose }: MobileSidebarProps) {
 
           <NavSection title="Core" items={visibleItems.filter((item) => item.group === 'Core')} pathname={pathname} onClose={onClose} />
           <NavSection title="Operations" items={visibleItems.filter((item) => item.group === 'Operations')} pathname={pathname} onClose={onClose} />
-          <NavSection title="Administration" items={adminItems} pathname={pathname} onClose={onClose} badges={{ '/admin/member-approvals': pendingApprovals }} />
+          <NavSection title="Administration" items={adminItems} pathname={pathname} onClose={onClose} badges={{ '/admin/member-approvals': pendingApprovals, '/admin/location-review': pendingLocationReviews }} />
         </div>
 
         <SheetFooter className="border-t border-slate-200/70 bg-white/70 px-4 pb-[calc(env(safe-area-inset-bottom)+1rem)] pt-4">

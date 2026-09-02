@@ -1,5 +1,7 @@
 import 'server-only';
 
+import { type SupabaseClient } from '@supabase/supabase-js';
+
 import { MABINI_MUNICIPALITY } from '@/lib/barangays';
 import type {
   DistributionEvent,
@@ -1559,8 +1561,46 @@ export async function rejectResidentOnServer(
     })
     .eq('id', residentId);
 
+  let rejectedViaHardDelete = false;
+
   if (rejectError) {
-    throw new Error(rejectError.message);
+    // SQLSTATE 23514 is a CHECK violation; `residents_status_check` is widened
+    // by supabase/migrations/20260829120000_resident_rejected_status.sql. When
+    // that migration has not been applied to the live database, the constraint
+    // still rejects `status = 'rejected'`.
+    const isMissingRejectedStatusMigration = rejectError.code === '23514'
+      || rejectError.message.includes('residents_status_check');
+
+    if (!isMissingRejectedStatusMigration) {
+      throw new Error(rejectError.message);
+    }
+
+    // Migration not applied yet — fall back to a hard delete so admins can
+    // still reject members right now. This is FK-safe: every relation pointing
+    // at residents is cascade or set-null (vulnerability_flags and
+    // beneficiaries cascade; households.head_id and distribution_records set
+    // null), so the row is removed without orphans. The audit entry below still
+    // records the rejection, but the member's details (birthdate, gender,
+    // relationship) are permanently gone instead of kept in a `rejected`
+    // tombstone. Applying the migration restores the tombstone behavior.
+    const { error: deleteError } = await supabase
+      .from('residents')
+      .delete()
+      .eq('id', residentId);
+
+    if (deleteError) {
+      throw new Error(
+        'Member rejection is blocked by the database. '
+        + 'The resident status migration has not been applied '
+        + `(constraint error: ${rejectError.message}), and the fallback delete `
+        + `also failed (${deleteError.message}). `
+        + 'In the Supabase dashboard, open SQL Editor and run the file '
+        + '`supabase/migrations/20260829120000_resident_rejected_status.sql` '
+        + '(or run `supabase db push`), then try rejecting again.',
+      );
+    }
+
+    rejectedViaHardDelete = true;
   }
 
   // Best-effort resident notice, idempotent under retries: the notification id
@@ -1614,6 +1654,11 @@ export async function rejectResidentOnServer(
       member_name: memberName,
       household_id: householdId || null,
       reason: (typeof reason === 'string' ? reason.trim() : '') || null,
+      // Honest record of the fallback: when the resident-status migration has
+      // not been applied, the row was deleted instead of tombstoned.
+      ...(rejectedViaHardDelete
+        ? { note: 'Rejected via row delete — resident status migration not applied; no tombstone retained.' }
+        : {}),
     },
   });
 
@@ -1792,6 +1837,92 @@ export async function deleteDistributionEventOnServer(
   return data;
 }
 
+/**
+ * Close out the pending members of a household whose registration was just
+ * rejected: they were submitted with the registration, so the household
+ * decision is theirs too. Mirrors {@link rejectResidentOnServer} — soft-delete
+ * to a `rejected` tombstone (keeping the member's details for the Member
+ * Approvals history), hard-delete fallback when the resident-status migration
+ * has not been applied, and a REJECT audit log per member so the history can
+ * show the reviewer's reason.
+ */
+async function cascadeRejectHouseholdResidents(
+  supabase: SupabaseClient,
+  user: User,
+  householdId: string,
+  reason?: string,
+) {
+  const { data: pendingResidents, error: fetchError } = await supabase
+    .from('residents')
+    .select('id, full_name')
+    .eq('household_id', householdId)
+    .eq('status', 'active')
+    .eq('verification_status', 'pending');
+
+  if (fetchError) {
+    throw new Error(fetchError.message);
+  }
+
+  if (!pendingResidents?.length) {
+    return;
+  }
+
+  const decidedAt = new Date().toISOString();
+  const trimmedReason = typeof reason === 'string' ? reason.trim() : '';
+
+  const { error: rejectError } = await supabase
+    .from('residents')
+    .update({
+      status: 'rejected',
+      updated_at: decidedAt,
+      sync_status: 'synced',
+    })
+    .eq('household_id', householdId)
+    .eq('status', 'active')
+    .eq('verification_status', 'pending');
+
+  if (rejectError) {
+    // Same migration guard as rejectResidentOnServer: without the widened
+    // residents_status_check, fall back to a hard delete so the members do not
+    // linger as pending forever.
+    const isMissingRejectedStatusMigration = rejectError.code === '23514'
+      || rejectError.message.includes('residents_status_check');
+
+    if (!isMissingRejectedStatusMigration) {
+      throw new Error(rejectError.message);
+    }
+
+    const { error: deleteError } = await supabase
+      .from('residents')
+      .delete()
+      .eq('household_id', householdId)
+      .eq('status', 'active')
+      .eq('verification_status', 'pending');
+
+    if (deleteError) {
+      throw new Error(deleteError.message);
+    }
+  }
+
+  for (const resident of pendingResidents) {
+    const memberName = typeof resident.full_name === 'string' && resident.full_name.trim()
+      ? resident.full_name.trim()
+      : 'A household member';
+
+    await createAuditLogEntry({
+      user,
+      action: 'REJECT',
+      entityType: 'resident',
+      entityId: resident.id,
+      changes: {
+        member_name: memberName,
+        household_id: householdId,
+        reason: trimmedReason || 'Household registration rejected',
+      },
+    });
+  }
+}
+
 export async function updateHouseholdOnServer(
   user: User,
   householdId: string,
@@ -1801,7 +1932,7 @@ export async function updateHouseholdOnServer(
   const remoteActorId = await getRemoteActorId(user);
   const { data: existing, error: existingError } = await supabase
     .from('households')
-    .select('id, barangay_id, applicant_user_id, applicant_email')
+    .select('id, barangay_id, applicant_user_id, applicant_email, registration_status')
     .eq('id', householdId)
     .limit(1);
 
@@ -1910,6 +2041,47 @@ export async function updateHouseholdOnServer(
     entityId: householdId,
     changes: updates as Record<string, unknown>,
   });
+
+  // A registration decision covers the whole household: the members submitted
+  // with the registration were reviewed as part of it, so they must not queue
+  // again in Member Approvals. Only a genuine transition triggers the cascade —
+  // re-approving an already-approved household must leave portal-added pending
+  // members (added after approval) in the queue for their own review. Best
+  // effort: on failure the members simply stay pending and the admin can still
+  // decide them one by one in Member Approvals.
+  const previousRegistrationStatus = typeof current.registration_status === 'string'
+    ? current.registration_status
+    : null;
+  const nextRegistrationStatus = updates.registration_status;
+  const isReviewerRole = user.role === 'admin' || user.role === 'encoder';
+
+  if (isReviewerRole && nextRegistrationStatus === 'approved' && previousRegistrationStatus !== 'approved') {
+    try {
+      const { error: verifyError } = await supabase
+        .from('residents')
+        .update({
+          verification_status: 'verified',
+          sync_status: 'synced',
+          updated_at: new Date().toISOString(),
+        })
+        .eq('household_id', householdId)
+        .eq('verification_status', 'pending');
+
+      if (verifyError) {
+        throw new Error(verifyError.message);
+      }
+    } catch (error) {
+      console.error('Household approved, but auto-verifying its members failed:', error);
+    }
+  }
+
+  if (isReviewerRole && nextRegistrationStatus === 'rejected' && previousRegistrationStatus !== 'rejected') {
+    try {
+      await cascadeRejectHouseholdResidents(supabase, user, householdId, updates.registration_review_notes);
+    } catch (error) {
+      console.error('Household rejected, but closing out its members failed:', error);
+    }
+  }
 
   return data;
 }

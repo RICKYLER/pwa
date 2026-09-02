@@ -17,13 +17,18 @@ import {
   buildResidentAnalyticsRecords,
   calculateDashboardStats,
   calculateHeatmapData,
+  calculatePurokRiskRankings,
   calculateTopPuroksByHouseholds,
   calculateTopPuroksByPopulation,
   calculateTopPuroksByVulnerability,
   filterResidentAnalyticsRecords,
+  type PurokRiskRanking,
+  type PurokVulnerabilityRank,
 } from './reporting';
 import { getDistributionAudienceContext, getDistributionEvents } from './distribution';
 import { getInventoryItems, getPackageTemplates } from './inventory';
+import { getPurokRiskProfiles } from './purok-risk-profiles';
+import { calculateResidentRisk, type ResidentRisk } from './risk-scoring';
 import { getCurrentVulnerabilityFlagsMapForResidents } from './vulnerability';
 import type { DistributionEvent, Resident, VulnerabilityFlags, Household } from './schema';
 
@@ -139,7 +144,7 @@ export async function getTopPuroksByHouseholds(
 export async function getTopPuroksByVulnerability(
   barangay_id?: string | null,
   limit: number = 3
-): Promise<Array<{ purok: string; vulnerable_count: number }>> {
+): Promise<PurokVulnerabilityRank[]> {
   try {
     const { records } = await getBarangayAnalyticsContext(barangay_id);
     return calculateTopPuroksByVulnerability(records, limit);
@@ -150,7 +155,26 @@ export async function getTopPuroksByVulnerability(
 }
 
 /**
- * Get all vulnerable residents with filters
+ * Get puroks ranked by risk — severity-weighted social vulnerability score
+ * combined with flood/disaster exposure. Ranks by severity, not raw count.
+ */
+export async function getPurokRiskRankings(
+  barangay_id?: string | null,
+  limit: number = 10
+): Promise<PurokRiskRanking[]> {
+  try {
+    const { records } = await getBarangayAnalyticsContext(barangay_id);
+    const profiles = await getPurokRiskProfiles(barangay_id ?? undefined);
+    return calculatePurokRiskRankings(records, profiles, limit);
+  } catch (error) {
+    console.error('Error getting purok risk rankings:', error);
+    throw error;
+  }
+}
+
+/**
+ * Get all vulnerable residents with filters, enriched with an auto-computed
+ * severity score, risk tier, and pending-confirmation suggestions.
  */
 export async function getVulnerableResidents(
   barangay_id?: string | null,
@@ -162,10 +186,14 @@ export async function getVulnerableResidents(
   resident: Resident;
   household: Household;
   flags: VulnerabilityFlags;
+  risk: ResidentRisk;
 }>> {
   try {
     const { records } = await getBarangayAnalyticsContext(barangay_id);
-    return filterResidentAnalyticsRecords(records, filters);
+    return filterResidentAnalyticsRecords(records, filters).map((record) => ({
+      ...record,
+      risk: calculateResidentRisk(record.flags),
+    }));
   } catch (error) {
     console.error('Error getting vulnerable residents:', error);
     throw error;

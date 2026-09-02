@@ -12,7 +12,9 @@ test('resident accounts must verify email before they can log in', async () => {
   try {
     const authStore = await import('../lib/server/auth-store');
     const resident = await authStore.createResidentSelfServiceAccount({
-      name: 'Resident Example',
+      first_name: 'Resident',
+      middle_name: 'Test',
+      last_name: 'Example',
       email: 'resident@example.com',
       password: 'resident123',
       barangay_id: 'anitapan',

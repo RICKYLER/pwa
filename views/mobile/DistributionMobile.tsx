@@ -110,6 +110,7 @@ export default function DistributionMobile() {
     ongoing: events.filter((event) => event.status === 'ongoing').length,
     completed: events.filter((event) => event.status === 'completed').length,
   };
+  const zeroMatchCount = events.filter((event) => zeroMatchEventIds.has(event.id)).length;
 
   async function handleConfirmDelete() {
     if (!pendingDelete) {
@@ -155,10 +156,8 @@ export default function DistributionMobile() {
           ) : null}
         />
 
-        <div className="flex flex-wrap gap-2">
-          <CivicBadge label={`${filteredEvents.length} showing`} tone="slate" />
+        <div className="flex flex-wrap items-center gap-2">
           {isZeroMatchMode ? <CivicBadge label="0 eligible" tone="amber" /> : null}
-          {filterStatus !== 'all' ? <CivicBadge label={STATUS[filterStatus]?.label || 'Filtered'} tone="navy" /> : null}
           <Button
             type="button"
             variant="outline"
@@ -166,7 +165,7 @@ export default function DistributionMobile() {
             className="h-8 rounded-full border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700"
           >
             <Filter className="h-3.5 w-3.5" />
-            Status
+            {filterStatus === 'all' ? 'Status' : STATUS[filterStatus]?.label}
           </Button>
         </div>
 
@@ -174,7 +173,7 @@ export default function DistributionMobile() {
           open={filterSheetOpen}
           onOpenChange={setFilterSheetOpen}
           title="Filter distribution events"
-          description="Keep the list tight on mobile and move the status tabs into a sheet."
+          description="Narrow the list by event status — planned, ongoing, or completed."
           resultCount={<span>Showing <strong>{filteredEvents.length}</strong> of <strong>{events.length}</strong> events</span>}
           filters={(
             <div className="space-y-2">
@@ -199,6 +198,19 @@ export default function DistributionMobile() {
           </div>
         ) : null}
 
+        {!isZeroMatchMode && zeroMatchCount > 0 ? (
+          <button
+            type="button"
+            onClick={() => router.push('/distribution?issue=zero_matches')}
+            className="flex w-full items-center gap-2 rounded-[22px] border border-amber-200 bg-amber-50 px-4 py-3 text-left text-sm font-semibold text-amber-800 transition hover:bg-amber-100"
+          >
+            <AlertTriangle className="h-4 w-4 shrink-0" />
+            <span>
+              {zeroMatchCount} event{zeroMatchCount !== 1 ? 's' : ''} currently have zero eligible matches — tap to view.
+            </span>
+          </button>
+        ) : null}
+
         {isLoading ? (
           <div className="space-y-2">
             {[...Array(4)].map((_, index) => (
@@ -211,41 +223,37 @@ export default function DistributionMobile() {
               const schedDate = new Date(event.scheduled_date);
               const isPast = schedDate < new Date() && event.status !== 'completed';
               const tone = STATUS[event.status as keyof typeof STATUS] ?? STATUS.planned;
-              const hasZeroMatches = zeroMatchEventIds.has(event.id);
 
               return (
                 <MobileListCard
                   key={event.id}
                   title={event.event_name}
-                  subtitle={`${event.location}`}
                   leading={<Package className="h-5 w-5" />}
-                  status={(
-                    <>
-                      <CivicBadge label={tone.label} tone={tone.tone} className="text-[10px]" />
-                      {isPast ? <CivicBadge label="Overdue" tone="amber" className="text-[10px]" /> : null}
-                    </>
-                  )}
+                  status={<CivicBadge label={tone.label} tone={tone.tone} className="text-[10px]" />}
                   meta={(
-                    <div className="space-y-2 text-xs text-slate-500">
-                      {hasZeroMatches ? (
-                        <div className="inline-flex items-center gap-1.5 font-semibold text-amber-700">
-                          <AlertTriangle className="h-3.5 w-3.5" />
-                          <span>0 eligible matches right now</span>
-                        </div>
-                      ) : null}
-                      <div className="inline-flex items-center gap-1.5">
-                        <Calendar className="h-3.5 w-3.5" />
-                        <span>{schedDate.toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
+                    <div className="space-y-2.5 text-xs text-slate-500">
+                      <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+                        <span className="inline-flex items-center gap-1.5">
+                          <Calendar className="h-3.5 w-3.5 text-slate-400" />
+                          <span>{schedDate.toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
+                          {isPast ? <span className="font-semibold text-amber-600">· overdue</span> : null}
+                        </span>
+                        <span className="inline-flex items-center gap-1.5">
+                          <Package className="h-3.5 w-3.5 text-slate-400" />
+                          <span>
+                            {event.package_items.length} pack item{event.package_items.length !== 1 ? 's' : ''}
+                          </span>
+                        </span>
                       </div>
-                      <div className="inline-flex items-center gap-1.5">
-                        <MapPin className="h-3.5 w-3.5" />
-                        <span>{event.location}</span>
+                      <div className="flex min-w-0 items-center gap-1.5">
+                        <MapPin className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+                        <span className="truncate">{event.location}</span>
                       </div>
                     </div>
                   )}
                   actions={(
                     <>
-                      <Button asChild variant="outline" className="h-10 rounded-full border-slate-200 px-4 text-xs font-semibold text-slate-700">
+                      <Button asChild variant="outline" className="h-10 flex-1 rounded-full border-slate-200 px-4 text-xs font-semibold text-slate-700">
                         <Link href={`/distribution/${event.id}`} prefetch={false}>Open event</Link>
                       </Button>
                       {canManage ? (
@@ -253,10 +261,10 @@ export default function DistributionMobile() {
                           type="button"
                           variant="outline"
                           onClick={() => setPendingDelete(event)}
-                          className="h-10 rounded-full border-rose-200 px-4 text-xs font-semibold text-rose-700 hover:bg-rose-50"
+                          aria-label="Delete event"
+                          className="h-10 w-10 shrink-0 rounded-full border-slate-200 px-0 text-slate-400 hover:border-rose-200 hover:bg-rose-50 hover:text-rose-700"
                         >
-                          <Trash2 className="h-3.5 w-3.5" />
-                          Delete
+                          <Trash2 className="h-4 w-4" />
                         </Button>
                       ) : null}
                     </>

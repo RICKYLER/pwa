@@ -4,6 +4,7 @@ import { createHash, randomBytes, scrypt as scryptCallback, timingSafeEqual } fr
 import { promisify } from 'util';
 import { DEFAULT_BARANGAY_ID } from '@/lib/barangays';
 import type { User, UserAccountStatus, UserRole } from '@/lib/db/schema';
+import { joinNameParts, splitFullName } from '@/lib/name-parts';
 import { resolveWritableFilePath } from '@/lib/server/runtime-storage';
 
 const scrypt = promisify(scryptCallback);
@@ -18,6 +19,9 @@ export interface StoredUserRecord {
   email: string;
   password_hash?: string;
   name: string;
+  first_name?: string;
+  middle_name?: string;
+  last_name?: string;
   role: UserRole;
   status: UserAccountStatus;
   barangay_id: string;
@@ -122,6 +126,9 @@ function toPublicUser(record: StoredUserRecord): User {
     id: record.id,
     email: record.email,
     name: record.name,
+    first_name: record.first_name || undefined,
+    middle_name: record.middle_name || undefined,
+    last_name: record.last_name || undefined,
     role: record.role,
     status: record.status,
     barangay_id: record.barangay_id,
@@ -302,7 +309,9 @@ export async function createUserAccount(input: {
 }
 
 export async function createResidentSelfServiceAccount(input: {
-  name: string;
+  first_name: string;
+  middle_name?: string;
+  last_name: string;
   email: string;
   password: string;
   barangay_id: string;
@@ -318,7 +327,10 @@ export async function createResidentSelfServiceAccount(input: {
       id: generateId('resident'),
       email: normalizedEmail,
       password_hash: await hashPassword(input.password),
-      name: input.name.trim(),
+      name: joinNameParts(input.first_name, input.middle_name ?? '', input.last_name),
+      first_name: input.first_name.trim(),
+      middle_name: (input.middle_name ?? '').trim(),
+      last_name: input.last_name.trim(),
       role: 'resident',
       status: 'active',
       barangay_id: input.barangay_id.trim(),
@@ -344,7 +356,15 @@ export async function updateUserAccount(
       throw new Error('User not found.');
     }
 
-    user.name = patch.name?.trim() || user.name;
+    if (patch.name?.trim()) {
+      // Mirror the users_sync_name_parts trigger: writing the display name
+      // re-splits the stored name parts.
+      const parts = splitFullName(patch.name);
+      user.name = joinNameParts(parts.first, parts.middle, parts.last);
+      user.first_name = parts.first;
+      user.middle_name = parts.middle;
+      user.last_name = parts.last;
+    }
     user.role = patch.role || user.role;
     user.status = patch.status || user.status;
     user.barangay_id = patch.barangay_id?.trim() || user.barangay_id;

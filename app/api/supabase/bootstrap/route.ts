@@ -12,6 +12,10 @@ import {
   type SupabaseBootstrapTable,
 } from '@/lib/supabase/row-mapper';
 import { buildDistributionNotificationBody } from '@/lib/distribution-notifications';
+import {
+  collectResidentAllowedBarangayIds,
+  isDistributionEventVisibleToResident,
+} from '@/lib/distribution-event-visibility';
 import { isLegacySampleIncident } from '@/lib/incident-filters';
 
 export const runtime = 'nodejs';
@@ -385,9 +389,31 @@ async function loadDerivedDistributionNotifications(
   }
 
   const supabase = getSupabaseAdminClient();
+
+  // A resident should only see events for their own barangay: their user
+  // profile's barangay plus any barangay they have an approved household in.
+  // Without this filter, every resident (including brand-new accounts from
+  // other barangays) receives a notification — and QR access — for every
+  // event in the system.
+  const { data: linkedHouseholds, error: linkedHouseholdsError } = await supabase
+    .from('households')
+    .select('barangay_id')
+    .eq('applicant_user_id', notificationUserId)
+    .eq('status', 'active')
+    .eq('registration_status', 'approved');
+
+  if (linkedHouseholdsError) {
+    throw new Error(linkedHouseholdsError.message);
+  }
+
+  const allowedBarangayIds = collectResidentAllowedBarangayIds(
+    user,
+    (linkedHouseholds ?? []).map((household) => household.barangay_id),
+  );
+
   const { data, error } = await supabase
     .from('distribution_events')
-    .select('id,event_name,type,target_scope,target_group,location,scheduled_date,status,notes')
+    .select('id,barangay_id,event_name,type,target_scope,target_group,location,scheduled_date,status,notes')
     .order('scheduled_date', { ascending: false })
     .limit(50);
 
@@ -398,7 +424,11 @@ async function loadDerivedDistributionNotifications(
   const excludedIds = new Set(options?.excludeEventIds ?? []);
 
   return (data ?? [])
-    .filter((event) => typeof event.id === 'string' && !excludedIds.has(event.id))
+    .filter((event) => (
+      typeof event.id === 'string'
+      && !excludedIds.has(event.id)
+      && isDistributionEventVisibleToResident(event, allowedBarangayIds)
+    ))
     .map((event) => ({
       id: `legacy_dist_notice_${event.id}`,
       user_id: notificationUserId,

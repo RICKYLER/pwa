@@ -6,6 +6,7 @@ import { ArrowUpRight, LogOut } from 'lucide-react';
 import { getCurrentUser, hasPermission, logout } from '@/lib/auth';
 import { ADMIN_NAV_ITEMS, isPathActive, STAFF_NAV_ITEMS } from '@/lib/navigation';
 import { usePendingMemberApprovalCount } from '@/hooks/usePendingMemberApprovalCount';
+import { usePendingLocationReviewCount } from '@/hooks/usePendingLocationReviewCount';
 import { cn } from '@/lib/utils';
 
 function SidebarLink({
@@ -73,6 +74,7 @@ export default function DesktopSidebar() {
   const visibleItems = STAFF_NAV_ITEMS.filter((item) => !item.perm || hasPermission(item.perm as never));
   const adminItems = user?.role === 'admin' ? ADMIN_NAV_ITEMS : [];
   const pendingApprovals = usePendingMemberApprovalCount();
+  const pendingLocationReviews = usePendingLocationReviewCount();
 
   function handleLogout() {
     logout();
@@ -147,7 +149,11 @@ export default function DesktopSidebar() {
                   description={item.description}
                   Icon={item.icon}
                   active={isPathActive(pathname, item.href)}
-                  badge={item.href === '/admin/member-approvals' ? pendingApprovals : undefined}
+                  badge={item.href === '/admin/member-approvals'
+                    ? pendingApprovals
+                    : item.href === '/admin/location-review'
+                      ? pendingLocationReviews
+                      : undefined}
                 />
               ))}
             </div>

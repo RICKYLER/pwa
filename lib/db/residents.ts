@@ -231,6 +231,19 @@ export async function updateHealthFlags(
 
     await bootstrapCurrentPathData(true);
     const updated = await getResidentVulnerabilityFlags(resident_id);
+
+    // The health worker just confirmed the flags — stamp the local
+    // re-verification time so the "re-verification due" suggestion clears.
+    if (updated) {
+      const verified: VulnerabilityFlags = {
+        ...updated,
+        last_verified_at: new Date(),
+        syncStatus: 'synced',
+      };
+      await db.put(STORE_NAMES.vulnerability_flags, verified);
+      return verified;
+    }
+
     console.log('Health flags updated for resident:', resident_id);
     return updated;
   } catch (error) {

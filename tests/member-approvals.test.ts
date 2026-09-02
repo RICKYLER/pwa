@@ -345,3 +345,20 @@ test('selectPendingMemberApprovals excludes rejected members from the pending qu
 
   assert.deepEqual(approvals.map((item) => item.resident.id), ['res-pending']);
 });
+
+test('selectPendingMemberApprovals excludes the household head from the pending queue', () => {
+  const household = makeHousehold({ id: 'hh-1', head_name: 'Cruz Family' });
+  const head = makeResident({
+    id: 'res-head',
+    household_id: 'hh-1',
+    full_name: 'Juan Cruz',
+    relationship_to_head: 'Self',
+  });
+  const pendingMember = makeResident({ id: 'res-member', household_id: 'hh-1', full_name: 'Ana Cruz' });
+
+  const approvals = selectPendingMemberApprovals([household], [head, pendingMember]);
+
+  // The head registers with the household and is covered by its location
+  // review — only the added member queues in Member Approvals.
+  assert.deepEqual(approvals.map((item) => item.resident.id), ['res-member']);
+});

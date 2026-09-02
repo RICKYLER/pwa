@@ -101,8 +101,10 @@ function applyLimit<T>(entries: T[], limit?: number): T[] {
  *
  * A pending approval is an active resident whose verification is still
  * `pending` and who belongs to an active, approved household (a member a
- * resident added to their own household). Results are sorted by household head
- * name, then member name, so the queue can group them deterministically.
+ * resident added to their own household). Household heads are excluded —
+ * they register with the household and are covered by its location review.
+ * Results are sorted by household head name, then member name, so the queue
+ * can group them deterministically.
  *
  * `flagsByResidentId` (when provided) is attached to each approval so the admin
  * can review the health details the member's form collected.
@@ -126,6 +128,12 @@ export function selectPendingMemberApprovals(
   const approvals: PendingMemberApproval[] = [];
   residents.forEach((resident) => {
     if (resident.status !== 'active' || resident.verification_status !== 'pending') {
+      return;
+    }
+
+    // The head registers with the household and is covered by its location
+    // review — they are never an "added member" awaiting approval.
+    if (isHeadRelationship(resident.relationship_to_head)) {
       return;
     }
 

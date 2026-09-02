@@ -45,7 +45,7 @@ const REGISTER_FEATURES: CivicAuthFeature[] = [
 ];
 
 const REGISTER_STATS: CivicAuthStat[] = [
-  { value: '01', label: 'create account', description: 'Enter your full name, email address, and password.' },
+  { value: '01', label: 'create account', description: 'Enter your name, email address, and password.' },
   { value: '02', label: 'verify email', description: 'Open the verification email and confirm your address.' },
   { value: '03', label: 'sign in', description: 'Sign in and start your household registration.' },
 ];
@@ -53,7 +53,9 @@ const REGISTER_STATS: CivicAuthStat[] = [
 export default function ResidentRegisterPage() {
   const router = useRouter();
   const [form, setForm] = useState({
-    name: '',
+    firstName: '',
+    middleName: '',
+    lastName: '',
     email: '',
     barangay_id: '',
     password: '',
@@ -123,6 +125,16 @@ export default function ResidentRegisterPage() {
       return;
     }
 
+    if (!form.firstName.trim()) {
+      setError('Enter your first name.');
+      return;
+    }
+
+    if (!form.lastName.trim()) {
+      setError('Enter your last name.');
+      return;
+    }
+
     if (!form.barangay_id) {
       setError('Select your barangay.');
       return;
@@ -139,7 +151,9 @@ export default function ResidentRegisterPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          name: form.name,
+          first_name: form.firstName.trim(),
+          middle_name: form.middleName.trim(),
+          last_name: form.lastName.trim(),
           email: form.email,
           password: form.password,
           barangay_id: form.barangay_id,
@@ -363,26 +377,63 @@ export default function ResidentRegisterPage() {
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-4">
-        <div className="grid gap-4 lg:grid-cols-3">
+        <div className="grid gap-4 sm:grid-cols-3">
           <div>
-            <label htmlFor="name" className="mb-1.5 block text-sm font-semibold text-slate-700">
-              Full name
+            <label htmlFor="firstName" className="mb-1.5 block text-sm font-semibold text-slate-700">
+              First name
             </label>
             <div className="relative">
               <User className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
               <input
-                id="name"
+                id="firstName"
                 type="text"
-                value={form.name}
-                onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))}
+                value={form.firstName}
+                onChange={(event) => setForm((current) => ({ ...current, firstName: event.target.value }))}
                 required
                 className="h-12 w-full rounded-md border border-slate-300 bg-white py-2 pl-11 pr-4 text-sm text-slate-900 shadow-sm outline-none transition placeholder:text-slate-400 focus:border-blue-700 focus:ring-2 focus:ring-blue-700/20"
-                placeholder="Enter your full name"
-                autoComplete="name"
+                placeholder="Juan"
+                autoComplete="given-name"
               />
             </div>
           </div>
 
+          <div>
+            <label htmlFor="middleName" className="mb-1.5 block text-sm font-semibold text-slate-700">
+              Middle name <span className="font-normal text-slate-400">(optional)</span>
+            </label>
+            <div className="relative">
+              <input
+                id="middleName"
+                type="text"
+                value={form.middleName}
+                onChange={(event) => setForm((current) => ({ ...current, middleName: event.target.value }))}
+                className="h-12 w-full rounded-md border border-slate-300 bg-white py-2 px-4 text-sm text-slate-900 shadow-sm outline-none transition placeholder:text-slate-400 focus:border-blue-700 focus:ring-2 focus:ring-blue-700/20"
+                placeholder="Reyes"
+                autoComplete="additional-name"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label htmlFor="lastName" className="mb-1.5 block text-sm font-semibold text-slate-700">
+              Last name
+            </label>
+            <div className="relative">
+              <input
+                id="lastName"
+                type="text"
+                value={form.lastName}
+                onChange={(event) => setForm((current) => ({ ...current, lastName: event.target.value }))}
+                required
+                className="h-12 w-full rounded-md border border-slate-300 bg-white py-2 px-4 text-sm text-slate-900 shadow-sm outline-none transition placeholder:text-slate-400 focus:border-blue-700 focus:ring-2 focus:ring-blue-700/20"
+                placeholder="Dela Cruz"
+                autoComplete="family-name"
+              />
+            </div>
+          </div>
+        </div>
+
+        <div className="grid gap-4 sm:grid-cols-2">
           <div>
             <label htmlFor="email" className="mb-1.5 block text-sm font-semibold text-slate-700">
               Email address
@@ -512,8 +563,7 @@ export default function ResidentRegisterPage() {
                 className="font-semibold text-blue-700 underline decoration-blue-200 underline-offset-2 transition hover:text-blue-900"
               >
                 Terms &amp; Conditions
-              </button>{' '}
-              <span className="text-xs uppercase tracking-[0.16em] text-slate-500">(Optional)</span>
+              </button>
             </div>
           </div>
 

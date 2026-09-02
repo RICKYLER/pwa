@@ -26,6 +26,7 @@ import {
   X,
 } from 'lucide-react';
 import jsQR from 'jsqr';
+import AppShell from '@/components/AppShell';
 import { getAnalyticsBarangayScope, getAnalyticsScopeLabel } from '@/lib/analytics-scope';
 import { getCurrentUser, hasPermission } from '@/lib/auth';
 import MapLocationPicker from '@/components/MapLocationPicker';
@@ -80,6 +81,12 @@ const STATUS_CFG = {
     badge: 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200',
   },
 };
+
+const DETAIL_TABS = [
+  { key: 'overview', label: 'Overview', icon: FileText },
+  { key: 'release', label: 'Release', icon: Package },
+  { key: 'records', label: 'Records', icon: Users },
+] as const;
 
 const TYPE_LABELS: Record<string, string> = {
   regular: 'Regular Distribution',
@@ -198,6 +205,7 @@ export default function DistributionDetailPage() {
   const [lastReleasedRecordId, setLastReleasedRecordId] = useState('');
   const [pendingQrConfirmation, setPendingQrConfirmation] = useState<PendingQrConfirmation | null>(null);
   const [qrReceiverName, setQrReceiverName] = useState('');
+  const [activeTab, setActiveTab] = useState<'overview' | 'release' | 'records'>('overview');
   const qrScannerSectionRef = useRef<HTMLDivElement | null>(null);
 
   const [editStatus, setEditStatus] = useState<DistributionEvent['status']>('planned');
@@ -632,13 +640,6 @@ export default function DistributionDetailPage() {
     }
   }, []);
 
-  const scrollToDistributionRecords = useCallback(() => {
-    recordsSectionRef.current?.scrollIntoView({
-      behavior: 'smooth',
-      block: 'start',
-    });
-  }, []);
-
   const scrollToQrScanner = useCallback(() => {
     qrScannerSectionRef.current?.scrollIntoView({
       behavior: 'smooth',
@@ -696,7 +697,7 @@ export default function DistributionDetailPage() {
 
       if (input.scrollToRecords !== false) {
         window.setTimeout(() => {
-          scrollToDistributionRecords();
+          setActiveTab('records');
         }, 150);
       }
 
@@ -709,7 +710,7 @@ export default function DistributionDetailPage() {
     } finally {
       setIsReleasing(false);
     }
-  }, [event, refreshOperationalFreshness, scrollToDistributionRecords, user]);
+  }, [event, refreshOperationalFreshness, user]);
 
   const processDistributionQr = useCallback(async (
     rawValue: string,
@@ -1116,6 +1117,7 @@ export default function DistributionDetailPage() {
     }
 
     processedQrTokenRef.current = qrFromUrl;
+    setActiveTab('release');
     void processDistributionQr(qrFromUrl, 'link');
   }, [event, processDistributionQr, searchParams]);
 
@@ -1187,16 +1189,15 @@ export default function DistributionDetailPage() {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-slate-50">
-        <header className="flex h-14 items-center border-b border-slate-200/70 bg-white px-4 shadow-sm">
+      <AppShell title="Distribution Event">
+        <div className="mx-auto max-w-7xl space-y-4 px-4 py-8 sm:px-6">
           <Link
             href="/distribution"
-            className="-ml-2 rounded-xl p-2 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700"
+            className="-ml-2 inline-flex items-center gap-1.5 rounded-xl p-2 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700"
           >
             <ArrowLeft className="h-4 w-4" />
+            <span className="text-sm font-medium">Distribution</span>
           </Link>
-        </header>
-        <div className="mx-auto max-w-5xl space-y-4 px-4 py-8">
           {[...Array(4)].map((_, index) => (
             <div
               key={index}
@@ -1204,7 +1205,7 @@ export default function DistributionDetailPage() {
             />
           ))}
         </div>
-      </div>
+      </AppShell>
     );
   }
 
@@ -1346,9 +1347,9 @@ export default function DistributionDetailPage() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50">
-      <header className="sticky top-0 z-10 border-b border-slate-200/70 bg-white shadow-sm">
-        <div className="mx-auto flex h-14 max-w-7xl items-center gap-3 px-4 sm:px-6">
+    <AppShell title="Distribution Event">
+      <div className="mx-auto max-w-7xl px-4 py-4 sm:px-6">
+        <div className="mb-4 flex flex-wrap items-center gap-3">
           <Link
             href="/distribution"
             className="-ml-2 rounded-xl p-2 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700"
@@ -1356,8 +1357,8 @@ export default function DistributionDetailPage() {
             <ArrowLeft className="h-4 w-4" />
           </Link>
           <div className="min-w-0 flex-1">
-            <p className="truncate text-sm font-bold text-slate-900">{event.event_name}</p>
-            <p className="text-[11px] text-slate-400">
+            <h1 className="truncate text-lg font-bold text-slate-900">{event.event_name}</h1>
+            <p className="mt-0.5 text-xs text-slate-500">
               {TYPE_LABELS[event.type] || event.type} · {SCOPE_LABELS[event.target_scope]} ·{' '}
               {TARGET_GROUP_LABELS[event.target_group]}
             </p>
@@ -1424,9 +1425,29 @@ export default function DistributionDetailPage() {
             </div>
           ) : null}
         </div>
-      </header>
 
-      <main className="mx-auto max-w-7xl space-y-3 px-4 py-3 pb-8 sm:px-6">
+        <div className="mb-4 flex items-center gap-1 overflow-x-auto rounded-2xl border border-slate-200/60 bg-white p-1.5 shadow-sm">
+          {DETAIL_TABS.map((tab) => {
+            const TabIcon = tab.icon;
+            const isTabActive = activeTab === tab.key;
+            return (
+              <button
+                key={tab.key}
+                type="button"
+                onClick={() => setActiveTab(tab.key)}
+                className={`inline-flex flex-shrink-0 items-center gap-1.5 rounded-xl px-3.5 py-2 text-sm font-semibold transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/40 ${
+                  isTabActive ? 'bg-slate-900 text-white shadow' : 'text-slate-500 hover:bg-slate-50 hover:text-slate-800'
+                }`}
+              >
+                <TabIcon className="h-4 w-4" />
+                {tab.label}
+              </button>
+            );
+          })}
+        </div>
+
+        {activeTab === 'overview' ? (
+        <div className="space-y-3">
         <div className="space-y-3 rounded-2xl border border-slate-200/60 bg-white p-4 shadow-sm">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
@@ -1739,7 +1760,13 @@ export default function DistributionDetailPage() {
                 </div>
               </div>
             </div>
+          </div>
+        </div>
+        </div>
+        ) : null}
 
+        {activeTab === 'release' ? (
+        <div className="space-y-3">
             {isHouseholdRelease ? (
               <div
                 ref={qrScannerSectionRef}
@@ -2317,9 +2344,11 @@ export default function DistributionDetailPage() {
                 )}
               </button>
             </div>
-          </div>
         </div>
+        ) : null}
 
+        {activeTab === 'records' ? (
+        <div className="space-y-3">
         <div
           ref={recordsSectionRef}
           className="overflow-hidden rounded-2xl border border-slate-200/60 bg-white shadow-sm"
@@ -2415,7 +2444,9 @@ export default function DistributionDetailPage() {
             </div>
           )}
         </div>
-      </main>
+        </div>
+        ) : null}
     </div>
+    </AppShell>
   );
 }

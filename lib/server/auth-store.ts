@@ -78,7 +78,9 @@ export async function createUserAccount(input: {
 }
 
 export async function createResidentSelfServiceAccount(input: {
-  name: string;
+  first_name: string;
+  middle_name?: string;
+  last_name: string;
   email: string;
   password: string;
   barangay_id: string;
