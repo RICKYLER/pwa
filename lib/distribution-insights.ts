@@ -1,6 +1,7 @@
 import {
   matchesDistributionTargetGroup,
   type DistributionAudienceMatches,
+  type DistributionCategory,
 } from '@/lib/distribution-audience';
 import type {
   DistributedItem,
@@ -48,6 +49,23 @@ export type DistributionServedSummary = {
   residents_served: number;
   packages_released: number;
   units_released: number;
+};
+
+export type DistributionUnclaimedEntry = {
+  id: string;
+  name: string;
+  subtitle: string;
+  categories: DistributionCategory[];
+};
+
+export type DistributionCoverageSummary = {
+  eligible_count: number;
+  served_count: number;
+  unclaimed_count: number;
+  coverage_percent: number;
+  coverage_label: string;
+  unclaimed_label: string;
+  unclaimed_entries: DistributionUnclaimedEntry[];
 };
 
 export type DistributionSelectionPreview = {
@@ -260,6 +278,65 @@ export function buildDistributionServedSummary(
       (sum, record) => sum + record.items_distributed.reduce((itemSum, item) => itemSum + item.quantity, 0),
       0,
     ),
+  };
+}
+
+/**
+ * Compare the configured audience against what was actually released. A
+ * partial event (e.g. 10 of 20 eligible households claimed) surfaces the
+ * unclaimed count and the unclaimed entries themselves (names, for display
+ * and the PDF report) instead of silently looking complete.
+ */
+export function buildDistributionCoverageSummary(params: {
+  targetScope: DistributionTargetScope;
+  records: DistributionRecord[];
+  eligibleHouseholds: Household[];
+  eligibleResidents: Resident[];
+  householdsById?: Map<string, Household>;
+  categoriesById?: Map<string, DistributionCategory[]>;
+}): DistributionCoverageSummary {
+  const { targetScope, records, eligibleHouseholds, eligibleResidents, householdsById, categoriesById } = params;
+
+  const servedHouseholdIds = new Set(records.map((record) => record.household_id).filter(Boolean));
+  const servedResidentIds = new Set(records.map((record) => record.resident_id).filter(Boolean));
+
+  const eligibleCount =
+    targetScope === 'household' ? eligibleHouseholds.length : eligibleResidents.length;
+
+  const unclaimedEntries: DistributionUnclaimedEntry[] =
+    targetScope === 'household'
+      ? eligibleHouseholds
+          .filter((household) => !servedHouseholdIds.has(household.id))
+          .map((household) => ({
+            id: household.id,
+            name: household.head_name,
+            subtitle: `${household.purok_sitio} · ${household.street_address}`,
+            categories: categoriesById?.get(household.id) ?? [],
+          }))
+      : eligibleResidents
+          .filter((resident) => !servedResidentIds.has(resident.id))
+          .map((resident) => {
+            const household = householdsById?.get(resident.household_id);
+            return {
+              id: resident.id,
+              name: resident.full_name,
+              subtitle: `${resident.relationship_to_head} · ${household?.head_name || 'Household'}`,
+              categories: categoriesById?.get(resident.id) ?? [],
+            };
+          });
+
+  const servedCount = eligibleCount - unclaimedEntries.length;
+  const coveragePercent = eligibleCount > 0 ? Math.min(100, Math.round((servedCount / eligibleCount) * 100)) : 0;
+  const noun = targetScope === 'household' ? 'household' : 'resident';
+
+  return {
+    eligible_count: eligibleCount,
+    served_count: servedCount,
+    unclaimed_count: unclaimedEntries.length,
+    coverage_percent: coveragePercent,
+    coverage_label: `${servedCount} of ${eligibleCount} ${noun}${eligibleCount === 1 ? '' : 's'} served`,
+    unclaimed_label: `${unclaimedEntries.length} unclaimed ${noun}${unclaimedEntries.length === 1 ? '' : 's'}`,
+    unclaimed_entries: unclaimedEntries,
   };
 }
 

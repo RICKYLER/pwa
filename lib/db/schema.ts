@@ -256,6 +256,7 @@ export interface DistributionEventNotificationPayload {
   scheduled_date: string;
   location: string;
   notes?: string;
+  claim_status?: 'released' | 'unclaimed';
 }
 
 export interface DisasterAlertRule {

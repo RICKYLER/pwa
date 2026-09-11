@@ -69,7 +69,7 @@ export async function deriveFieldEncryptionKey(passphrase: string, salt: string)
     {
       name: 'PBKDF2',
       salt: encoder.encode(salt),
-      iterations: PBKDF2_ITERATIONS,
+      iterations: PBKDF2_ITERATIONS,  
       hash: 'SHA-256',
     },
     material,

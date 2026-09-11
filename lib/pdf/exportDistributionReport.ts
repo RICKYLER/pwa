@@ -1,5 +1,6 @@
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import { DISTRIBUTION_CATEGORY_LABELS, type DistributionCategory } from '@/lib/distribution-audience';
 import type {
   DistributedItem,
   DistributionEvent,
@@ -40,6 +41,10 @@ type DistributionReportExportInput = {
     audienceMatchSupport: string;
     scopeLabel: string;
     generatedBy?: string;
+  };
+  unclaimed?: {
+    label: string;
+    entries: Array<{ id: string; name: string; subtitle: string; categories: DistributionCategory[] }>;
   };
 };
 
@@ -165,7 +170,7 @@ function drawMetricCards(
 }
 
 export function exportDistributionReportPDF(input: DistributionReportExportInput) {
-  const { event, records, packageStock, summary } = input;
+  const { event, records, packageStock, summary, unclaimed } = input;
   const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
   const generatedAt = formatDateTime(new Date());
 
@@ -301,6 +306,7 @@ export function exportDistributionReportPDF(input: DistributionReportExportInput
     doc.setFontSize(8);
     doc.setTextColor(...SLATE_500);
     doc.text('This event has not released any packages yet. Inventory values above reflect the latest stock snapshot.', 18, y + 12.5);
+    y += 22;
   } else {
     autoTable(doc, {
       startY: y,
@@ -341,6 +347,51 @@ export function exportDistributionReportPDF(input: DistributionReportExportInput
         6: { cellWidth: 15, halign: 'center', fontStyle: 'bold' },
         7: { cellWidth: 28, halign: 'center' },
         8: { cellWidth: 33 },
+      },
+      alternateRowStyles: { fillColor: SLATE_100 },
+      didDrawPage: () => {
+        drawHeader(doc, event, generatedAt);
+      },
+    });
+  }
+
+  if (unclaimed && unclaimed.entries.length > 0) {
+    y = (doc as jsPDF & { lastAutoTable?: { finalY: number } }).lastAutoTable?.finalY ?? y;
+    y += 8;
+    drawSectionTitle(doc, `NOT YET RECEIVED (${unclaimed.label.toUpperCase()})`, y);
+    y += 7;
+
+    autoTable(doc, {
+      startY: y,
+      margin: { left: 14, right: 14, top: 42 },
+      head: [['#', 'Name', 'Details', 'Categories']],
+      body: unclaimed.entries.map((entry, index) => [
+        String(index + 1),
+        entry.name,
+        entry.subtitle,
+        entry.categories.length > 0
+          ? entry.categories.map((category) => DISTRIBUTION_CATEGORY_LABELS[category]).join(', ')
+          : '—',
+      ]),
+      theme: 'grid',
+      headStyles: {
+        fillColor: AMBER_500,
+        textColor: WHITE,
+        fontStyle: 'bold',
+        fontSize: 8,
+        halign: 'center',
+      },
+      bodyStyles: {
+        fontSize: 8,
+        textColor: SLATE_900,
+        cellPadding: 2.5,
+        valign: 'middle',
+      },
+      columnStyles: {
+        0: { cellWidth: 10, halign: 'center' },
+        1: { cellWidth: 70, fontStyle: 'bold' },
+        2: { cellWidth: 112 },
+        3: { cellWidth: 52 },
       },
       alternateRowStyles: { fillColor: SLATE_100 },
       didDrawPage: () => {

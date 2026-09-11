@@ -393,6 +393,9 @@ export default function ResidentNotificationsPage() {
                                 tone={claimedRecord ? 'emerald' : STATUS_BADGE_TONES[distributionPayload.status]}
                               />
                               {claimedRecord ? <CivicBadge label="Claimed" tone="emerald" /> : null}
+                              {!claimedRecord && distributionPayload.claim_status === 'unclaimed' ? (
+                                <CivicBadge label="Not Claimed" tone="amber" />
+                              ) : null}
                             </>
                           ) : null}
                           {disasterPayload ? (
@@ -470,6 +473,18 @@ export default function ResidentNotificationsPage() {
                         <div className="mt-4 rounded-[22px] border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-900">
                           <p className="font-semibold">Additional notes</p>
                           <p className="mt-1">{distributionPayload.notes.trim()}</p>
+                        </div>
+                      ) : null}
+
+                      {!claimedRecord
+                        && distributionPayload.claim_status === 'unclaimed'
+                        && distributionPayload.status === 'completed' ? (
+                        <div className="mt-4 rounded-[22px] border border-rose-200 bg-rose-50 px-4 py-3 text-sm leading-6 text-rose-800">
+                          <p className="font-semibold">Package not claimed</p>
+                          <p className="mt-1">
+                            This distribution event has ended and your household was not able to claim.
+                            Please contact the barangay for follow-up.
+                          </p>
                         </div>
                       ) : null}
 

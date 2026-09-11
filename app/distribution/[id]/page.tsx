@@ -9,6 +9,7 @@ import {
   Camera,
   Calendar,
   CheckCircle2,
+  ChevronDown,
   Clock,
   Download,
   Edit2,
@@ -31,7 +32,13 @@ import { getAnalyticsBarangayScope, getAnalyticsScopeLabel } from '@/lib/analyti
 import { getCurrentUser, hasPermission } from '@/lib/auth';
 import MapLocationPicker from '@/components/MapLocationPicker';
 import MapView from '@/components/MapView';
-import { coerceDistributionTargetScope } from '@/lib/distribution-audience';
+import {
+  coerceDistributionTargetScope,
+  DISTRIBUTION_CATEGORY_LABELS,
+  getResidentCategories,
+  type DistributionCategory,
+} from '@/lib/distribution-audience';
+import { CivicBadge, CivicChipButton } from '@/components/ui/civic-primitives';
 import {
   getDistributionAudienceContext,
   getDistributionEvent,
@@ -40,6 +47,7 @@ import {
   updateDistributionEvent,
 } from '@/lib/db/distribution';
 import {
+  buildDistributionCoverageSummary,
   buildDistributionInventorySummary,
   buildDistributionSelectionPreview,
   buildDistributionServedSummary,
@@ -107,6 +115,97 @@ const TARGET_GROUP_LABELS: Record<DistributionTargetGroup, string> = {
   minor: 'Minor',
   low_income: 'Low Income',
 };
+
+// Badge tone per vulnerability category, mirroring the vulnerability module
+// (PWD/Pregnant -> rose, Senior -> amber, Low Income -> emerald, Minor -> navy).
+const CATEGORY_TONES: Record<DistributionCategory, 'rose' | 'amber' | 'emerald' | 'navy'> = {
+  pwd: 'rose',
+  pregnant: 'rose',
+  senior: 'amber',
+  low_income: 'emerald',
+  minor: 'navy',
+};
+
+const CATEGORY_FILTERS: Array<'all' | DistributionCategory> = [
+  'all',
+  'senior',
+  'pwd',
+  'pregnant',
+  'minor',
+  'low_income',
+];
+
+type CategoryFilter = (typeof CATEGORY_FILTERS)[number];
+
+function CategoryBadges({ categories }: { categories: DistributionCategory[] }) {
+  if (categories.length === 0) return null;
+
+  return (
+    <div className="mt-1 flex flex-wrap gap-1">
+      {categories.map((category) => (
+        <CivicBadge
+          key={category}
+          label={DISTRIBUTION_CATEGORY_LABELS[category]}
+          tone={CATEGORY_TONES[category]}
+          className="px-1.5 py-0.5 text-[10px]"
+        />
+      ))}
+    </div>
+  );
+}
+
+function entryMatchesCategoryFilter(categories: DistributionCategory[], filter: CategoryFilter): boolean {
+  return filter === 'all' || categories.includes(filter);
+}
+
+function countByCategory(entries: Array<{ categories: DistributionCategory[] }>): Record<CategoryFilter, number> {
+  const counts: Record<CategoryFilter, number> = {
+    all: entries.length,
+    senior: 0,
+    pwd: 0,
+    pregnant: 0,
+    minor: 0,
+    low_income: 0,
+  };
+  entries.forEach((entry) => {
+    entry.categories.forEach((category) => {
+      counts[category] += 1;
+    });
+  });
+  return counts;
+}
+
+function CategoryFilterChips({
+  filter,
+  onChange,
+  counts,
+}: {
+  filter: CategoryFilter;
+  onChange: (filter: CategoryFilter) => void;
+  counts: Record<CategoryFilter, number>;
+}) {
+  return (
+    <div className="flex flex-wrap gap-2">
+      {CATEGORY_FILTERS.map((key) => (
+        <CivicChipButton
+          key={key}
+          active={filter === key}
+          onClick={() => onChange(key)}
+          className="px-2.5 py-1.5"
+        >
+          {key === 'all' ? 'All' : DISTRIBUTION_CATEGORY_LABELS[key]}
+          <span
+            className={`rounded-full px-2 py-0.5 text-[10px] ${
+              filter === key ? 'bg-white/12 text-white' : 'bg-slate-100 text-slate-500'
+            }`}
+          >
+            {counts[key]}
+          </span>
+        </CivicChipButton>
+      ))}
+    </div>
+  );
+}
 
 const TARGET_SCOPE_OPTIONS: Array<{
   value: DistributionTargetScope;
@@ -193,6 +292,7 @@ export default function DistributionDetailPage() {
   const [receivedByName, setReceivedByName] = useState('');
   const [releaseNotes, setReleaseNotes] = useState('');
   const [isQuickUpdating, setIsQuickUpdating] = useState(false);
+  const [quickStatusError, setQuickStatusError] = useState<string | null>(null);
   const [isExportingPdf, setIsExportingPdf] = useState(false);
   const [pendingSyncCount, setPendingSyncCount] = useState(0);
   const [lastBootstrapAt, setLastBootstrapAt] = useState<number | null>(null);
@@ -209,6 +309,9 @@ export default function DistributionDetailPage() {
   const qrScannerSectionRef = useRef<HTMLDivElement | null>(null);
 
   const [editStatus, setEditStatus] = useState<DistributionEvent['status']>('planned');
+  const [pendingCompletion, setPendingCompletion] = useState<'quick' | 'edit' | null>(null);
+  const [isUnclaimedExpanded, setIsUnclaimedExpanded] = useState(false);
+  const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>('all');
   const [editTargetScope, setEditTargetScope] = useState<DistributionTargetScope>('household');
   const [editTargetGroup, setEditTargetGroup] = useState<DistributionTargetGroup>('all');
   const [editNotes, setEditNotes] = useState('');
@@ -440,9 +543,60 @@ export default function DistributionDetailPage() {
     () => buildDistributionServedSummary(records),
     [records],
   );
+  const categoriesByResidentId = useMemo(
+    () =>
+      new Map(
+        eligibleResidents.map((resident) => [
+          resident.id,
+          getResidentCategories(resident, flagsByResidentId.get(resident.id)),
+        ]),
+      ),
+    [eligibleResidents, flagsByResidentId],
+  );
+  const categoriesByHouseholdId = useMemo(() => {
+    const entries = new Map<string, DistributionCategory[]>();
+
+    matchedResidentsForHouseholds.forEach((resident) => {
+      const categories = getResidentCategories(resident, flagsByResidentId.get(resident.id));
+      const current = entries.get(resident.household_id) ?? [];
+      categories.forEach((category) => {
+        if (!current.includes(category)) {
+          current.push(category);
+        }
+      });
+      entries.set(resident.household_id, current);
+    });
+
+    return entries;
+  }, [matchedResidentsForHouseholds, flagsByResidentId]);
+  const coverageSummary = useMemo(
+    () => buildDistributionCoverageSummary({
+      targetScope: event?.target_scope ?? 'household',
+      records,
+      eligibleHouseholds,
+      eligibleResidents,
+      householdsById,
+      categoriesById:
+        event?.target_scope === 'resident' ? categoriesByResidentId : categoriesByHouseholdId,
+    }),
+    [
+      event?.target_scope,
+      records,
+      eligibleHouseholds,
+      eligibleResidents,
+      householdsById,
+      categoriesByResidentId,
+      categoriesByHouseholdId,
+    ],
+  );
 
   const filteredHouseholds = useMemo(() => {
-    const readyHouseholds = eligibleHouseholds.filter((household) => !servedHouseholdIds.has(household.id));
+    const readyHouseholds = eligibleHouseholds
+      .filter((household) => !servedHouseholdIds.has(household.id))
+      .filter(
+        (household) =>
+          entryMatchesCategoryFilter(categoriesByHouseholdId.get(household.id) ?? [], categoryFilter),
+      );
     if (!deferredSearch) return readyHouseholds;
 
     return readyHouseholds.filter((household) => {
@@ -463,10 +617,22 @@ export default function DistributionDetailPage() {
 
       return haystack.includes(deferredSearch);
     });
-  }, [eligibleHouseholds, deferredSearch, matchedResidentsForHouseholds, servedHouseholdIds]);
+  }, [
+    eligibleHouseholds,
+    deferredSearch,
+    matchedResidentsForHouseholds,
+    servedHouseholdIds,
+    categoriesByHouseholdId,
+    categoryFilter,
+  ]);
 
   const filteredResidents = useMemo(() => {
-    const readyResidents = eligibleResidents.filter((resident) => !servedResidentIds.has(resident.id));
+    const readyResidents = eligibleResidents
+      .filter((resident) => !servedResidentIds.has(resident.id))
+      .filter(
+        (resident) =>
+          entryMatchesCategoryFilter(categoriesByResidentId.get(resident.id) ?? [], categoryFilter),
+      );
     if (!deferredSearch) return readyResidents;
 
     return readyResidents.filter((resident) => {
@@ -484,7 +650,49 @@ export default function DistributionDetailPage() {
 
       return haystack.includes(deferredSearch);
     });
-  }, [eligibleResidents, householdsById, deferredSearch, servedResidentIds]);
+  }, [
+    eligibleResidents,
+    householdsById,
+    deferredSearch,
+    servedResidentIds,
+    categoriesByResidentId,
+    categoryFilter,
+  ]);
+
+  const filteredUnclaimedEntries = useMemo(
+    () =>
+      coverageSummary.unclaimed_entries.filter((entry) =>
+        entryMatchesCategoryFilter(entry.categories, categoryFilter),
+      ),
+    [coverageSummary, categoryFilter],
+  );
+  const unclaimedCategoryCounts = useMemo(
+    () => countByCategory(coverageSummary.unclaimed_entries),
+    [coverageSummary],
+  );
+  const releaseCategoryCounts = useMemo(() => {
+    if (event?.target_scope === 'resident') {
+      return countByCategory(
+        eligibleResidents
+          .filter((resident) => !servedResidentIds.has(resident.id))
+          .map((resident) => ({ categories: categoriesByResidentId.get(resident.id) ?? [] })),
+      );
+    }
+
+    return countByCategory(
+      eligibleHouseholds
+        .filter((household) => !servedHouseholdIds.has(household.id))
+        .map((household) => ({ categories: categoriesByHouseholdId.get(household.id) ?? [] })),
+    );
+  }, [
+    event?.target_scope,
+    eligibleResidents,
+    eligibleHouseholds,
+    servedResidentIds,
+    servedHouseholdIds,
+    categoriesByResidentId,
+    categoriesByHouseholdId,
+  ]);
 
   const selectedHousehold = useMemo(() => {
     if (!event) return null;
@@ -1121,8 +1329,22 @@ export default function DistributionDetailPage() {
     void processDistributionQr(qrFromUrl, 'link');
   }, [event, processDistributionQr, searchParams]);
 
-  async function handleSave() {
+  async function handleSave(force = false) {
     if (!event) return;
+
+    // Same completion gate as the quick-status button: saving the edit form
+    // with a completed status over unclaimed audience members needs a
+    // confirmation first.
+    if (
+      !force
+      && editStatus === 'completed'
+      && event.status !== 'completed'
+      && coverageSummary.unclaimed_count > 0
+    ) {
+      setPendingCompletion('edit');
+      return;
+    }
+
     setIsSaving(true);
 
     try {
@@ -1166,11 +1388,30 @@ export default function DistributionDetailPage() {
   async function handleQuickStatus(nextStatus: DistributionEvent['status']) {
     if (!event) return;
 
+    // Completing with unserved audience members is allowed, but the admin
+    // confirms the shortfall first instead of finalizing silently.
+    if (nextStatus === 'completed' && coverageSummary.unclaimed_count > 0) {
+      setPendingCompletion('quick');
+      return;
+    }
+
+    await finalizeQuickStatus(nextStatus);
+  }
+
+  async function finalizeQuickStatus(nextStatus: DistributionEvent['status']) {
+    if (!event) return;
+
     try {
+      setQuickStatusError(null);
       setIsQuickUpdating(true);
       const updated = await updateDistributionEvent(event.id, { status: nextStatus });
       setEvent(updated);
       setEditStatus(updated.status);
+      setPendingCompletion(null);
+    } catch (error) {
+      setQuickStatusError(
+        error instanceof Error ? error.message : 'Failed to update the distribution event status.',
+      );
     } finally {
       setIsQuickUpdating(false);
     }
@@ -1340,6 +1581,13 @@ export default function DistributionDetailPage() {
           scopeLabel: audienceScopeLabel,
           generatedBy: user.name,
         },
+        unclaimed:
+          coverageSummary.unclaimed_count > 0
+            ? {
+                label: coverageSummary.unclaimed_label,
+                entries: coverageSummary.unclaimed_entries,
+              }
+            : undefined,
       });
     } finally {
       setIsExportingPdf(false);
@@ -1411,7 +1659,7 @@ export default function DistributionDetailPage() {
                 <X className="h-4 w-4" />
               </button>
               <button
-                onClick={handleSave}
+                onClick={() => { void handleSave(); }}
                 disabled={isSaving}
                 className="inline-flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-600 px-3 py-1.5 text-xs font-bold text-white transition-all hover:opacity-90 disabled:opacity-60"
               >
@@ -1749,6 +1997,35 @@ export default function DistributionDetailPage() {
                 </div>
               </div>
 
+              <button
+                type="button"
+                onClick={() => setIsUnclaimedExpanded((expanded) => !expanded)}
+                aria-expanded={isUnclaimedExpanded}
+                className={`flex items-center gap-3 rounded-2xl border p-3 text-left shadow-sm transition sm:col-span-2 ${
+                  coverageSummary.unclaimed_count > 0
+                    ? 'border-amber-200 bg-amber-50/60 hover:border-amber-300'
+                    : 'border-slate-200/60 bg-white'
+                }`}
+              >
+                <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-teal-50">
+                  <CheckCircle2 className="h-4 w-4 text-teal-600" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="text-xl font-bold text-slate-900">{coverageSummary.coverage_percent}%</p>
+                  <p className="text-xs font-medium text-slate-400">
+                    Coverage · {coverageSummary.coverage_label}
+                  </p>
+                  <p className="mt-0.5 text-[11px] text-slate-400">{coverageSummary.unclaimed_label}</p>
+                </div>
+                {coverageSummary.unclaimed_count > 0 ? (
+                  <ChevronDown
+                    className={`h-4 w-4 flex-shrink-0 text-amber-600 transition-transform ${
+                      isUnclaimedExpanded ? 'rotate-180' : ''
+                    }`}
+                  />
+                ) : null}
+              </button>
+
               <div className="flex items-center gap-3 rounded-2xl border border-slate-200/60 bg-white p-3 shadow-sm sm:col-span-2">
                 <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-rose-50">
                   <ShieldCheck className="h-4 w-4 text-rose-600" />
@@ -1760,6 +2037,61 @@ export default function DistributionDetailPage() {
                 </div>
               </div>
             </div>
+
+            {coverageSummary.unclaimed_count > 0 ? (
+              <div className="rounded-2xl border border-amber-200 bg-amber-50/60 shadow-sm">
+                <button
+                  type="button"
+                  onClick={() => setIsUnclaimedExpanded((expanded) => !expanded)}
+                  aria-expanded={isUnclaimedExpanded}
+                  className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left"
+                >
+                  <div className="min-w-0">
+                    <p className="text-sm font-bold text-slate-900">
+                      Not yet received · {coverageSummary.unclaimed_label}
+                    </p>
+                    <p className="mt-0.5 text-xs text-slate-500">
+                      {event.status === 'completed'
+                        ? 'This event is completed. These audience members were not able to claim.'
+                        : 'Audience members who have not claimed a package yet.'}
+                    </p>
+                  </div>
+                  <ChevronDown
+                    className={`h-4 w-4 flex-shrink-0 text-amber-600 transition-transform ${
+                      isUnclaimedExpanded ? 'rotate-180' : ''
+                    }`}
+                  />
+                </button>
+                {isUnclaimedExpanded ? (
+                  <div className="space-y-3 border-t border-amber-200 px-3 py-3">
+                    <CategoryFilterChips
+                      filter={categoryFilter}
+                      onChange={setCategoryFilter}
+                      counts={unclaimedCategoryCounts}
+                    />
+                    <div className="max-h-64 space-y-2 overflow-y-auto">
+                      {filteredUnclaimedEntries.length > 0 ? (
+                        filteredUnclaimedEntries.map((entry) => (
+                          <div
+                            key={entry.id}
+                            className="rounded-xl border border-amber-100 bg-white px-3 py-2"
+                          >
+                            <p className="truncate text-sm font-semibold text-slate-900">{entry.name}</p>
+                            <p className="mt-0.5 truncate text-xs text-slate-400">{entry.subtitle}</p>
+                            <CategoryBadges categories={entry.categories} />
+                          </div>
+                        ))
+                      ) : (
+                        <div className="rounded-xl border border-amber-100 bg-white px-3 py-4 text-center text-xs text-slate-400">
+                          No {categoryFilter === 'all' ? 'entries' : DISTRIBUTION_CATEGORY_LABELS[categoryFilter]}{' '}
+                          in this list.
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
           </div>
         </div>
         </div>
@@ -2013,6 +2345,12 @@ export default function DistributionDetailPage() {
                 />
               </div>
 
+              <CategoryFilterChips
+                filter={categoryFilter}
+                onChange={setCategoryFilter}
+                counts={releaseCategoryCounts}
+              />
+
               <div className="max-h-48 space-y-2 overflow-y-auto pr-1">
                 {event.target_scope === 'household'
                   ? filteredHouseholds.map((household) => {
@@ -2050,6 +2388,9 @@ export default function DistributionDetailPage() {
                                   {matchedResidents.length > 2 ? ` +${matchedResidents.length - 2} more` : ''}
                                 </p>
                               ) : null}
+                              <CategoryBadges
+                                categories={categoriesByHouseholdId.get(household.id) ?? []}
+                              />
                             </div>
                             {served ? (
                               <span className="rounded-full bg-amber-100 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.16em] text-amber-700">
@@ -2091,6 +2432,9 @@ export default function DistributionDetailPage() {
                               <p className="mt-0.5 text-xs text-slate-400">
                                 {household?.purok_sitio} · {household?.street_address}
                               </p>
+                              <CategoryBadges
+                                categories={categoriesByResidentId.get(resident.id) ?? []}
+                              />
                             </div>
                             {served ? (
                               <span className="rounded-full bg-amber-100 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.16em] text-amber-700">
@@ -2325,6 +2669,15 @@ export default function DistributionDetailPage() {
                 </div>
               ) : null}
 
+              {categoryFilter !== 'all'
+              && (event.target_scope === 'household' ? eligibleHouseholds : eligibleResidents).length > 0
+              && (event.target_scope === 'household' ? filteredHouseholds : filteredResidents).length === 0 ? (
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-500">
+                  No {DISTRIBUTION_CATEGORY_LABELS[categoryFilter]} entries in this list. Try
+                  another category or clear the search.
+                </div>
+              ) : null}
+
               <button
                 type="button"
                 onClick={handleRelease}
@@ -2447,6 +2800,87 @@ export default function DistributionDetailPage() {
         </div>
         ) : null}
     </div>
+
+    {pendingCompletion ? (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4">
+        <div className="w-full max-w-md space-y-4 rounded-2xl border border-amber-200 bg-white p-5 shadow-xl">
+          <div className="flex items-start gap-3">
+            <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl bg-amber-50">
+              <AlertTriangle className="h-5 w-5 text-amber-600" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-sm font-bold text-slate-900">Mark as completed anyway?</p>
+              <p className="mt-1 text-xs text-slate-500">
+                Not everyone in this event&apos;s audience received the package.
+              </p>
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+            <p className="text-sm font-semibold text-slate-700">
+              {coverageSummary.coverage_label} ({coverageSummary.coverage_percent}% coverage)
+            </p>
+            <p className="mt-0.5 text-xs text-amber-700 font-medium">
+              {coverageSummary.unclaimed_label} will no longer be able to claim after completion.
+            </p>
+          </div>
+
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+              Not yet received
+            </p>
+            <div className="mt-2 max-h-40 space-y-1.5 overflow-y-auto pr-1">
+              {coverageSummary.unclaimed_entries.map((entry) => (
+                <div
+                  key={entry.id}
+                  className="rounded-xl border border-slate-200 bg-white px-3 py-2"
+                >
+                  <p className="truncate text-sm font-semibold text-slate-900">{entry.name}</p>
+                  <p className="mt-0.5 truncate text-xs text-slate-400">{entry.subtitle}</p>
+                  <CategoryBadges categories={entry.categories} />
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {quickStatusError ? (
+            <div className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+              {quickStatusError}
+            </div>
+          ) : null}
+
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                if (pendingCompletion === 'edit') {
+                  void handleSave(true);
+                } else {
+                  void finalizeQuickStatus('completed');
+                }
+              }}
+              disabled={isQuickUpdating || isSaving}
+              className="inline-flex flex-1 items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-bold text-white transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {isQuickUpdating || isSaving ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <CheckCircle2 className="h-4 w-4" />
+              )}
+              Mark Completed
+            </button>
+            <button
+              type="button"
+              onClick={() => { setPendingCompletion(null); setQuickStatusError(null); }}
+              disabled={isQuickUpdating || isSaving}
+              className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      </div>
+    ) : null}
     </AppShell>
   );
 }

@@ -2,7 +2,10 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   coerceDistributionTargetScope,
+  DISTRIBUTION_CATEGORY_LABELS,
+  getResidentCategories,
   isResidentOnlyTargetGroup,
+  matchesDistributionTargetGroup,
   resolveDistributionAudienceMatches,
 } from '../lib/distribution-audience';
 import type { Household, Resident, VulnerabilityFlags } from '../lib/db/schema';
@@ -141,4 +144,48 @@ test('target scope stays exactly as selected by the user', () => {
   assert.equal(coerceDistributionTargetScope('household', 'all'), 'household');
   assert.equal(coerceDistributionTargetScope('resident', 'all'), 'resident');
   assert.equal(coerceDistributionTargetScope('household', 'low_income'), 'household');
+});
+
+test('getResidentCategories collects every matching vulnerability category', () => {
+  const resident = makeResident({ id: 'res-multi' });
+  const flags = makeFlags('res-multi', {
+    is_adult: false,
+    is_senior: true,
+    is_pwd: true,
+    is_pregnant: true,
+  });
+
+  assert.deepEqual(getResidentCategories(resident, flags), ['senior', 'pwd', 'pregnant']);
+});
+
+test('getResidentCategories falls back to income_level for low income and returns empty without flags', () => {
+  const lowIncomeResident = makeResident({ id: 'res-low', income_level: 'low' });
+
+  assert.deepEqual(getResidentCategories(lowIncomeResident, undefined), ['low_income']);
+  assert.deepEqual(
+    getResidentCategories(lowIncomeResident, makeFlags('res-low')),
+    ['low_income'],
+  );
+  assert.deepEqual(getResidentCategories(makeResident({ id: 'res-plain' }), undefined), []);
+});
+
+test('matchesDistributionTargetGroup agrees with getResidentCategories after the delegation refactor', () => {
+  const resident = makeResident({ id: 'res-mixed', income_level: 'low' });
+  const flags = makeFlags('res-mixed', { is_pwd: true });
+
+  assert.equal(matchesDistributionTargetGroup(resident, flags, 'all'), true);
+  assert.equal(matchesDistributionTargetGroup(resident, flags, 'pwd'), true);
+  assert.equal(matchesDistributionTargetGroup(resident, flags, 'low_income'), true);
+  assert.equal(matchesDistributionTargetGroup(resident, flags, 'senior'), false);
+  assert.equal(matchesDistributionTargetGroup(resident, flags, 'pregnant'), false);
+  assert.equal(matchesDistributionTargetGroup(resident, flags, 'minor'), false);
+  assert.equal(matchesDistributionTargetGroup(resident, undefined, 'senior'), false);
+});
+
+test('distribution category labels stay stable for badges and the PDF report', () => {
+  assert.equal(DISTRIBUTION_CATEGORY_LABELS.senior, 'Senior');
+  assert.equal(DISTRIBUTION_CATEGORY_LABELS.pwd, 'PWD');
+  assert.equal(DISTRIBUTION_CATEGORY_LABELS.pregnant, 'Pregnant');
+  assert.equal(DISTRIBUTION_CATEGORY_LABELS.minor, 'Minor');
+  assert.equal(DISTRIBUTION_CATEGORY_LABELS.low_income, 'Low Income');
 });

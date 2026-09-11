@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { evaluateHouseholdDistributionEligibility } from '@/lib/distribution-claims';
+import { isHouseholdAllowedToClaimFromEvent } from '@/lib/distribution-event-visibility';
 import { verifyDistributionQrToken } from '@/lib/server/distribution-qr';
 import { writeQrScanLog } from '@/lib/server/distribution-qr-log';
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
@@ -131,6 +132,25 @@ export async function POST(request: NextRequest) {
       notes: 'Household linked to QR is no longer active and approved.',
     });
     return badRequest('The household linked to this QR code is no longer active and approved.', 404);
+  }
+
+  // QR access is scoped to the event's barangay, so the household linked to
+  // the token must belong to that same barangay. Tokens issued before this
+  // gate existed (or against events with a missing barangay) are rejected
+  // here instead of being released.
+  if (!isHouseholdAllowedToClaimFromEvent(event.barangay_id, household.barangay_id)) {
+    await writeQrScanLog({
+      supabase,
+      eventId: event.id,
+      householdId: household.id,
+      claimantUserId: claims.userId,
+      scannedBy: authResult.user.id,
+      source,
+      status: 'rejected',
+      token,
+      notes: 'Household barangay does not match the event barangay.',
+    });
+    return badRequest('This QR code belongs to a household outside this event\'s barangay.', 403);
   }
 
   const { data: existingRecord, error: existingRecordError } = await supabase

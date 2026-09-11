@@ -509,3 +509,5 @@ export default function DistributionNotificationQr({
     </div>
   );
 }
+
+

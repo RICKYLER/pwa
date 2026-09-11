@@ -28,7 +28,7 @@ export function collectResidentAllowedBarangayIds(
 }
 
 export function isDistributionEventVisibleToResident(
-  event: { barangay_id?: string | null },
+  event: { id?: string; barangay_id?: string | null },
   allowedBarangayIds: Set<string>,
 ): boolean {
   const eventBarangayId = typeof event.barangay_id === 'string' ? event.barangay_id.trim() : '';
@@ -37,9 +37,10 @@ export function isDistributionEventVisibleToResident(
 
 // The QR generation route only receives the event id, so the notification
 // fan-out cannot be trusted to gate access on its own. A household may only
-// claim from an event when both barangays are known and match; a missing
-// barangay on either side fails open, matching the legacy behavior for data
-// recorded before barangay scoping.
+// claim from an event when both barangays are known and match. A missing
+// barangay on either side fails closed: a resident without a scoping barangay
+// must not be handed QR access to an event, even a legacy one recorded before
+// barangay scoping.
 export function isHouseholdAllowedToClaimFromEvent(
   eventBarangayId: string | null | undefined,
   householdBarangayId: string | null | undefined,
@@ -48,7 +49,7 @@ export function isHouseholdAllowedToClaimFromEvent(
   const trimmedHouseholdBarangayId = typeof householdBarangayId === 'string' ? householdBarangayId.trim() : '';
 
   if (!trimmedEventBarangayId || !trimmedHouseholdBarangayId) {
-    return true;
+    return false;
   }
 
   return trimmedEventBarangayId === trimmedHouseholdBarangayId;

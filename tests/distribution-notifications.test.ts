@@ -52,7 +52,92 @@ test('parseDistributionEventNotification returns a typed payload including statu
     scheduled_date: '2026-04-08',
     location: 'Covered Court',
     notes: 'Bring your claim stub.',
+    claim_status: undefined,
   });
+});
+
+test('parseDistributionEventNotification passes through claim_status and drops invalid values', () => {
+  const unclaimed = parseDistributionEventNotification({
+    type: 'distribution_event',
+    payload: {
+      event_id: 'dist_partial',
+      event_name: 'Relief Goods',
+      type: 'emergency',
+      status: 'completed',
+      target_scope: 'household',
+      target_group: 'all',
+      scheduled_date: '2026-09-11',
+      location: 'Covered Court',
+      claim_status: 'unclaimed',
+    },
+  });
+  assert.equal(unclaimed?.claim_status, 'unclaimed');
+
+  const released = parseDistributionEventNotification({
+    type: 'distribution_event',
+    payload: {
+      event_id: 'dist_partial',
+      event_name: 'Relief Goods',
+      type: 'emergency',
+      status: 'completed',
+      target_scope: 'household',
+      target_group: 'all',
+      scheduled_date: '2026-09-11',
+      location: 'Covered Court',
+      claim_status: 'released',
+    },
+  });
+  assert.equal(released?.claim_status, 'released');
+
+  const invalid = parseDistributionEventNotification({
+    type: 'distribution_event',
+    payload: {
+      event_id: 'dist_partial',
+      event_name: 'Relief Goods',
+      type: 'emergency',
+      status: 'completed',
+      target_scope: 'household',
+      target_group: 'all',
+      scheduled_date: '2026-09-11',
+      location: 'Covered Court',
+      claim_status: 'bogus',
+    },
+  });
+  assert.equal(invalid?.claim_status, undefined);
+});
+
+test('buildDistributionNotificationBody appends the follow-up sentence only for unclaimed claim status', () => {
+  const unclaimedBody = buildDistributionNotificationBody({
+    type: 'regular',
+    status: 'completed',
+    scheduled_date: '2026-09-11',
+    location: 'Barangay Hall',
+    target_scope: 'household',
+    target_group: 'all',
+    claim_status: 'unclaimed',
+  });
+  assert.match(unclaimedBody, /was not able to claim\. Contact the barangay for follow-up\.$/);
+
+  const releasedBody = buildDistributionNotificationBody({
+    type: 'regular',
+    status: 'completed',
+    scheduled_date: '2026-09-11',
+    location: 'Barangay Hall',
+    target_scope: 'household',
+    target_group: 'all',
+    claim_status: 'released',
+  });
+  assert.doesNotMatch(releasedBody, /not able to claim/);
+
+  const genericBody = buildDistributionNotificationBody({
+    type: 'regular',
+    status: 'completed',
+    scheduled_date: '2026-09-11',
+    location: 'Barangay Hall',
+    target_scope: 'household',
+    target_group: 'all',
+  });
+  assert.doesNotMatch(genericBody, /not able to claim/);
 });
 
 test('parseDistributionEventNotification defaults missing legacy status values to planned', () => {

@@ -72,6 +72,7 @@ export function buildDistributionNotificationBody(input: {
   location?: string | null;
   target_scope?: string | null;
   target_group?: string | null;
+  claim_status?: string | null;
 }) {
   const type = isDistributionType(input.type) ? input.type : 'regular';
   const status = isDistributionStatus(input.status) ? input.status : 'planned';
@@ -83,8 +84,11 @@ export function buildDistributionNotificationBody(input: {
     )
     : 'the scheduled date';
   const location = input.location?.trim() || 'the barangay venue';
+  const followUp = input.claim_status === 'unclaimed'
+    ? ' This event has ended, but your household was not able to claim. Contact the barangay for follow-up.'
+    : '';
 
-  return `${DISTRIBUTION_NOTIFICATION_TYPE_LABELS[type]} distribution status: ${DISTRIBUTION_NOTIFICATION_STATUS_LABELS[status]}. Schedule: ${scheduledDate}. Location: ${location}. Audience: ${getDistributionNotificationAudienceLabel(targetScope, targetGroup)}.`;
+  return `${DISTRIBUTION_NOTIFICATION_TYPE_LABELS[type]} distribution status: ${DISTRIBUTION_NOTIFICATION_STATUS_LABELS[status]}. Schedule: ${scheduledDate}. Location: ${location}. Audience: ${getDistributionNotificationAudienceLabel(targetScope, targetGroup)}.${followUp}`;
 }
 
 export function parseDistributionEventNotification(
@@ -110,6 +114,9 @@ export function parseDistributionEventNotification(
   const scheduledDate = typeof payloadRecord.scheduled_date === 'string' ? payloadRecord.scheduled_date : '';
   const location = typeof payloadRecord.location === 'string' ? payloadRecord.location : '';
   const notes = typeof payloadRecord.notes === 'string' ? payloadRecord.notes : undefined;
+  const claimStatus = payloadRecord.claim_status === 'released' || payloadRecord.claim_status === 'unclaimed'
+    ? payloadRecord.claim_status
+    : undefined;
 
   if (
     !eventId
@@ -133,5 +140,8 @@ export function parseDistributionEventNotification(
     scheduled_date: scheduledDate,
     location,
     notes,
+    claim_status: claimStatus,
   };
 }
+
+

@@ -12,6 +12,32 @@ export type DistributionAudienceMatches = {
   matchedResidentsByHouseholdId: Map<string, Resident[]>;
 };
 
+// Vulnerability categories used to tag and filter people in distribution
+// event lists (badges, filter chips, PDF report). Mirrors the target groups
+// minus the catch-all 'all'.
+export type DistributionCategory = 'senior' | 'pwd' | 'pregnant' | 'minor' | 'low_income';
+
+export const DISTRIBUTION_CATEGORY_LABELS: Record<DistributionCategory, string> = {
+  senior: 'Senior',
+  pwd: 'PWD',
+  pregnant: 'Pregnant',
+  minor: 'Minor',
+  low_income: 'Low Income',
+};
+
+export function getResidentCategories(
+  resident: Resident,
+  flags: VulnerabilityFlags | undefined,
+): DistributionCategory[] {
+  const categories: DistributionCategory[] = [];
+  if (flags?.is_senior) categories.push('senior');
+  if (flags?.is_pwd) categories.push('pwd');
+  if (flags?.is_pregnant) categories.push('pregnant');
+  if (flags?.is_child) categories.push('minor');
+  if (flags?.is_low_income || resident.income_level === 'low') categories.push('low_income');
+  return categories;
+}
+
 export function isResidentOnlyTargetGroup(_targetGroup: DistributionTargetGroup): boolean {
   return false;
 }
@@ -28,22 +54,11 @@ export function matchesDistributionTargetGroup(
   flags: VulnerabilityFlags | undefined,
   targetGroup: DistributionTargetGroup,
 ): boolean {
-  switch (targetGroup) {
-    case 'all':
-      return true;
-    case 'senior':
-      return Boolean(flags?.is_senior);
-    case 'pwd':
-      return Boolean(flags?.is_pwd);
-    case 'pregnant':
-      return Boolean(flags?.is_pregnant);
-    case 'minor':
-      return Boolean(flags?.is_child);
-    case 'low_income':
-      return Boolean(flags?.is_low_income || resident.income_level === 'low');
-    default:
-      return true;
+  if (targetGroup === 'all') {
+    return true;
   }
+
+  return getResidentCategories(resident, flags).includes(targetGroup);
 }
 
 export function resolveDistributionAudienceMatches(params: {

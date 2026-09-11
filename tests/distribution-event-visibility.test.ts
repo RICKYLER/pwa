@@ -55,11 +55,13 @@ test('a household cannot claim a QR package from an event in a different baranga
   assert.equal(isHouseholdAllowedToClaimFromEvent(' anitapan ', 'anitapan'), true);
 });
 
-test('QR claiming fails open only when a barangay is missing on either side', () => {
-  // Legacy events recorded before barangay scoping have no barangay_id; the
-  // route keeps serving them rather than locking residents out.
-  assert.equal(isHouseholdAllowedToClaimFromEvent(null, 'anitapan'), true);
-  assert.equal(isHouseholdAllowedToClaimFromEvent('anitapan', null), true);
-  assert.equal(isHouseholdAllowedToClaimFromEvent('', ''), true);
-  assert.equal(isHouseholdAllowedToClaimFromEvent('  ', 'basiao'), true);
+test('QR claiming fails closed when a barangay is missing on either side', () => {
+  // A missing barangay on either side must never hand out QR access: events
+  // recorded before barangay scoping (or households without a barangay) are
+  // not claimable until their barangay is set.
+  assert.equal(isHouseholdAllowedToClaimFromEvent(null, 'anitapan'), false);
+  assert.equal(isHouseholdAllowedToClaimFromEvent('anitapan', null), false);
+  assert.equal(isHouseholdAllowedToClaimFromEvent('', ''), false);
+  assert.equal(isHouseholdAllowedToClaimFromEvent('  ', 'basiao'), false);
+  assert.equal(isHouseholdAllowedToClaimFromEvent('basiao', '  '), false);
 });
