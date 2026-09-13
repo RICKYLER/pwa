@@ -19,7 +19,7 @@ function hasFiniteCoordinates(input: Pick<AlertTargetHousehold, 'gps_lat' | 'gps
     && Number.isFinite(input.gps_long);
 }
 
-function getDistanceMeters(
+export function getDistanceMeters(
   left: { lat: number; lng: number },
   right: { lat: number; lng: number },
 ) {

@@ -2,9 +2,10 @@ import 'server-only';
 
 import { type SupabaseClient } from '@supabase/supabase-js';
 
-import { MABINI_MUNICIPALITY } from '@/lib/barangays';
+import { MABINI_MUNICIPALITY, isBarangayId } from '@/lib/barangays';
 import type {
   DistributionEvent,
+  EvacuationCenter,
   Household,
   Incident,
   InventoryItem,
@@ -16,6 +17,12 @@ import type {
   Resident,
   User,
 } from '@/lib/db/schema';
+import {
+  applyEvacuationCenterManualStatus,
+  buildEvacuationCenterId,
+  isEvacuationCenterStatus,
+  normalizeEvacuationCenter,
+} from '@/lib/evacuation-centers';
 import {
   buildPurokRiskProfileId,
   createDefaultPurokRiskProfile,
@@ -486,7 +493,8 @@ async function createAuditLogEntry(params: {
     | 'location_master'
     | 'purok_risk_profile'
     | 'disaster_alert'
-    | 'disaster_alert_rule';
+    | 'disaster_alert_rule'
+    | 'evacuation_center';
   entityId: string;
   changes?: Record<string, unknown>;
 }) {
@@ -1217,7 +1225,8 @@ export async function createAuditLogOnServer(params: {
     | 'location_master'
     | 'purok_risk_profile'
     | 'disaster_alert'
-    | 'disaster_alert_rule';
+    | 'disaster_alert_rule'
+    | 'evacuation_center';
   entityId: string;
   changes?: Record<string, unknown>;
 }) {
@@ -2921,4 +2930,216 @@ export async function updateIncidentStatusOnServer(
   });
 
   return data;
+}
+
+export async function saveEvacuationCentersOnServer(
+  user: User,
+  input: {
+    centers: Array<Pick<
+      EvacuationCenter,
+      | 'barangay_id'
+      | 'name'
+      | 'gps_lat'
+      | 'gps_lng'
+      | 'capacity'
+      | 'notes'
+    >>;
+  },
+) {
+  if (user.role !== 'admin') {
+    throw new Error('Admin access is required to manage the evacuation center registry.');
+  }
+
+  const supabase = getSupabaseAdminClient();
+  const remoteActorId = await getRemoteActorId(user);
+  const normalizedCenters = input.centers
+    .filter((center) => (
+      typeof center?.name === 'string'
+      && center.name.trim()
+      && typeof center?.barangay_id === 'string'
+      && isBarangayId(center.barangay_id)
+    ))
+    .map((center) => {
+      const normalized = normalizeEvacuationCenter({
+        ...center,
+        id: buildEvacuationCenterId(center.barangay_id, center.name),
+        municipality: MABINI_MUNICIPALITY,
+        status: 'closed',
+        updatedAt: new Date(),
+        syncStatus: 'synced',
+      });
+      return {
+        id: normalized.id,
+        municipality: MABINI_MUNICIPALITY,
+        barangay_id: normalized.barangay_id,
+        name: normalized.name,
+        gps_lat: normalized.gps_lat ?? null,
+        gps_lng: normalized.gps_lng ?? null,
+        capacity: normalized.capacity ?? null,
+        notes: normalized.notes ?? null,
+        updated_at: new Date().toISOString(),
+        updated_by: remoteActorId,
+        sync_status: 'synced' as const,
+      };
+    });
+
+  if (normalizedCenters.length === 0) {
+    return [];
+  }
+
+  const { data, error } = await supabase
+    .from('evacuation_centers')
+    .upsert(normalizedCenters, {
+      onConflict: 'id',
+    })
+    .select('*');
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  await Promise.all(normalizedCenters.map((center) => createAuditLogEntry({
+    user,
+    action: 'UPSERT',
+    entityType: 'evacuation_center',
+    entityId: center.id,
+    changes: {
+      barangay_id: center.barangay_id,
+      name: center.name,
+      capacity: center.capacity,
+      notes: center.notes,
+    },
+  })));
+
+  return data ?? [];
+}
+
+export async function setEvacuationCenterStatusOnServer(
+  user: User,
+  input: {
+    center_id: string;
+    status: string;
+  },
+) {
+  if (!['admin', 'responder'].includes(user.role)) {
+    throw new Error('Only admins and responders can change evacuation center status.');
+  }
+
+  if (!isEvacuationCenterStatus(input.status)) {
+    throw new Error('Evacuation center status must be "open" or "closed".');
+  }
+
+  const centerId = toOptionalString(input.center_id);
+  if (!centerId) {
+    throw new Error('center_id is required.');
+  }
+
+  const supabase = getSupabaseAdminClient();
+  const { data: current, error: loadError } = await supabase
+    .from('evacuation_centers')
+    .select('*')
+    .eq('id', centerId)
+    .single();
+
+  if (loadError) {
+    throw new Error(loadError.message);
+  }
+
+  if (user.role === 'responder' && current.barangay_id !== user.barangay_id) {
+    throw new Error('Responders can only manage evacuation centers in their own barangay.');
+  }
+
+  const remoteActorId = await getRemoteActorId(user);
+  const updatedAt = new Date();
+  const updated = applyEvacuationCenterManualStatus({
+    center: current as unknown as EvacuationCenter,
+    status: input.status,
+    updatedAt,
+    updatedBy: remoteActorId ?? undefined,
+  });
+
+  const { data, error } = await supabase
+    .from('evacuation_centers')
+    .update({
+      status: updated.status,
+      activation_source: updated.activation_source ?? null,
+      activated_at: updated.activated_at ? updated.activated_at.toISOString() : null,
+      activated_by: updated.activated_by ?? null,
+      activated_by_alert_id: updated.activated_by_alert_id ?? null,
+      deactivated_at: updated.deactivated_at ? updated.deactivated_at.toISOString() : null,
+      updated_at: updatedAt.toISOString(),
+      updated_by: remoteActorId,
+      sync_status: 'synced',
+    })
+    .eq('id', centerId)
+    .select('*')
+    .single();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  await createAuditLogEntry({
+    user,
+    action: 'UPDATE',
+    entityType: 'evacuation_center',
+    entityId: centerId,
+    changes: {
+      previous_status: (current as Record<string, unknown>).status,
+      new_status: input.status,
+      activation_source: updated.activation_source ?? null,
+    },
+  });
+
+  return data;
+}
+
+export async function deleteEvacuationCenterOnServer(
+  user: User,
+  input: {
+    center_id: string;
+  },
+) {
+  if (user.role !== 'admin') {
+    throw new Error('Admin access is required to manage the evacuation center registry.');
+  }
+
+  const centerId = toOptionalString(input.center_id);
+  if (!centerId) {
+    throw new Error('center_id is required.');
+  }
+
+  const supabase = getSupabaseAdminClient();
+  const { data: current, error: loadError } = await supabase
+    .from('evacuation_centers')
+    .select('*')
+    .eq('id', centerId)
+    .single();
+
+  if (loadError) {
+    throw new Error(loadError.message);
+  }
+
+  const { error } = await supabase
+    .from('evacuation_centers')
+    .delete()
+    .eq('id', centerId);
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  await createAuditLogEntry({
+    user,
+    action: 'DELETE',
+    entityType: 'evacuation_center',
+    entityId: centerId,
+    changes: {
+      barangay_id: (current as Record<string, unknown>).barangay_id,
+      name: (current as Record<string, unknown>).name,
+      status: (current as Record<string, unknown>).status,
+    },
+  });
+
+  return { id: centerId };
 }

@@ -27,7 +27,7 @@ test('alerts route bootstraps disaster alert history and rules', () => {
 test('responder route bootstraps automatic alert rules for field map zones', () => {
   assert.deepEqual(
     getRouteBootstrapTables('/responder'),
-    ['households', 'residents', 'vulnerability_flags', 'incidents', 'distribution_events', 'purok_risk_profiles', 'disaster_alert_rules', 'disaster_alerts', 'user_notifications'],
+    ['households', 'residents', 'vulnerability_flags', 'incidents', 'distribution_events', 'purok_risk_profiles', 'evacuation_centers', 'disaster_alert_rules', 'disaster_alerts', 'user_notifications'],
   );
 });
 

@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Loader2 } from 'lucide-react';
-import type { DisasterAlertRule, DistributionEvent, Household, Incident, PurokRiskProfile } from '@/lib/db/schema';
+import type { DisasterAlertRule, DistributionEvent, EvacuationCenter, Household, Incident, PurokRiskProfile } from '@/lib/db/schema';
 import {
   DEFAULT_BARANGAY_CENTER,
   HOUSEHOLD_PIN_COLOR,
@@ -25,6 +25,20 @@ import {
   buildFieldResponseZoneMarkers,
   type FieldResponseZoneMarker,
 } from '@/lib/purok-risk-profiles';
+import { getBarangayLabel, type BarangayId } from '@/lib/barangays';
+import {
+  findBarangayForPoint,
+  getBarangayBounds,
+  getBarangayCenter,
+  getBarangayUnionBounds,
+  toLeafletLatLngs,
+  type BarangayBoundary,
+} from '@/lib/barangay-geometry';
+import { formatBarangayArea, getBarangayBoundaryColors } from '@/lib/mabini-barangays';
+import { useWindyMapLayer } from '@/hooks/useWindyMapLayer';
+import { WINDY_MAP_PAGE_URL, type WindyLayerId } from '@/lib/windy-map';
+import { cn } from '@/lib/utils';
+import MapLegend from '@/components/MapLegend';
 
 declare global {
   interface Window {
@@ -60,6 +74,13 @@ interface LeafletTileLayer extends LeafletLayer {
 interface LeafletMarker extends LeafletLayer {
   bindTooltip(content: string, options?: Record<string, unknown>): this;
   on(event: string, handler: (event: { latlng?: { lat: number; lng: number } }) => void): this;
+}
+
+interface LeafletPath extends LeafletLayer {
+  bindTooltip(content: string, options?: Record<string, unknown>): this;
+  off(event: string, handler: (event: unknown) => void): this;
+  on(event: string, handler: (event: unknown) => void): this;
+  setStyle(style: Record<string, unknown>): this;
 }
 
 interface LeafletLayerGroup extends LeafletLayer {
@@ -128,7 +149,8 @@ interface LeafletRuntime {
   latLngBounds(points: [number, number][]): unknown;
   map(element: HTMLElement, options?: Record<string, unknown>): LeafletMap;
   marker(latlng: [number, number], options?: Record<string, unknown>): LeafletMarker;
-  polygon(latlngs: unknown, options?: Record<string, unknown>): LeafletLayer;
+  polygon(latlngs: unknown, options?: Record<string, unknown>): LeafletPath;
+  polyline(latlngs: unknown, options?: Record<string, unknown>): LeafletLayer;
   tileLayer(urlTemplate: string, options?: Record<string, unknown>): LeafletTileLayer;
 }
 
@@ -143,6 +165,14 @@ interface ResponderLeafletMapProps {
   events?: DistributionEvent[];
   purokRiskProfiles?: PurokRiskProfile[];
   alertRules?: DisasterAlertRule[];
+  evacuationCenters?: EvacuationCenter[];
+  barangayBoundaries?: BarangayBoundary[];
+  selectedBarangayId?: BarangayId | null;
+  highlightBarangayId?: BarangayId | null;
+  onSelectBarangay?: (barangayId: BarangayId | null) => void;
+  boundaryMode?: boolean;
+  /** Master visibility for the barangay boundary layer (default: on). */
+  showBoundaries?: boolean;
   selectedHousehold?: Household | null;
   onSelectHousehold?: (household: Household | null) => void;
   selectedIncident?: Incident | null;
@@ -153,6 +183,12 @@ interface ResponderLeafletMapProps {
   activeLayerIds: OpenWeatherTileLayerId[];
   showWeather: boolean;
   overlayOpacity: number;
+  /** Windy Map Forecast visualization layer shown under the E-Mabini map layers. */
+  windyLayer?: WindyLayerId;
+  /** Sticky flag: the Windy underlay iframe stays mounted once first enabled. */
+  windyFrameMounted?: boolean;
+  /** Reports store.getAllowed('overlay') back so the control panel can tier-gate layers. */
+  onWindyAllowedOverlaysChange?: (allowedOverlays: string[]) => void;
   refreshVersion?: number;
   containerClassName?: string;
   compactWeather?: boolean;
@@ -170,6 +206,10 @@ const LEAFLET_CSS_ID = 'responder-leaflet-css';
 const LEAFLET_SCRIPT_ID = 'responder-leaflet-script';
 const LEAFLET_CSS_HREF = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
 const LEAFLET_SCRIPT_SRC = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
+// Pane ordering: basemap tiles (200) < barangay boundaries (350) < weather
+// overlays (360–385) < default overlay/marker panes (400+).
+const BARANGAY_BOUNDARY_PANE = 'barangay-boundaries';
+const BARANGAY_BOUNDARY_PANE_Z_INDEX = 350;
 const LAYER_SWAP_TIMEOUT_MS = 2200;
 const LAYER_FADE_DELAY_MS = 180;
 const PREFETCH_RING_TILES = 1;
@@ -534,13 +574,18 @@ function pickPrimaryCluster(points: Array<{ lat: number; lng: number }>) {
   return cluster.length >= 2 ? cluster : ranked.slice(0, Math.min(4, ranked.length));
 }
 
-function buildHouseholdMarkerHtml(selected: boolean) {
+function buildHouseholdMarkerHtml(selected: boolean, highRisk = false) {
   const outerSize = selected ? 30 : 22;
   const innerSize = selected ? 16 : 13;
-  const ringColor = selected ? 'rgba(8,47,73,0.22)' : 'rgba(8,47,73,0.12)';
+  const pinColor = highRisk ? '#dc2626' : HOUSEHOLD_PIN_COLOR;
+  const ringColor = highRisk
+    ? 'rgba(220,38,38,0.22)'
+    : selected
+      ? 'rgba(8,47,73,0.22)'
+      : 'rgba(8,47,73,0.12)';
   return `
     <div style="width:${outerSize}px;height:${outerSize}px;display:flex;align-items:center;justify-content:center;border-radius:999px;background:${ringColor};box-shadow:0 12px 24px rgba(15,23,42,0.18);">
-      <div style="width:${innerSize}px;height:${innerSize}px;border-radius:999px;background:${HOUSEHOLD_PIN_COLOR};border:3px solid #ffffff;"></div>
+      <div style="width:${innerSize}px;height:${innerSize}px;border-radius:999px;background:${pinColor};border:3px solid #ffffff;"></div>
     </div>
   `;
 }
@@ -703,6 +748,58 @@ function hasIncidentPin(incident: Pick<Incident, 'gps_lat' | 'gps_lng'>): incide
   return typeof incident.gps_lat === 'number' && typeof incident.gps_lng === 'number';
 }
 
+function hasEvacCenterPin(center: Pick<EvacuationCenter, 'gps_lat' | 'gps_lng'>): center is EvacuationCenter & {
+  gps_lat: number;
+  gps_lng: number;
+} {
+  return typeof center.gps_lat === 'number' && typeof center.gps_lng === 'number';
+}
+
+function buildEvacCenterMarkerHtml(center: EvacuationCenter) {
+  const open = center.status === 'open';
+  // Matches the MapLegend swatch: emerald triangle, solid when open, hollow when closed.
+  const border = open ? '#065f46' : '#94a3b8';
+  const fill = open ? '#10b981' : '#ffffff';
+  return `
+    <div style="position:relative;width:24px;height:24px;">
+      <div style="position:absolute;inset:0;clip-path:polygon(50% 0,100% 100%,0 100%);background:${border};"></div>
+      <div style="position:absolute;left:3px;right:3px;top:4px;bottom:2px;clip-path:polygon(50% 0,100% 100%,0 100%);background:${fill};"></div>
+    </div>
+  `;
+}
+
+function buildBarangayPolygonStyle(barangayId: string, selected: boolean) {
+  const colors = getBarangayBoundaryColors(barangayId);
+  return {
+    color: colors.stroke,
+    weight: selected ? 3 : 1.5,
+    opacity: 0.95,
+    fillColor: colors.fill,
+    fillOpacity: selected ? 0.32 : 0.12,
+  };
+}
+
+function buildBarangayLabelHtml(label: string, barangayId: string) {
+  const colors = getBarangayBoundaryColors(barangayId);
+  return `
+    <span style="position:absolute;left:0;top:50%;transform:translate(-50%,-50%);display:inline-block;padding:2px 8px;border-radius:999px;background:rgba(255,255,255,0.92);border:1px solid ${colors.stroke}66;color:${colors.stroke};font-size:10px;font-weight:800;letter-spacing:0.05em;white-space:nowrap;box-shadow:0 8px 18px rgba(15,23,42,0.16);">${escapeMarkerText(label)}</span>
+  `;
+}
+
+function buildBarangayTooltipHtml(boundary: BarangayBoundary) {
+  return `
+    <div class="responder-hover-card">
+      <div class="responder-hover-card__eyebrow">Barangay</div>
+      <div class="responder-hover-card__title">${escapeMarkerText(boundary.label)}</div>
+      <div class="responder-hover-card__line">Mabini, Davao de Oro</div>
+      <div class="responder-hover-card__meta">
+        <span>${escapeMarkerText(formatBarangayArea(boundary.areaKm2))}</span>
+        <span>PSGC ${escapeMarkerText(boundary.psgc)}</span>
+      </div>
+    </div>
+  `;
+}
+
 function hasEventPin(event: Pick<DistributionEvent, 'gps_lat' | 'gps_lng'>): event is DistributionEvent & {
   gps_lat: number;
   gps_lng: number;
@@ -716,6 +813,13 @@ export default function ResponderLeafletMap({
   events = [],
   purokRiskProfiles = [],
   alertRules = [],
+  evacuationCenters = [],
+  barangayBoundaries = [],
+  selectedBarangayId = null,
+  highlightBarangayId = null,
+  onSelectBarangay,
+  boundaryMode = false,
+  showBoundaries = true,
   selectedHousehold,
   onSelectHousehold,
   selectedIncident,
@@ -726,6 +830,9 @@ export default function ResponderLeafletMap({
   activeLayerIds,
   showWeather,
   overlayOpacity,
+  windyLayer = 'none',
+  windyFrameMounted = false,
+  onWindyAllowedOverlaysChange,
   refreshVersion = 0,
   containerClassName = 'h-full',
   compactWeather = false,
@@ -743,6 +850,7 @@ export default function ResponderLeafletMap({
   const [internalSelectedEvent, setInternalSelectedEvent] = useState<DistributionEvent | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<LeafletMap | null>(null);
+  const [mapInstance, setMapInstance] = useState<LeafletMap | null>(null);
   const onSelectHouseholdRef = useRef(onSelectHousehold);
   const onSelectIncidentRef = useRef(onSelectIncident);
   const onSelectEventRef = useRef(onSelectEvent);
@@ -751,10 +859,12 @@ export default function ResponderLeafletMap({
   const selectedEventControlledRef = useRef(selectedEvent !== undefined);
   const zoneLayerRef = useRef<LeafletLayerGroup | null>(null);
   const boundaryLayerRef = useRef<LeafletLayerGroup | null>(null);
+  const fittedToBoundariesRef = useRef(false);
   const householdLayerRef = useRef<LeafletLayerGroup | null>(null);
   const incidentLayerRef = useRef<LeafletLayerGroup | null>(null);
   const eventLayerRef = useRef<LeafletLayerGroup | null>(null);
   const facilityLayerRef = useRef<LeafletLayerGroup | null>(null);
+  const evacCenterLayerRef = useRef<LeafletLayerGroup | null>(null);
   const baseTileRefs = useRef<Partial<Record<ResponderBaseMapLayerId, LeafletTileLayer>>>({});
   const weatherTileRefs = useRef<Partial<Record<OpenWeatherTileLayerId, LeafletTileLayer>>>({});
   const activeBaseLayerRef = useRef<{
@@ -784,6 +894,11 @@ export default function ResponderLeafletMap({
     () => buildFieldResponseZoneMarkers(households, purokRiskProfiles, alertRules),
     [households, purokRiskProfiles, alertRules],
   );
+  const barangayBoundariesById = useMemo(
+    () => new Map(barangayBoundaries.map((boundary) => [boundary.barangayId, boundary])),
+    [barangayBoundaries],
+  );
+  const showBarangayLabels = showBoundaries && (boundaryMode || (mapViewport?.zoom ?? 0) >= 13);
   const viewportReady = (mapViewport?.width ?? 0) > 0 && (mapViewport?.height ?? 0) > 0;
   const weatherOverlayVisible = showWeather && activeLayerIds.length > 0;
   const windLayerSelected = activeLayerIds.includes('WND');
@@ -801,6 +916,19 @@ export default function ResponderLeafletMap({
     ),
     [compactWeather, mapViewport?.height, mapViewport?.width, mapViewport?.zoom],
   );
+
+  const windy = useWindyMapLayer({
+    map: mapInstance,
+    layerId: windyLayer,
+    frameMounted: windyFrameMounted,
+  });
+
+  // Surface Windy's allowed overlays (tier-gated) to the control panel.
+  useEffect(() => {
+    if (windy.allowedOverlays) {
+      onWindyAllowedOverlaysChange?.(windy.allowedOverlays);
+    }
+  }, [onWindyAllowedOverlaysChange, windy.allowedOverlays]);
 
   useEffect(() => {
     onSelectHouseholdRef.current = onSelectHousehold;
@@ -846,6 +974,7 @@ export default function ResponderLeafletMap({
     });
 
     mapRef.current = map;
+    setMapInstance(map);
     map.setView([DEFAULT_BARANGAY_CENTER.lat, DEFAULT_BARANGAY_CENTER.lng], 14);
 
     zoneLayerRef.current = runtime.layerGroup().addTo(map);
@@ -854,6 +983,18 @@ export default function ResponderLeafletMap({
     incidentLayerRef.current = runtime.layerGroup().addTo(map);
     eventLayerRef.current = runtime.layerGroup().addTo(map);
     facilityLayerRef.current = runtime.layerGroup().addTo(map);
+    evacCenterLayerRef.current = runtime.layerGroup().addTo(map);
+
+    // Dedicated pane for barangay boundaries: above the basemap tiles (200)
+    // and below the weather overlays (360–385) and the marker panes (400+),
+    // so real barangay polygons stay visible without covering pins.
+    if (!map.getPane(BARANGAY_BOUNDARY_PANE)) {
+      map.createPane(BARANGAY_BOUNDARY_PANE);
+    }
+    const boundaryPane = map.getPane(BARANGAY_BOUNDARY_PANE);
+    if (boundaryPane) {
+      boundaryPane.style.zIndex = String(BARANGAY_BOUNDARY_PANE_Z_INDEX);
+    }
 
     Object.keys(WEATHER_LAYER_Z_INDEX).forEach((layerId) => {
       const paneName = getWeatherPaneName(layerId as OpenWeatherTileLayerId);
@@ -930,12 +1071,14 @@ export default function ResponderLeafletMap({
       map.off('click', handleMapClick);
       map.remove();
       mapRef.current = null;
+      setMapInstance(null);
       zoneLayerRef.current = null;
       boundaryLayerRef.current = null;
       householdLayerRef.current = null;
       incidentLayerRef.current = null;
       eventLayerRef.current = null;
       facilityLayerRef.current = null;
+      evacCenterLayerRef.current = null;
       baseTileRefs.current = {};
       weatherTileRefs.current = {};
       activeBaseLayerRef.current = null;
@@ -947,6 +1090,7 @@ export default function ResponderLeafletMap({
       prefetchedImages.clear();
       setBaseLayerReady(false);
       setMapViewport(null);
+      fittedToBoundariesRef.current = false;
     };
   }, [runtime]);
 
@@ -1030,9 +1174,62 @@ export default function ResponderLeafletMap({
     });
   }, [runtime, activeBaseLayerId, viewportReady]);
 
+  // Once the real barangay polygons arrive, frame the municipality itself —
+  // the extent of the actual geometry, never hand-guessed bounds. Skipped if
+  // the responder already focused a specific selection.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !runtime || fittedToBoundariesRef.current) return;
+    const union = getBarangayUnionBounds(barangayBoundaries);
+    if (!union) return;
+
+    fittedToBoundariesRef.current = true;
+    if (
+      selectedBarangayId
+      || activeSelectedHousehold
+      || activeSelectedIncident
+      || activeSelectedEvent
+    ) {
+      return;
+    }
+
+    map.fitBounds(
+      runtime.latLngBounds([
+        [union.south, union.west],
+        [union.north, union.east],
+      ]),
+      { padding: [28, 28], maxZoom: 13 },
+    );
+    queueMapRefresh(map);
+  }, [
+    runtime,
+    barangayBoundaries,
+    selectedBarangayId,
+    activeSelectedHousehold,
+    activeSelectedIncident,
+    activeSelectedEvent,
+  ]);
+
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !runtime) return;
+
+    // A selected barangay takes priority — zoom the map to its boundary.
+    if (selectedBarangayId) {
+      const boundary = barangayBoundariesById.get(selectedBarangayId);
+      if (boundary) {
+        const bounds = getBarangayBounds(boundary);
+        map.fitBounds(
+          runtime.latLngBounds([
+            [bounds.south, bounds.west],
+            [bounds.north, bounds.east],
+          ]),
+          { padding: [36, 36], maxZoom: 15 },
+        );
+        queueMapRefresh(map);
+        return;
+      }
+    }
 
     if (activeSelectedHousehold && hasHouseholdPin(activeSelectedHousehold)) {
       map.flyTo(
@@ -1104,10 +1301,12 @@ export default function ResponderLeafletMap({
           : zoneFocusPoints;
 
     if (preferredFocusPoints.length === 0) {
+      // Prefer the real barangay geometry extent over the static bounds.
+      const union = getBarangayUnionBounds(barangayBoundaries) ?? MABINI_MAP_BOUNDS;
       map.fitBounds(
         runtime.latLngBounds([
-          [MABINI_MAP_BOUNDS.south, MABINI_MAP_BOUNDS.west],
-          [MABINI_MAP_BOUNDS.north, MABINI_MAP_BOUNDS.east],
+          [union.south, union.west],
+          [union.north, union.east],
         ]),
         { padding: [28, 28], maxZoom: 13 },
       );
@@ -1126,11 +1325,11 @@ export default function ResponderLeafletMap({
       { padding: [28, 28], maxZoom: weatherOverlayVisible ? 15 : 16 },
     );
     queueMapRefresh(map);
-  }, [runtime, households, activeIncidents, activeEvents, activeSelectedHousehold, activeSelectedIncident, activeSelectedEvent, weatherOverlayVisible, zoneMarkers]);
+  }, [runtime, households, activeIncidents, activeEvents, activeSelectedHousehold, activeSelectedIncident, activeSelectedEvent, weatherOverlayVisible, zoneMarkers, barangayBoundariesById, barangayBoundaries, selectedBarangayId]);
 
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !runtime || !zoneLayerRef.current || !boundaryLayerRef.current || !householdLayerRef.current || !incidentLayerRef.current || !eventLayerRef.current || !facilityLayerRef.current) return;
+    if (!map || !runtime || !zoneLayerRef.current || !boundaryLayerRef.current || !householdLayerRef.current || !incidentLayerRef.current || !eventLayerRef.current || !facilityLayerRef.current || !evacCenterLayerRef.current) return;
 
     zoneLayerRef.current.clearLayers();
     boundaryLayerRef.current.clearLayers();
@@ -1138,21 +1337,134 @@ export default function ResponderLeafletMap({
     incidentLayerRef.current.clearLayers();
     eventLayerRef.current.clearLayers();
     facilityLayerRef.current.clearLayers();
+    evacCenterLayerRef.current.clearLayers();
 
-    MABINI_BOUNDARY_PATHS.forEach((path) => {
-      const boundary = runtime.polygon(
-        path.map((point) => [point.lat, point.lng]),
-        {
-          color: '#ef4444',
-          weight: 3,
-          opacity: 0.95,
-          fill: false,
-          interactive: false,
-        },
+    if (process.env.NODE_ENV !== 'production' && barangayBoundaries.length > 0) {
+      console.info(
+        '[barangay-boundaries] rendering',
+        `${barangayBoundaries.length} polygons`,
+        barangayBoundaries.map((boundary) => ({
+          name: boundary.label,
+          sourceName: boundary.sourceName,
+          psgc: boundary.psgc,
+          polygons: boundary.polygons.length,
+          areaKm2: boundary.areaKm2,
+        })),
       );
+    }
 
-      boundaryLayerRef.current?.addLayer(boundary);
-    });
+    // Barangay response zones: real GIS polygons from the GeoRisk/PSA service.
+    if (showBoundaries && barangayBoundaries.length > 0) {
+      barangayBoundaries.forEach((boundary) => {
+        const isSelected = selectedBarangayId === boundary.barangayId
+          || highlightBarangayId === boundary.barangayId;
+        const polygon = runtime.polygon(toLeafletLatLngs(boundary), {
+          ...buildBarangayPolygonStyle(boundary.barangayId, isSelected),
+          pane: BARANGAY_BOUNDARY_PANE,
+          interactive: true,
+        });
+
+        polygon.bindTooltip(buildBarangayTooltipHtml(boundary), {
+          className: 'responder-hover-tooltip',
+          direction: 'top',
+          opacity: 1,
+          sticky: true,
+        });
+
+        polygon.on('mouseover', () => {
+          if (isSelected) return;
+          polygon.setStyle({
+            ...buildBarangayPolygonStyle(boundary.barangayId, false),
+            fillOpacity: 0.28,
+            weight: 2.5,
+          });
+        });
+        polygon.on('mouseout', () => {
+          if (isSelected) return;
+          polygon.setStyle(buildBarangayPolygonStyle(boundary.barangayId, false));
+        });
+        polygon.on('click', () => {
+          onSelectBarangay?.(boundary.barangayId);
+        });
+
+        boundaryLayerRef.current?.addLayer(polygon);
+
+        if (showBarangayLabels) {
+          const center = getBarangayCenter(boundary);
+          const label = runtime.marker([center.lat, center.lng], {
+            interactive: false,
+            keyboard: false,
+            zIndexOffset: -300,
+            icon: runtime.divIcon({
+              className: 'responder-barangay-label',
+              html: buildBarangayLabelHtml(boundary.label, boundary.barangayId),
+              iconSize: undefined,
+              iconAnchor: undefined,
+            }),
+          });
+          boundaryLayerRef.current?.addLayer(label);
+        }
+      });
+
+      // Thin neutral municipality outline on top of the barangay zones.
+      MABINI_BOUNDARY_PATHS.forEach((path) => {
+        const outline = runtime.polygon(
+          path.map((point) => [point.lat, point.lng]),
+          {
+            color: '#0f172a',
+            weight: 2,
+            opacity: 0.55,
+            fill: false,
+            interactive: false,
+          },
+        );
+        boundaryLayerRef.current?.addLayer(outline);
+      });
+    } else if (showBoundaries) {
+      // Fallback: municipality outline only, when the boundary service is
+      // unreachable.
+      MABINI_BOUNDARY_PATHS.forEach((path) => {
+        const boundary = runtime.polygon(
+          path.map((point) => [point.lat, point.lng]),
+          {
+            color: '#ef4444',
+            weight: 3,
+            opacity: 0.95,
+            fill: false,
+            interactive: false,
+          },
+        );
+
+        boundaryLayerRef.current?.addLayer(boundary);
+      });
+    }
+
+    // Response Boundary mode: indicative dashed connector from the selected
+    // incident to its barangay's reference point (not a routed road path).
+    if (boundaryMode && activeSelectedIncident && hasIncidentPin(activeSelectedIncident)) {
+      const incidentBarangay = findBarangayForPoint(
+        activeSelectedIncident.gps_lat,
+        activeSelectedIncident.gps_lng,
+        barangayBoundaries,
+      );
+      if (incidentBarangay) {
+        const center = getBarangayCenter(incidentBarangay);
+        const route = runtime.polyline(
+          [
+            [activeSelectedIncident.gps_lat, activeSelectedIncident.gps_lng],
+            [center.lat, center.lng],
+          ],
+          {
+            color: '#0f766e',
+            weight: 2.5,
+            opacity: 0.85,
+            dashArray: '8 6',
+            interactive: false,
+          },
+        );
+        boundaryLayerRef.current?.addLayer(route);
+      }
+    }
 
     zoneMarkers.forEach((marker) => {
       const zoneMarker = runtime.marker([marker.lat, marker.lng], {
@@ -1175,11 +1487,12 @@ export default function ResponderLeafletMap({
 
     households.filter(hasHouseholdPin).forEach((household) => {
       const isSelected = activeSelectedHousehold?.id === household.id;
+      const isHighRisk = boundaryMode && household.disaster_risk_level === 'high';
       const marker = runtime.marker([household.gps_lat, household.gps_long], {
         title: household.head_name,
         icon: runtime.divIcon({
           className: 'responder-marker',
-          html: buildHouseholdMarkerHtml(isSelected),
+          html: buildHouseholdMarkerHtml(isSelected, isHighRisk),
           iconSize: isSelected ? [30, 30] : [22, 22],
           iconAnchor: isSelected ? [15, 15] : [11, 11],
         }),
@@ -1297,6 +1610,42 @@ export default function ResponderLeafletMap({
       facilityLayerRef.current?.addLayer(marker);
     });
 
+    (evacuationCenters ?? []).filter(hasEvacCenterPin).forEach((center) => {
+      const statusLabel = center.status === 'open' ? 'Open' : 'Closed';
+      const marker = runtime.marker([center.gps_lat, center.gps_lng], {
+        title: `${center.name} (${statusLabel})`,
+        zIndexOffset: center.status === 'open' ? 450 : 250,
+        icon: runtime.divIcon({
+          className: 'responder-marker responder-evac-center-marker',
+          html: buildEvacCenterMarkerHtml(center),
+          iconSize: [24, 24],
+          iconAnchor: [12, 24],
+        }),
+      });
+
+      const tooltipLines = [
+        escapeMarkerText(center.name),
+        [
+          getBarangayLabel(center.barangay_id) ?? center.barangay_id,
+          statusLabel,
+          typeof center.capacity === 'number' ? `cap. ${center.capacity.toLocaleString('en-PH')}` : null,
+        ].filter(Boolean).join(' · '),
+      ];
+
+      marker.bindTooltip(tooltipLines.join('<br/>'), {
+        className: 'responder-hover-tooltip',
+        direction: 'top',
+        offset: [0, -20],
+        opacity: 1,
+      });
+
+      marker.on('click', () => {
+        onSelectBarangay?.(center.barangay_id as BarangayId);
+      });
+
+      evacCenterLayerRef.current?.addLayer(marker);
+    });
+
     map.closePopup();
   }, [
     runtime,
@@ -1304,12 +1653,20 @@ export default function ResponderLeafletMap({
     activeIncidents,
     activeEvents,
     zoneMarkers,
+    barangayBoundaries,
+    selectedBarangayId,
+    highlightBarangayId,
+    boundaryMode,
+    showBoundaries,
+    showBarangayLabels,
     activeSelectedHousehold,
     activeSelectedIncident,
     activeSelectedEvent,
+    evacuationCenters,
     onSelectHousehold,
     onSelectIncident,
     onSelectEvent,
+    onSelectBarangay,
     selectedHousehold,
     selectedIncident,
     selectedEvent,
@@ -1580,8 +1937,42 @@ export default function ResponderLeafletMap({
   }, [mapViewport, viewportReady, weatherOverlayVisible, windLayerSelected, windSurfaceGrid.cols, windSurfaceGrid.rows]);
 
   return (
-    <div className={`responder-leaflet-shell relative w-full overflow-hidden rounded-[30px] border border-slate-200/80 bg-slate-100 ${containerClassName}`}>
+    <div
+      className={cn(
+        'responder-leaflet-shell relative w-full overflow-hidden rounded-[30px] border border-slate-200/80 bg-slate-100',
+        windy.windyActive && 'windy-underlay-active',
+        containerClassName,
+      )}
+    >
+      {/* Windy Map Forecast underlay: its own isolated Leaflet 1.4 runtime,
+          rendered beneath the E-Mabini map so boundaries and markers stay on
+          top. Pointer events stay on the Leaflet map above. */}
+      {windyFrameMounted ? (
+        <iframe
+          ref={windy.frameRef}
+          src={WINDY_MAP_PAGE_URL}
+          title="Windy weather visualization layer"
+          aria-hidden="true"
+          tabIndex={-1}
+          className={cn(
+            'pointer-events-none absolute inset-0 z-0 h-full w-full border-0',
+            windy.windyActive ? 'block' : 'hidden',
+          )}
+        />
+      ) : null}
+
       <div ref={containerRef} className="responder-leaflet-map h-full w-full" />
+      <MapLegend showBarangayColors={barangayBoundaries.length > 0} />
+      {windy.windyError && windyLayer !== 'none' ? (
+        <div className="pointer-events-none absolute bottom-4 left-1/2 z-[420] max-w-[min(420px,calc(100%-24px))] -translate-x-1/2 rounded-full border border-rose-200 bg-white/92 px-3 py-2 text-center text-[11px] font-semibold text-rose-700 shadow-[0_16px_30px_-24px_rgba(15,23,42,0.45)] backdrop-blur">
+          Windy layer unavailable: {windy.windyError}
+        </div>
+      ) : null}
+      {windyFrameMounted && !windy.windyReady && !windy.windyError && windyLayer !== 'none' ? (
+        <div className="pointer-events-none absolute bottom-4 left-4 z-[420] rounded-full border border-white/70 bg-white/88 px-3 py-2 text-[11px] font-semibold text-slate-600 shadow-[0_16px_30px_-24px_rgba(15,23,42,0.45)] backdrop-blur">
+          Loading Windy weather…
+        </div>
+      ) : null}
       {windSurfaceData ? (
         <ResponderWindFieldOverlay
           visible={animatedWindReady}

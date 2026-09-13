@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import type {
   DistributionEvent,
+  EvacuationCenter,
   Household,
   Incident,
   InventoryItem,
@@ -25,6 +26,9 @@ import {
   deletePackageTemplateOnServer,
   deleteDistributionEventOnServer,
   releaseDistributionPackageOnServer,
+  saveEvacuationCentersOnServer,
+  setEvacuationCenterStatusOnServer,
+  deleteEvacuationCenterOnServer,
   saveLocationMasterListOnServer,
   savePurokRiskProfilesOnServer,
   markUserNotificationReadOnServer,
@@ -331,6 +335,61 @@ export async function POST(request: NextRequest) {
         );
 
         return NextResponse.json({ profiles }, {
+          headers: { 'Cache-Control': 'no-store' },
+        });
+      }
+      case 'save_evacuation_centers': {
+        const input = body.input;
+        if (!input || typeof input !== 'object') {
+          return badRequest('input payload is required.');
+        }
+
+        const centers = await saveEvacuationCentersOnServer(
+          authResult.user,
+          input as {
+            centers: Array<Pick<
+              EvacuationCenter,
+              | 'barangay_id'
+              | 'name'
+              | 'gps_lat'
+              | 'gps_lng'
+              | 'capacity'
+              | 'notes'
+            >>;
+          },
+        );
+
+        return NextResponse.json({ centers }, {
+          headers: { 'Cache-Control': 'no-store' },
+        });
+      }
+      case 'set_evacuation_center_status': {
+        const input = body.input;
+        if (!input || typeof input !== 'object') {
+          return badRequest('input payload is required.');
+        }
+
+        const center = await setEvacuationCenterStatusOnServer(
+          authResult.user,
+          input as { center_id: string; status: string },
+        );
+
+        return NextResponse.json({ center }, {
+          headers: { 'Cache-Control': 'no-store' },
+        });
+      }
+      case 'delete_evacuation_center': {
+        const input = body.input;
+        if (!input || typeof input !== 'object') {
+          return badRequest('input payload is required.');
+        }
+
+        const result = await deleteEvacuationCenterOnServer(
+          authResult.user,
+          input as { center_id: string },
+        );
+
+        return NextResponse.json(result, {
           headers: { 'Cache-Control': 'no-store' },
         });
       }

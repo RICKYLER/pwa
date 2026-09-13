@@ -19,18 +19,28 @@ import WeatherWidget from '@/components/WeatherWidget';
 import ResponderLeafletMap from '@/components/ResponderLeafletMap';
 import ResponderMapControlPanel from '@/components/ResponderMapControlPanel';
 import ResponderSelectionSummary from '@/components/ResponderSelectionSummary';
+import IncidentImpactPanel, { IncidentImpactSummary } from '@/components/IncidentImpactPanel';
+import BarangayResponsePanel from '@/components/BarangayResponsePanel';
+import EvacuationCenterPanel from '@/components/EvacuationCenterPanel';
 import { MobileActionBar, MobileListCard, MobilePageHeader } from '@/components/mobile/mobile-primitives';
-import { CivicBadge, CivicEmptyState, CivicPage, CivicPanel } from '@/components/ui/civic-primitives';
+import { CivicBadge, CivicChipButton, CivicEmptyState, CivicPage, CivicPanel } from '@/components/ui/civic-primitives';
 import { getCurrentUser, hasRole } from '@/lib/auth';
 import { getDisasterAlertRules, getDisasterAlerts } from '@/lib/db/disaster-alerts';
 import { getDistributionEvents } from '@/lib/db/distribution';
 import { getHouseholds } from '@/lib/db/households';
 import { getIncidents, updateIncidentStatus } from '@/lib/db/incidents';
 import { db, STORE_NAMES } from '@/lib/db/indexeddb';
+import {
+  getEvacuationCenters,
+  setEvacuationCenterStatus,
+} from '@/lib/db/evacuation-centers';
 import { getPurokRiskProfiles } from '@/lib/db/purok-risk-profiles';
 import type {
+  DisasterAlert,
   DisasterAlertRule,
   DistributionEvent,
+  EvacuationCenter,
+  EvacuationCenterStatus,
   Household,
   Incident,
   IncidentStatus,
@@ -47,6 +57,12 @@ import {
 } from '@/lib/purok-risk-profiles';
 import { openResponderMapLocation } from '@/lib/responder-map-links';
 import { useResponderMapControls } from '@/hooks/useResponderMapControls';
+import { useBarangayBoundaries } from '@/hooks/useBarangayBoundaries';
+import { BARANGAY_OPTIONS, type BarangayId } from '@/lib/barangays';
+import {
+  assignIncidentBarangay,
+  buildBarangayResponseSummary,
+} from '@/lib/barangay-response';
 import {
   getResponderCoverageLabel,
   getResponderMappedHouseholds,
@@ -57,6 +73,7 @@ import {
   matchesPurokPriorityFilters,
   type PurokPriorityGroup,
 } from '@/lib/responder-priorities';
+import { buildIncidentImpactAnalysis, type IncidentImpactAnalysis } from '@/lib/incident-impact';
 
 declare global {
   interface WindowEventMap {
@@ -180,9 +197,14 @@ export default function ResponderMobile() {
 
   const [incidents, setIncidents] = useState<Incident[]>([]);
   const [priorityGroups, setPriorityGroups] = useState<PurokPriorityGroup[]>([]);
+  const [allResidents, setAllResidents] = useState<Resident[]>([]);
+  const [allFlags, setAllFlags] = useState<VulnerabilityFlags[]>([]);
+  const [alerts, setAlerts] = useState<DisasterAlert[]>([]);
   const [events, setEvents] = useState<DistributionEvent[]>([]);
   const [mapHouseholds, setMapHouseholds] = useState<Household[]>([]);
   const [purokRiskProfiles, setPurokRiskProfiles] = useState<PurokRiskProfile[]>([]);
+  const [evacuationCenters, setEvacuationCenters] = useState<EvacuationCenter[]>([]);
+  const [savingCenterId, setSavingCenterId] = useState<string | null>(null);
   const [alertRules, setAlertRules] = useState<DisasterAlertRule[]>([]);
   const [filterFloodProne, setFilterFloodProne] = useState<PurokFloodProneFilter>('all');
   const [filterFloodControlStatus, setFilterFloodControlStatus] = useState<PurokFloodControlStatus | 'all'>('all');
@@ -196,18 +218,32 @@ export default function ResponderMobile() {
   const [selectionOpen, setSelectionOpen] = useState(false);
   const [queueOpen, setQueueOpen] = useState(false);
   const [priorityOpen, setPriorityOpen] = useState(false);
+  const [selectedBarangayId, setSelectedBarangayId] = useState<BarangayId | ''>('');
+  const [showBarangayBoundaries, setShowBarangayBoundaries] = useState(true);
+  const barangayBoundaryState = useBarangayBoundaries();
   const reloadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const purokRiskProfileMap = useMemo(
     () => buildPurokRiskProfileMap(purokRiskProfiles),
     [purokRiskProfiles],
   );
+  const incidentImpactAnalyses = useMemo(() => new Map<string, IncidentImpactAnalysis>(
+    incidents.map((incident) => [incident.id, buildIncidentImpactAnalysis({
+      incident,
+      households: mapHouseholds,
+      residents: allResidents,
+      flags: allFlags,
+      alerts,
+      alertRules,
+      purokRiskProfiles,
+    })]),
+  ), [incidents, mapHouseholds, allResidents, allFlags, alerts, alertRules, purokRiskProfiles]);
 
   const loadData = useCallback(async () => {
     if (!user) return;
 
     setLoading(true);
     try {
-      const [allIncidents, allApprovedHouseholds, allResidents, allFlags, ongoingEvents, profiles, rules, alerts] = await Promise.all([
+      const [allIncidents, allApprovedHouseholds, allResidents, allFlags, ongoingEvents, profiles, rules, alerts, centers] = await Promise.all([
         getIncidents(),
         getHouseholds({
           registration_status: 'approved',
@@ -218,6 +254,7 @@ export default function ResponderMobile() {
         getPurokRiskProfiles(user.role === 'admin' ? undefined : user.barangay_id),
         getDisasterAlertRules(),
         getDisasterAlerts(),
+        getEvacuationCenters(user.role === 'admin' ? undefined : user.barangay_id),
       ]);
       const allHouseholds = getResponderMappedHouseholds(allApprovedHouseholds, user);
 
@@ -225,7 +262,11 @@ export default function ResponderMobile() {
       setEvents(ongoingEvents);
       setMapHouseholds(allHouseholds);
       setPurokRiskProfiles(profiles);
+      setEvacuationCenters(centers);
       setAlertRules(rules);
+      setAlerts(alerts);
+      setAllResidents(allResidents);
+      setAllFlags(allFlags);
 
       setPriorityGroups(buildPurokPriorityGroups({
         households: allHouseholds,
@@ -274,7 +315,7 @@ export default function ResponderMobile() {
     }
 
     function handleDataChanged(event: WindowEventMap['mswdo-data-changed']) {
-      if (!['households', 'residents', 'vulnerability_flags', 'incidents', 'distribution_events', 'purok_risk_profiles', 'disaster_alert_rules', 'disaster_alerts'].includes(event.detail.table)) {
+      if (!['households', 'residents', 'vulnerability_flags', 'incidents', 'distribution_events', 'purok_risk_profiles', 'evacuation_centers', 'disaster_alert_rules', 'disaster_alerts'].includes(event.detail.table)) {
         return;
       }
 
@@ -296,6 +337,17 @@ export default function ResponderMobile() {
     setIncidents((current) => current.map((incident) => incident.id === id ? updated : incident));
     if (selectedIncident?.id === id) {
       setSelectedIncident(updated);
+    }
+  }
+
+  async function handleSetEvacuationCenterStatus(centerId: string, status: EvacuationCenterStatus) {
+    setSavingCenterId(centerId);
+    try {
+      await setEvacuationCenterStatus({ center_id: centerId, status });
+    } catch (error) {
+      console.error('Failed to update evacuation center status:', error);
+    } finally {
+      setSavingCenterId(null);
     }
   }
 
@@ -331,6 +383,29 @@ export default function ResponderMobile() {
   const mappedEventCount = events.filter((event) => (
     typeof event.gps_lat === 'number' && typeof event.gps_lng === 'number'
   )).length;
+
+  const barangayBoundaries = barangayBoundaryState.boundaries;
+  const hasBarangayBoundaries = barangayBoundaries.length > 0;
+  const zoneFilteredHouseholds = selectedBarangayId
+    ? filteredMapHouseholds.filter((household) => household.barangay_id.trim() === selectedBarangayId)
+    : filteredMapHouseholds;
+  const zoneFilteredIncidents = selectedBarangayId && hasBarangayBoundaries
+    ? incidents.filter(
+      (incident) => assignIncidentBarangay(incident, barangayBoundaries) === selectedBarangayId,
+    )
+    : incidents;
+  const selectedBarangaySummary = selectedBarangayId && hasBarangayBoundaries
+    ? buildBarangayResponseSummary({
+      barangayId: selectedBarangayId,
+      boundaries: barangayBoundaries,
+      households: mapHouseholds,
+      incidents,
+      purokRiskProfiles,
+    })
+    : null;
+  const highlightedBarangayId = selectedIncident && hasBarangayBoundaries
+    ? assignIncidentBarangay(selectedIncident, barangayBoundaries)
+    : null;
   const topPriorityGroup = filteredPriorityGroups[0] ?? null;
   const topPriorityHousehold = topPriorityGroup
     ? topPriorityGroup.households.find((priority) => !visited.has(priority.household.id)) ?? topPriorityGroup.households[0] ?? null
@@ -361,6 +436,9 @@ export default function ResponderMobile() {
               showWeather={mapControls.showWeather}
               weatherOverlayVisible={mapControls.weatherOverlayVisible}
               windLayerSelected={mapControls.windLayerSelected}
+              windyAvailable={mapControls.windyAvailable}
+              windyLayer={mapControls.windyLayer}
+              windyAllowedOverlays={mapControls.windyAllowedOverlays}
               onActiveBaseLayerChange={mapControls.handleActiveBaseLayerChange}
               onOverlayOpacityChange={mapControls.handleOverlayOpacityChange}
               onShowAdvancedLayersChange={mapControls.handleShowAdvancedLayersChange}
@@ -368,6 +446,7 @@ export default function ResponderMobile() {
               onToggleWeatherVisibility={mapControls.handleWeatherVisibilityToggle}
               onOpenAllLayers={mapControls.handleOpenAllLayers}
               onClearAllLayers={mapControls.handleClearAllLayers}
+              onWindyLayerChange={mapControls.handleWindyLayerChange}
             />
           </div>
         </DrawerContent>
@@ -395,6 +474,15 @@ export default function ResponderMobile() {
               onNavigateIncident={(incident) => openResponderMapLocation(incident.gps_lat, incident.gps_lng, incident.location)}
               onNavigateEvent={(event) => openResponderMapLocation(event.gps_lat, event.gps_lng, event.location)}
             />
+            {selectedIncident ? (
+              <IncidentImpactPanel
+                compact
+                analysis={incidentImpactAnalyses.get(selectedIncident.id) ?? null}
+                visitedHouseholdIds={visited}
+                onNavigateHousehold={(household) => openResponderMapLocation(household.gps_lat, household.gps_long, household.street_address)}
+                onCheckIn={toggleVisited}
+              />
+            ) : null}
           </div>
         </DrawerContent>
       </Drawer>
@@ -432,9 +520,12 @@ export default function ResponderMobile() {
                     </>
                   )}
                   meta={(
-                    <div className="flex items-center justify-between gap-3 text-xs text-slate-500">
-                      <span>{howLongAgo(incident.reported_at)}</span>
-                      <span>{incident.location}</span>
+                    <div className="space-y-1">
+                      <div className="flex items-center justify-between gap-3 text-xs text-slate-500">
+                        <span>{howLongAgo(incident.reported_at)}</span>
+                        <span>{incident.location}</span>
+                      </div>
+                      <IncidentImpactSummary analysis={incidentImpactAnalyses.get(incident.id) ?? null} />
                     </div>
                   )}
                   actions={(
@@ -815,22 +906,62 @@ export default function ResponderMobile() {
             <div>
               <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Map workspace</p>
               <h2 className="mt-1 text-lg font-black tracking-tight text-slate-950">Field map</h2>
-              <p className="mt-1 text-sm text-slate-500">Only approved and location-verified households appear here. Tap markers to open the selection drawer.</p>
+              <p className="mt-1 text-sm text-slate-500">Official barangay boundaries from the GeoRisk / PSA GIS service. Tap a zone for its response picture.</p>
             </div>
             <div className="flex flex-col items-end gap-1">
-              <CivicBadge label={`${filteredMapHouseholds.length} verified pins`} tone="emerald" className="text-[10px]" />
+              <CivicBadge
+                label={hasBarangayBoundaries ? `${barangayBoundaries.length} zones` : 'Boundary offline'}
+                tone={hasBarangayBoundaries ? 'teal' : 'rose'}
+                className="text-[10px]"
+              />
+              <CivicBadge label={`${zoneFilteredHouseholds.length} verified pins`} tone="emerald" className="text-[10px]" />
               <CivicBadge label={`${mappedEventCount} event pins`} tone="navy" className="text-[10px]" />
               <CivicBadge label={`${visibleFloodZoneCount} risk zones`} tone="amber" className="text-[10px]" />
-              <CivicBadge label={mapControls.activeBaseLayer.label} tone="navy" className="text-[10px]" />
             </div>
           </div>
 
+          <div className="flex flex-wrap items-center gap-2">
+            <select
+              value={selectedBarangayId}
+              onChange={(event) => setSelectedBarangayId(event.target.value as BarangayId | '')}
+              className="h-10 min-w-[140px] flex-1 rounded-[14px] border border-slate-300 bg-slate-50 px-3 text-sm font-semibold text-slate-700 outline-none transition focus:border-cyan-800 focus:bg-white"
+              aria-label="Filter by barangay"
+            >
+              <option value="">All Barangays</option>
+              {BARANGAY_OPTIONS.map((option) => (
+                <option key={option.id} value={option.id}>{option.label}</option>
+              ))}
+            </select>
+            <CivicChipButton
+              active={showBarangayBoundaries}
+              onClick={() => setShowBarangayBoundaries((value) => !value)}
+              className="h-10"
+              aria-pressed={showBarangayBoundaries}
+            >
+              Barangay Boundaries
+            </CivicChipButton>
+          </div>
+
           <ResponderLeafletMap
-            households={filteredMapHouseholds}
-            incidents={incidents}
+            households={zoneFilteredHouseholds}
+            incidents={zoneFilteredIncidents}
             events={events}
             purokRiskProfiles={purokRiskProfiles}
             alertRules={alertRules}
+            evacuationCenters={evacuationCenters}
+            barangayBoundaries={barangayBoundaries}
+            selectedBarangayId={selectedBarangayId || null}
+            highlightBarangayId={highlightedBarangayId}
+            onSelectBarangay={(barangayId) => {
+              setSelectedBarangayId(barangayId ?? '');
+              if (barangayId) {
+                setSelectedHousehold(null);
+                setSelectedIncident(null);
+                setSelectedEvent(null);
+              }
+            }}
+            boundaryMode={showBarangayBoundaries}
+            showBoundaries={showBarangayBoundaries}
             selectedHousehold={selectedHousehold}
             onSelectHousehold={(household) => {
               setSelectedHousehold(household);
@@ -862,6 +993,9 @@ export default function ResponderMobile() {
             activeLayerIds={mapControls.activeLayerIds}
             showWeather={mapControls.showWeather}
             overlayOpacity={mapControls.overlayOpacity}
+            windyLayer={mapControls.windyLayer}
+            windyFrameMounted={mapControls.windyFrameMounted}
+            onWindyAllowedOverlaysChange={mapControls.handleWindyAllowedOverlaysChange}
             refreshVersion={mapControls.mapRefreshVersion}
             containerClassName="h-[380px]"
             compactWeather
@@ -888,7 +1022,23 @@ export default function ResponderMobile() {
               {hasSelection ? 'Selection' : 'No selection'}
             </Button>
           </div>
+
+          {selectedBarangaySummary ? (
+            <BarangayResponsePanel
+              compact
+              summary={selectedBarangaySummary}
+              onClose={() => setSelectedBarangayId('')}
+            />
+          ) : null}
         </CivicPanel>
+
+        <EvacuationCenterPanel
+          centers={evacuationCenters}
+          savingCenterId={savingCenterId}
+          onSetStatus={(centerId, status) => {
+            void handleSetEvacuationCenterStatus(centerId, status);
+          }}
+        />
 
         <WeatherWidget mode="compact" />
 

@@ -15,6 +15,7 @@ export type SupabaseBootstrapTable =
   | 'incidents'
   | 'location_master_lists'
   | 'purok_risk_profiles'
+  | 'evacuation_centers'
   | 'programs'
   | 'beneficiaries'
   | 'audit_logs';
@@ -37,6 +38,7 @@ export const SUPABASE_BOOTSTRAP_TABLES: Array<{
   { table: 'incidents', storeName: STORE_NAMES.incidents },
   { table: 'location_master_lists', storeName: STORE_NAMES.location_master_lists },
   { table: 'purok_risk_profiles', storeName: STORE_NAMES.purok_risk_profiles },
+  { table: 'evacuation_centers', storeName: STORE_NAMES.evacuation_centers },
   { table: 'programs', storeName: STORE_NAMES.programs },
   { table: 'beneficiaries', storeName: STORE_NAMES.beneficiaries },
   { table: 'audit_logs', storeName: STORE_NAMES.audit_logs },
@@ -159,6 +161,15 @@ export function mapSupabaseRow(table: SupabaseBootstrapTable, row: Record<string
       return {
         ...base,
         ...metadata,
+        syncStatus: 'synced' as const,
+        updatedBy: typeof updated_by === 'string' ? updated_by : undefined,
+      };
+    case 'evacuation_centers':
+      return {
+        ...base,
+        ...metadata,
+        activated_at: toOptionalDate(base.activated_at),
+        deactivated_at: toOptionalDate(base.deactivated_at),
         syncStatus: 'synced' as const,
         updatedBy: typeof updated_by === 'string' ? updated_by : undefined,
       };

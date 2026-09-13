@@ -8,6 +8,12 @@ import { getDistributionEvents } from '@/lib/db/distribution';
 import { getDisasterAlerts, getDisasterAlertRules } from '@/lib/db/disaster-alerts';
 import { db, STORE_NAMES } from '@/lib/db/indexeddb';
 import { getHouseholds } from '@/lib/db/households';
+import {
+  deleteEvacuationCenter,
+  getEvacuationCenters,
+  saveEvacuationCenters,
+  setEvacuationCenterStatus,
+} from '@/lib/db/evacuation-centers';
 import { getSupabaseBrowserClient } from '@/lib/supabase/client';
 import { bootstrapSupabaseTables } from '@/lib/supabase/bootstrap';
 import { getPurokRiskProfiles, savePurokRiskProfiles } from '@/lib/db/purok-risk-profiles';
@@ -18,9 +24,12 @@ import type {
   DisasterAlertNotificationPayload,
   DisasterAlertRule,
   DistributionEvent,
+  EvacuationCenter,
+  EvacuationCenterStatus,
   Household,
   Incident,
   IncidentStatus,
+  IncidentType,
   PurokFloodControlStatus,
   PurokRiskProfile,
   Resident,
@@ -32,7 +41,10 @@ import WeatherWidget from '@/components/WeatherWidget';
 import ResponderLeafletMap from '@/components/ResponderLeafletMap';
 import ResponderMapControlPanel from '@/components/ResponderMapControlPanel';
 import ResponderSelectionSummary from '@/components/ResponderSelectionSummary';
-import { CivicBadge, CivicChipButton, CivicPanel } from '@/components/ui/civic-primitives';
+import IncidentImpactPanel, { IncidentImpactSummary } from '@/components/IncidentImpactPanel';
+import BarangayResponsePanel from '@/components/BarangayResponsePanel';
+import EvacuationCenterPanel, { type EvacuationCenterDraft } from '@/components/EvacuationCenterPanel';
+import { CivicBadge, CivicChipButton, CivicPanel, CivicSearchInput } from '@/components/ui/civic-primitives';
 import {
   buildFieldResponseZoneMarkers,
   buildPurokRiskProfileMap,
@@ -46,7 +58,12 @@ import {
   HAZARD_LABELS,
   parseDisasterAlertNotification,
 } from '@/lib/disaster-alerts';
-import { BARANGAY_OPTIONS } from '@/lib/barangays';
+import { BARANGAY_OPTIONS, type BarangayId } from '@/lib/barangays';
+import { useBarangayBoundaries } from '@/hooks/useBarangayBoundaries';
+import {
+  assignIncidentBarangay,
+  buildBarangayResponseSummary,
+} from '@/lib/barangay-response';
 import { buildAlertDerivedIncidentDraft } from '@/lib/incident-alerts';
 import { openResponderMapLocation } from '@/lib/responder-map-links';
 import { useResponderMapControls } from '@/hooks/useResponderMapControls';
@@ -62,6 +79,41 @@ import {
   matchesPurokPriorityFilters,
   type PurokPriorityGroup,
 } from '@/lib/responder-priorities';
+import { buildIncidentImpactAnalysis, type IncidentImpactAnalysis } from '@/lib/incident-impact';
+import {
+  DISTRIBUTION_CATEGORY_KEYS,
+  DISTRIBUTION_CATEGORY_LABELS,
+  DISTRIBUTION_CATEGORY_TONES,
+  type DistributionCategory,
+} from '@/lib/distribution-audience';
+
+type PriorityCategoryFilter = 'all' | DistributionCategory;
+
+const PRIORITY_CATEGORY_FILTERS: PriorityCategoryFilter[] = ['all', ...DISTRIBUTION_CATEGORY_KEYS];
+
+function formatCategoryCountLabel(category: DistributionCategory, count: number) {
+  const label = DISTRIBUTION_CATEGORY_LABELS[category];
+  const plural = count !== 1 && category !== 'pwd' && category !== 'low_income' ? 's' : '';
+  return `${count} ${label}${plural}`;
+}
+
+function PurokCategoryBadges({ group }: { group: PurokPriorityGroup }) {
+  const present = DISTRIBUTION_CATEGORY_KEYS.filter((key) => group.categoryCounts[key] > 0);
+  if (present.length === 0) return null;
+
+  return (
+    <>
+      {present.map((key) => (
+        <CivicBadge
+          key={key}
+          label={formatCategoryCountLabel(key, group.categoryCounts[key])}
+          tone={DISTRIBUTION_CATEGORY_TONES[key]}
+          className="text-[10px]"
+        />
+      ))}
+    </>
+  );
+}
 
 declare global {
   interface WindowEventMap {
@@ -150,19 +202,30 @@ export default function ResponderDesktop() {
 
   const [incidents, setIncidents] = useState<Incident[]>([]);
   const [priorityGroups, setPriorityGroups] = useState<PurokPriorityGroup[]>([]);
+  const [allResidents, setAllResidents] = useState<Resident[]>([]);
+  const [allFlags, setAllFlags] = useState<VulnerabilityFlags[]>([]);
   const [events, setEvents] = useState<DistributionEvent[]>([]);
   const [mapHouseholds, setMapHouseholds] = useState<Household[]>([]);
   const [purokRiskProfiles, setPurokRiskProfiles] = useState<PurokRiskProfile[]>([]);
+  const [evacuationCenters, setEvacuationCenters] = useState<EvacuationCenter[]>([]);
+  const [savingCenterId, setSavingCenterId] = useState<string | null>(null);
   const [alertRules, setAlertRules] = useState<DisasterAlertRule[]>([]);
   const [alerts, setAlerts] = useState<DisasterAlert[]>([]);
   const [notifications, setNotifications] = useState<UserNotification[]>([]);
   const [liveWeather, setLiveWeather] = useState<FieldResponseWeatherPayload | null>(null);
   const [filterFloodProne, setFilterFloodProne] = useState<PurokFloodProneFilter>('all');
   const [filterFloodControlStatus, setFilterFloodControlStatus] = useState<PurokFloodControlStatus | 'all'>('all');
+  const [categoryFilter, setCategoryFilter] = useState<PriorityCategoryFilter>('all');
   const [loading, setLoading] = useState(true);
   const [selectedHousehold, setSelectedHousehold] = useState<Household | null>(null);
   const [selectedIncident, setSelectedIncident] = useState<Incident | null>(null);
   const [selectedEvent, setSelectedEvent] = useState<DistributionEvent | null>(null);
+  const [selectedBarangayId, setSelectedBarangayId] = useState<BarangayId | ''>('');
+  const [riskLevelFilter, setRiskLevelFilter] = useState<'all' | 'low' | 'medium' | 'high'>('all');
+  const [incidentTypeFilter, setIncidentTypeFilter] = useState<'all' | IncidentType>('all');
+  const [showBarangayBoundaries, setShowBarangayBoundaries] = useState(true);
+  const [searchQuery, setSearchQuery] = useState('');
+  const barangayBoundaryState = useBarangayBoundaries();
   const [activeTab, setActiveTab] = useState<'incidents' | 'suggestions' | 'priorities' | 'events' | 'zones'>('incidents');
   const [updatingId, setUpdatingId] = useState<string | null>(null);
   const [creatingFromAlertId, setCreatingFromAlertId] = useState<string | null>(null);
@@ -184,6 +247,17 @@ export default function ResponderDesktop() {
     () => buildPurokRiskProfileMap(purokRiskProfiles),
     [purokRiskProfiles],
   );
+  const incidentImpactAnalyses = useMemo(() => new Map<string, IncidentImpactAnalysis>(
+    incidents.map((incident) => [incident.id, buildIncidentImpactAnalysis({
+      incident,
+      households: mapHouseholds,
+      residents: allResidents,
+      flags: allFlags,
+      alerts,
+      alertRules,
+      purokRiskProfiles,
+    })]),
+  ), [incidents, mapHouseholds, allResidents, allFlags, alerts, alertRules, purokRiskProfiles]);
 
   // Derive the primary trigger location from the first enabled rule for this user's barangay
   const activeRule = useMemo(() => {
@@ -215,7 +289,7 @@ export default function ResponderDesktop() {
         }
       }
 
-      const [allIncidents, allHouseholds, residents, flags, ongoingEvents, profiles, rules, latestAlerts, latestNotifications] = await Promise.all([
+      const [allIncidents, allHouseholds, residents, flags, ongoingEvents, profiles, rules, latestAlerts, latestNotifications, centers] = await Promise.all([
         getIncidents(),
         getHouseholds({
           registration_status: 'approved',
@@ -227,6 +301,7 @@ export default function ResponderDesktop() {
         getDisasterAlertRules(),
         getDisasterAlerts(),
         getUserNotifications(),
+        getEvacuationCenters(user.role === 'admin' ? undefined : user.barangay_id),
       ]);
       const households = getResponderMappedHouseholds(allHouseholds, user);
 
@@ -234,9 +309,12 @@ export default function ResponderDesktop() {
       setEvents(ongoingEvents);
       setMapHouseholds(households);
       setPurokRiskProfiles(profiles);
+      setEvacuationCenters(centers);
       setAlertRules(rules);
       setAlerts(latestAlerts);
       setNotifications(latestNotifications);
+      setAllResidents(residents);
+      setAllFlags(flags);
 
       setPriorityGroups(buildPurokPriorityGroups({
         households,
@@ -292,6 +370,7 @@ export default function ResponderDesktop() {
         'incidents',
         'distribution_events',
         'purok_risk_profiles',
+        'evacuation_centers',
         'disaster_alert_rules',
         'disaster_alerts',
         'user_notifications',
@@ -335,12 +414,65 @@ export default function ResponderDesktop() {
           }
         },
       )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'evacuation_centers' },
+        async () => {
+          try {
+            await bootstrapSupabaseTables(['evacuation_centers'], { force: true });
+            window.dispatchEvent(new CustomEvent('mswdo-data-changed', {
+              detail: { source: 'supabase', table: 'evacuation_centers', mode: 'change' },
+            }));
+          } catch (err) {
+            console.warn('Realtime evacuation_centers refresh failed:', err);
+          }
+        },
+      )
       .subscribe();
 
     return () => {
       void supabase.removeChannel(channel);
     };
   }, [user]);
+
+  const handleSetEvacuationCenterStatus = useCallback(async (centerId: string, status: EvacuationCenterStatus) => {
+    setSavingCenterId(centerId);
+    try {
+      await setEvacuationCenterStatus({ center_id: centerId, status });
+    } catch (error) {
+      console.error('Failed to update evacuation center status:', error);
+    } finally {
+      setSavingCenterId(null);
+    }
+  }, []);
+
+  const handleDeleteEvacuationCenter = useCallback(async (centerId: string) => {
+    setSavingCenterId(centerId);
+    try {
+      await deleteEvacuationCenter({ center_id: centerId });
+    } catch (error) {
+      console.error('Failed to delete evacuation center:', error);
+    } finally {
+      setSavingCenterId(null);
+    }
+  }, []);
+
+  const handleSaveEvacuationCenters = useCallback(async (drafts: EvacuationCenterDraft[]) => {
+    try {
+      await saveEvacuationCenters({
+        centers: drafts.map((draft) => ({
+          barangay_id: draft.barangay_id,
+          name: draft.name,
+          gps_lat: draft.gps_lat,
+          gps_lng: draft.gps_lng,
+          capacity: draft.capacity,
+          notes: draft.notes,
+        })),
+      });
+    } catch (error) {
+      console.error('Failed to save evacuation centers:', error);
+    }
+  }, []);
 
 
   // When the activeRule changes, fetch live weather for the same trigger point
@@ -627,6 +759,7 @@ export default function ResponderDesktop() {
   const filteredPriorityGroups = priorityGroups.filter((group) => matchesPurokPriorityFilters(group, {
     floodProne: filterFloodProne,
     floodControlStatus: filterFloodControlStatus,
+    category: categoryFilter,
   }));
   const filteredPriorityHouseholdCount = filteredPriorityGroups.reduce(
     (total, group) => total + group.householdCount,
@@ -635,12 +768,85 @@ export default function ResponderDesktop() {
   const mappedEventCount = events.filter((event) => (
     typeof event.gps_lat === 'number' && typeof event.gps_lng === 'number'
   )).length;
+
+  const barangayBoundaries = barangayBoundaryState.boundaries;
+  const hasBarangayBoundaries = barangayBoundaries.length > 0;
+  const filteredMapHouseholdsByZone = filteredMapHouseholds.filter((household) => {
+    if (selectedBarangayId && household.barangay_id.trim() !== selectedBarangayId) return false;
+    if (riskLevelFilter !== 'all' && (household.disaster_risk_level ?? 'low') !== riskLevelFilter) return false;
+    return true;
+  });
+  const filteredMapIncidents = incidents.filter((incident) => {
+    if (incidentTypeFilter !== 'all' && incident.type !== incidentTypeFilter) return false;
+    if (selectedBarangayId && hasBarangayBoundaries) {
+      return assignIncidentBarangay(incident, barangayBoundaries) === selectedBarangayId;
+    }
+    return true;
+  });
+  const selectedBarangaySummary = selectedBarangayId && hasBarangayBoundaries
+    ? buildBarangayResponseSummary({
+      barangayId: selectedBarangayId,
+      boundaries: barangayBoundaries,
+      households: mapHouseholds,
+      incidents,
+      purokRiskProfiles,
+    })
+    : null;
+  const highlightedBarangayId = selectedIncident && hasBarangayBoundaries
+    ? assignIncidentBarangay(selectedIncident, barangayBoundaries)
+    : null;
+
+  type MapSearchResult = {
+    kind: 'barangay' | 'household' | 'incident';
+    id: string;
+    label: string;
+    sublabel: string;
+    barangayId?: BarangayId;
+  };
+  const normalizedSearchQuery = searchQuery.trim().toLowerCase();
+  const mapSearchResults: MapSearchResult[] = normalizedSearchQuery.length < 2
+    ? []
+    : [
+      ...BARANGAY_OPTIONS
+        .filter((option) => option.label.toLowerCase().includes(normalizedSearchQuery))
+        .map((option) => ({
+          kind: 'barangay' as const,
+          id: option.id,
+          label: option.label,
+          sublabel: 'Barangay boundary',
+          barangayId: option.id,
+        })),
+      ...mapHouseholds
+        .filter((household) => (
+          household.head_name.toLowerCase().includes(normalizedSearchQuery)
+          || household.purok_sitio.toLowerCase().includes(normalizedSearchQuery)
+        ))
+        .slice(0, 4)
+        .map((household) => ({
+          kind: 'household' as const,
+          id: household.id,
+          label: household.head_name,
+          sublabel: `${household.barangay_name ?? household.barangay_id} · ${household.purok_sitio}`,
+        })),
+      ...incidents
+        .filter((incident) => (
+          incident.location.toLowerCase().includes(normalizedSearchQuery)
+          || incident.type.includes(normalizedSearchQuery)
+        ))
+        .slice(0, 4)
+        .map((incident) => ({
+          kind: 'incident' as const,
+          id: incident.id,
+          label: `${incident.type.charAt(0).toUpperCase()}${incident.type.slice(1)} incident`,
+          sublabel: incident.location,
+        })),
+    ].slice(0, 10);
   const topPriorityGroup = filteredPriorityGroups[0] ?? null;
   const topPriorityHousehold = topPriorityGroup
     ? topPriorityGroup.households.find((priority) => !visitedIds.has(priority.household.id)) ?? topPriorityGroup.households[0] ?? null
     : null;
   const topPriorityTags = topPriorityHousehold ? getVulnerabilityPriorityLabels(topPriorityHousehold.flags) : [];
-  const hasPurokFilters = filterFloodProne !== 'all' || filterFloodControlStatus !== 'all';
+  const hasPurokFilters = filterFloodProne !== 'all' || filterFloodControlStatus !== 'all' || categoryFilter !== 'all';
 
   return (
     <div className="flex h-full min-h-0 gap-5 p-5">
@@ -839,6 +1045,9 @@ export default function ResponderDesktop() {
             showWeather={mapControls.showWeather}
             weatherOverlayVisible={mapControls.weatherOverlayVisible}
             windLayerSelected={mapControls.windLayerSelected}
+            windyAvailable={mapControls.windyAvailable}
+            windyLayer={mapControls.windyLayer}
+            windyAllowedOverlays={mapControls.windyAllowedOverlays}
             onActiveBaseLayerChange={mapControls.handleActiveBaseLayerChange}
             onOverlayOpacityChange={mapControls.handleOverlayOpacityChange}
             onShowAdvancedLayersChange={mapControls.handleShowAdvancedLayersChange}
@@ -846,6 +1055,27 @@ export default function ResponderDesktop() {
             onToggleWeatherVisibility={mapControls.handleWeatherVisibilityToggle}
             onOpenAllLayers={mapControls.handleOpenAllLayers}
             onClearAllLayers={mapControls.handleClearAllLayers}
+            onWindyLayerChange={mapControls.handleWindyLayerChange}
+          />
+
+          {selectedBarangaySummary ? (
+            <BarangayResponsePanel
+              summary={selectedBarangaySummary}
+              onClose={() => setSelectedBarangayId('')}
+            />
+          ) : null}
+
+          <EvacuationCenterPanel
+            centers={evacuationCenters}
+            canManageRegistry={user?.role === 'admin'}
+            savingCenterId={savingCenterId}
+            onSetStatus={(centerId, status) => {
+              void handleSetEvacuationCenterStatus(centerId, status);
+            }}
+            onSaveCenters={handleSaveEvacuationCenters}
+            onDeleteCenter={(centerId) => {
+              void handleDeleteEvacuationCenter(centerId);
+            }}
           />
 
           <ResponderSelectionSummary
@@ -862,6 +1092,25 @@ export default function ResponderDesktop() {
             onNavigateEvent={navigateToEvent}
           />
 
+          {selectedIncident ? (
+            <IncidentImpactPanel
+              analysis={incidentImpactAnalyses.get(selectedIncident.id) ?? null}
+              visitedHouseholdIds={visitedIds}
+              onNavigateHousehold={navigateToHousehold}
+              onCheckIn={(householdId) => {
+                setVisitedIds((current) => {
+                  const next = new Set(current);
+                  if (next.has(householdId)) {
+                    next.delete(householdId);
+                  } else {
+                    next.add(householdId);
+                  }
+                  return next;
+                });
+              }}
+            />
+          ) : null}
+
           <CivicPanel className="space-y-4">
             <div className="flex items-start justify-between gap-3">
               <div>
@@ -875,6 +1124,7 @@ export default function ResponderDesktop() {
                   onClick={() => {
                     setFilterFloodProne('all');
                     setFilterFloodControlStatus('all');
+                    setCategoryFilter('all');
                   }}
                   className="rounded-full border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50"
                 >
@@ -908,6 +1158,34 @@ export default function ResponderDesktop() {
                   ))}
                 </select>
               </label>
+            </div>
+            <div className="space-y-2">
+              <span className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">
+                Vulnerability focus
+              </span>
+              <div className="flex flex-wrap gap-2">
+                {PRIORITY_CATEGORY_FILTERS.map((key) => {
+                  const count = key === 'all'
+                    ? priorityGroups.length
+                    : priorityGroups.filter((group) => group.categoryCounts[key] > 0).length;
+                  return (
+                    <CivicChipButton
+                      key={key}
+                      active={categoryFilter === key}
+                      onClick={() => setCategoryFilter(key)}
+                    >
+                      {key === 'all' ? 'All' : DISTRIBUTION_CATEGORY_LABELS[key]}
+                      <span
+                        className={`rounded-full px-2 py-0.5 text-[10px] ${
+                          categoryFilter === key ? 'bg-white/12 text-white' : 'bg-slate-100 text-slate-500'
+                        }`}
+                      >
+                        {count}
+                      </span>
+                    </CivicChipButton>
+                  );
+                })}
+              </div>
             </div>
             <div className="flex flex-wrap gap-2">
               <CivicBadge label={`${filteredMapHouseholds.length} mapped households`} tone="emerald" />
@@ -995,6 +1273,7 @@ export default function ResponderDesktop() {
                             </div>
                             <p className="mt-2 text-sm font-bold text-slate-950">{incident.location}</p>
                             <p className="mt-1 text-xs leading-relaxed text-slate-500">{incident.description}</p>
+                            <IncidentImpactSummary analysis={incidentImpactAnalyses.get(incident.id) ?? null} />
                             {incident.source === 'alert' && incident.context_snapshot ? (
                               <div className="mt-3 rounded-2xl border border-cyan-100 bg-cyan-50 px-3 py-2.5 text-[11px] leading-5 text-cyan-900">
                                 <p className="font-bold uppercase tracking-[0.18em] text-cyan-700">Alert Context</p>
@@ -1849,31 +2128,157 @@ export default function ResponderDesktop() {
 
       <section className="min-w-0 flex-1">
         <div className="flex h-full min-h-[720px] flex-col gap-4">
-          <CivicPanel className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Map workspace</p>
-              <h2 className="mt-1 text-xl font-black tracking-tight text-slate-950">Clean field map canvas</h2>
-              <p className="mt-1 text-sm text-slate-500">Weather, basemap, and selected-item detail now stay in the operations rail.</p>
+          <CivicPanel className="space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Map workspace</p>
+                <h2 className="mt-1 text-xl font-black tracking-tight text-slate-950">Field response map</h2>
+                <p className="mt-1 text-sm text-slate-500">
+                  Official barangay boundaries from the GeoRisk / PSA GIS service.
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <CivicBadge
+                  label={hasBarangayBoundaries ? `${barangayBoundaries.length} barangay zones` : 'Boundary service offline'}
+                  tone={hasBarangayBoundaries ? 'teal' : 'rose'}
+                />
+                <CivicBadge label={`${filteredMapHouseholdsByZone.length} household pins`} tone="emerald" />
+                <CivicBadge label={`${mappedEventCount} event pins`} tone="navy" />
+                <CivicBadge label={`${visibleFloodZoneCount} response zones`} tone="amber" />
+                <CivicBadge
+                  label={mapControls.weatherOverlayVisible ? mapControls.activeLayerSummary : 'Weather hidden'}
+                  tone={mapControls.weatherOverlayVisible ? 'teal' : 'slate'}
+                />
+              </div>
             </div>
-            <div className="flex flex-wrap gap-2">
-              <CivicBadge label={`${filteredMapHouseholds.length} verified household pins`} tone="emerald" />
-              <CivicBadge label={`${mappedEventCount} event pins`} tone="navy" />
-              <CivicBadge label={`${visibleFloodZoneCount} response zones`} tone="amber" />
-              <CivicBadge label={`${mapControls.activeBaseLayer.label} base`} tone="navy" />
-              <CivicBadge
-                label={mapControls.weatherOverlayVisible ? mapControls.activeLayerSummary : 'Weather hidden'}
-                tone={mapControls.weatherOverlayVisible ? 'teal' : 'slate'}
+
+            <div className="relative flex flex-wrap items-center gap-2">
+              <CivicSearchInput
+                value={searchQuery}
+                onChange={(event) => setSearchQuery(event.target.value)}
+                placeholder="Search barangay / household / incident…"
+                className="min-w-[220px] flex-1"
               />
+
+              {mapSearchResults.length > 0 ? (
+                <div className="absolute top-[52px] left-0 z-30 w-full max-w-[420px] overflow-hidden rounded-xl border border-slate-200 bg-white shadow-[0_28px_60px_-30px_rgba(15,23,42,0.4)]">
+                  {mapSearchResults.map((result) => (
+                    <button
+                      key={`${result.kind}-${result.id}`}
+                      type="button"
+                      onClick={() => {
+                        setSearchQuery('');
+                        if (result.kind === 'barangay') {
+                          setSelectedBarangayId(result.barangayId ?? '');
+                          setSelectedHousehold(null);
+                          setSelectedIncident(null);
+                          setSelectedEvent(null);
+                        } else if (result.kind === 'household') {
+                          const household = mapHouseholds.find((item) => item.id === result.id) ?? null;
+                          setSelectedHousehold(household);
+                          setSelectedIncident(null);
+                          setSelectedEvent(null);
+                        } else if (result.kind === 'incident') {
+                          const incident = incidents.find((item) => item.id === result.id) ?? null;
+                          setSelectedIncident(incident);
+                          setSelectedHousehold(null);
+                          setSelectedEvent(null);
+                        }
+                      }}
+                      className="flex w-full items-center justify-between gap-3 border-b border-slate-100 px-4 py-2.5 text-left transition last:border-b-0 hover:bg-slate-50"
+                    >
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-bold text-slate-900">{result.label}</p>
+                        <p className="truncate text-xs text-slate-500">{result.sublabel}</p>
+                      </div>
+                      <CivicBadge
+                        label={result.kind === 'barangay' ? 'Zone' : result.kind === 'household' ? 'Household' : 'Incident'}
+                        tone={result.kind === 'incident' ? 'rose' : result.kind === 'household' ? 'emerald' : 'navy'}
+                      />
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+
+              <select
+                value={selectedBarangayId}
+                onChange={(event) => setSelectedBarangayId(event.target.value as BarangayId | '')}
+                className="h-11 rounded-lg border border-slate-300 bg-slate-50 px-3 text-sm font-semibold text-slate-700 outline-none transition focus:border-cyan-800 focus:bg-white focus:ring-2 focus:ring-cyan-900/20"
+                aria-label="Filter by barangay"
+              >
+                <option value="">All Barangays</option>
+                {BARANGAY_OPTIONS.map((option) => (
+                  <option key={option.id} value={option.id}>{option.label}</option>
+                ))}
+              </select>
+
+              <select
+                value={riskLevelFilter}
+                onChange={(event) => setRiskLevelFilter(event.target.value as 'all' | 'low' | 'medium' | 'high')}
+                className="h-11 rounded-lg border border-slate-300 bg-slate-50 px-3 text-sm font-semibold text-slate-700 outline-none transition focus:border-cyan-800 focus:bg-white focus:ring-2 focus:ring-cyan-900/20"
+                aria-label="Filter by household risk level"
+              >
+                <option value="all">All Risk Levels</option>
+                <option value="high">High Risk</option>
+                <option value="medium">Medium Risk</option>
+                <option value="low">Low Risk</option>
+              </select>
+
+              <select
+                value={incidentTypeFilter}
+                onChange={(event) => setIncidentTypeFilter(event.target.value as 'all' | IncidentType)}
+                className="h-11 rounded-lg border border-slate-300 bg-slate-50 px-3 text-sm font-semibold text-slate-700 outline-none transition focus:border-cyan-800 focus:bg-white focus:ring-2 focus:ring-cyan-900/20"
+                aria-label="Filter by incident type"
+              >
+                <option value="all">All Incident Types</option>
+                <option value="flood">Flood</option>
+                <option value="fire">Fire</option>
+                <option value="medical">Medical</option>
+                <option value="landslide">Landslide</option>
+                <option value="typhoon">Typhoon</option>
+                <option value="other">Other</option>
+              </select>
+
+              <CivicChipButton
+                active={showBarangayBoundaries}
+                onClick={() => setShowBarangayBoundaries((value) => !value)}
+                className="h-11"
+                aria-pressed={showBarangayBoundaries}
+              >
+                <span
+                  className="h-3 w-3 flex-shrink-0 rounded-[3px] border"
+                  style={
+                    showBarangayBoundaries
+                      ? { backgroundColor: '#0d94883d', borderColor: '#115e59' }
+                      : undefined
+                  }
+                />
+                Barangay Boundaries
+              </CivicChipButton>
             </div>
           </CivicPanel>
 
           <div className="min-h-0 flex-1">
             <ResponderLeafletMap
-              households={filteredMapHouseholds}
-              incidents={incidents}
+              households={filteredMapHouseholdsByZone}
+              incidents={filteredMapIncidents}
               events={events}
               purokRiskProfiles={purokRiskProfiles}
               alertRules={alertRules}
+              evacuationCenters={evacuationCenters}
+              barangayBoundaries={barangayBoundaries}
+              selectedBarangayId={selectedBarangayId || null}
+              highlightBarangayId={highlightedBarangayId}
+              onSelectBarangay={(barangayId) => {
+                setSelectedBarangayId(barangayId ?? '');
+                if (barangayId) {
+                  setSelectedHousehold(null);
+                  setSelectedIncident(null);
+                  setSelectedEvent(null);
+                }
+              }}
+              boundaryMode={showBarangayBoundaries}
+              showBoundaries={showBarangayBoundaries}
               selectedHousehold={selectedHousehold}
               onSelectHousehold={(household) => {
                 setSelectedHousehold(household);
@@ -1902,6 +2307,9 @@ export default function ResponderDesktop() {
               activeLayerIds={mapControls.activeLayerIds}
               showWeather={mapControls.showWeather}
               overlayOpacity={mapControls.overlayOpacity}
+              windyLayer={mapControls.windyLayer}
+              windyFrameMounted={mapControls.windyFrameMounted}
+              onWindyAllowedOverlaysChange={mapControls.handleWindyAllowedOverlaysChange}
               refreshVersion={mapControls.mapRefreshVersion}
               containerClassName="h-full"
             />

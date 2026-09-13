@@ -1,0 +1,44 @@
+# Automatic flood watch — triggers the disaster alert evaluation engine every
+# 30 minutes. Vercel Hobby's native cron is limited to once per day, so GitHub
+# Actions calls the endpoint with the shared secret instead.
+#
+# Required repo secrets (Settings → Secrets and variables → Actions):
+#   DISASTER_ALERT_EVALUATION_SECRET — same value as the Vercel env var
+#   APP_URL — e.g. https://<app>.vercel.app (no trailing slash)
+#
+# NOTE: GitHub disables scheduled workflows after 60 days of repo inactivity;
+# any push to the repo resets that timer.
+name: Flood watch
+
+on:
+  schedule:
+    - cron: '*/30 * * * *'
+  workflow_dispatch: {}
+
+jobs:
+  evaluate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Trigger disaster alert evaluation
+        env:
+          APP_URL: ${{ secrets.APP_URL }}
+          EVALUATION_SECRET: ${{ secrets.DISASTER_ALERT_EVALUATION_SECRET }}
+        run: |
+          if [ -z "$APP_URL" ] || [ -z "$EVALUATION_SECRET" ]; then
+            echo "::error::Missing APP_URL or DISASTER_ALERT_EVALUATION_SECRET repo secret."
+            exit 1
+          fi
+          response=$(curl -sS -w '\n%{http_code}' -X POST \
+            --max-time 120 \
+            -H "x-disaster-alert-secret: $EVALUATION_SECRET" \
+            -H "Content-Type: application/json" \
+            "$APP_URL/api/disaster-alerts/evaluate")
+          code=$(echo "$response" | tail -n 1)
+          body=$(echo "$response" | head -n -1)
+          echo "HTTP $code"
+          echo "$body" | head -c 2000
+          case "$code" in
+            2*) exit 0 ;;
+            *) echo "::error::Disaster alert evaluation returned HTTP $code"; exit 1 ;;
+          esac

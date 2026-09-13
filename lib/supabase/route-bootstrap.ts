@@ -41,6 +41,7 @@ const ROUTE_TABLES: Array<{
       'incidents',
       'distribution_events',
       'purok_risk_profiles',
+      'evacuation_centers',
       'disaster_alert_rules',
       'disaster_alerts',
       'user_notifications',

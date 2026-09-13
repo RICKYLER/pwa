@@ -441,6 +441,30 @@ create table if not exists public.purok_risk_profiles (
     check (sync_status in ('pending', 'synced'))
 );
 
+create table if not exists public.evacuation_centers (
+  id text primary key,
+  municipality text not null default 'Mabini',
+  barangay_id text not null,
+  name text not null,
+  gps_lat double precision,
+  gps_lng double precision,
+  capacity integer
+    check (capacity is null or capacity >= 0),
+  status text not null default 'closed'
+    check (status in ('closed', 'open')),
+  activation_source text
+    check (activation_source is null or activation_source in ('alert', 'manual')),
+  activated_at timestamptz,
+  activated_by uuid references public.users (id) on delete set null,
+  activated_by_alert_id text,
+  deactivated_at timestamptz,
+  notes text,
+  updated_at timestamptz not null default timezone('utc', now()),
+  updated_by uuid references public.users (id) on delete set null,
+  sync_status text not null default 'synced'
+    check (sync_status in ('pending', 'synced'))
+);
+
 create table if not exists public.households (
   id text primary key default gen_random_uuid()::text,
   head_name text not null,
@@ -867,7 +891,7 @@ create table if not exists public.audit_logs (
   user_id uuid references public.users (id) on delete set null,
   action text not null,
   entity_type text not null
-    check (entity_type in ('household', 'resident', 'distribution', 'incident', 'inventory', 'user', 'location_master', 'disaster_alert', 'disaster_alert_rule', 'purok_risk_profile')),
+    check (entity_type in ('household', 'resident', 'distribution', 'incident', 'inventory', 'user', 'location_master', 'disaster_alert', 'disaster_alert_rule', 'purok_risk_profile', 'evacuation_center')),
   entity_id text not null,
   changes jsonb,
   "timestamp" timestamptz not null default timezone('utc', now())
@@ -935,6 +959,15 @@ create index if not exists purok_risk_profiles_barangay_id_idx on public.purok_r
 create unique index if not exists purok_risk_profiles_barangay_purok_idx
   on public.purok_risk_profiles (barangay_id, purok_sitio);
 
+create index if not exists evacuation_centers_barangay_id_idx
+  on public.evacuation_centers (barangay_id);
+
+create index if not exists evacuation_centers_status_idx
+  on public.evacuation_centers (status);
+
+create unique index if not exists evacuation_centers_barangay_name_idx
+  on public.evacuation_centers (barangay_id, lower(trim(name)));
+
 create unique index if not exists distribution_records_unique_household_per_event
   on public.distribution_records (event_id, household_id)
   where household_id is not null;
@@ -958,6 +991,12 @@ execute function public.set_updated_at();
 drop trigger if exists purok_risk_profiles_set_updated_at on public.purok_risk_profiles;
 create trigger purok_risk_profiles_set_updated_at
 before update on public.purok_risk_profiles
+for each row
+execute function public.set_updated_at();
+
+drop trigger if exists evacuation_centers_set_updated_at on public.evacuation_centers;
+create trigger evacuation_centers_set_updated_at
+before update on public.evacuation_centers
 for each row
 execute function public.set_updated_at();
 
@@ -1165,6 +1204,7 @@ $$;
 alter table public.users enable row level security;
 alter table public.location_master_lists enable row level security;
 alter table public.purok_risk_profiles enable row level security;
+alter table public.evacuation_centers enable row level security;
 alter table public.households enable row level security;
 alter table public.residents enable row level security;
 alter table public.vulnerability_flags enable row level security;
@@ -1234,6 +1274,41 @@ on public.purok_risk_profiles
 for all
 using (public.is_admin())
 with check (public.is_admin());
+
+drop policy if exists "evacuation_centers_read_authenticated" on public.evacuation_centers;
+drop policy if exists "evacuation_centers_read_scoped" on public.evacuation_centers;
+create policy "evacuation_centers_read_scoped"
+on public.evacuation_centers
+for select
+using (
+  public.current_user_is_active()
+  and (
+    public.is_admin()
+    or barangay_id = public.current_user_barangay_id()
+  )
+);
+
+drop policy if exists "evacuation_centers_write_admin" on public.evacuation_centers;
+create policy "evacuation_centers_write_admin"
+on public.evacuation_centers
+for all
+using (public.is_admin())
+with check (public.is_admin());
+
+drop policy if exists "evacuation_centers_status_responder" on public.evacuation_centers;
+create policy "evacuation_centers_status_responder"
+on public.evacuation_centers
+for update
+using (
+  public.current_user_is_active()
+  and public.current_user_role() = 'responder'
+  and barangay_id = public.current_user_barangay_id()
+)
+with check (
+  public.current_user_is_active()
+  and public.current_user_role() = 'responder'
+  and barangay_id = public.current_user_barangay_id()
+);
 
 drop policy if exists "households_select_accessible" on public.households;
 create policy "households_select_accessible"
@@ -1493,6 +1568,7 @@ declare
     'users',
     'location_master_lists',
     'purok_risk_profiles',
+    'evacuation_centers',
     'households',
     'residents',
     'vulnerability_flags',

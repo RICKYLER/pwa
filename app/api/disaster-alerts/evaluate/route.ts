@@ -7,6 +7,9 @@ import {
 } from '@/lib/server/disaster-alerts';
 
 export const runtime = 'nodejs';
+// Rule evaluation fetches weather and writes alerts per rule — the Hobby
+// default 10 s is not enough when several rules are enabled.
+export const maxDuration = 60;
 
 function unauthorized(message: string, status = 401) {
   return NextResponse.json({ error: message }, { status });

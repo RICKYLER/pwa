@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Windy weather underlay</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background: transparent;
+      }
+
+      #windy {
+        width: 100%;
+        height: 100%;
+      }
+    </style>
+    <!-- Windy Map Forecast API prerequisites, per https://api.windy.com/map-forecast/docs:
+         Leaflet 1.4.0 (required version), NO leaflet.css (Windy downloads fixed styles itself). -->
+    <script src="https://unpkg.com/leaflet@1.4.0/dist/leaflet.js"></script>
+    <script src="https://api.windy.com/assets/map-forecast/libBoot.js"></script>
+  </head>
+  <body>
+    <div id="windy"></div>
+    <script>
+      (function () {
+        'use strict';
+
+        var ORIGIN = window.location.origin;
+        var windyAPI = null;
+        var initRequested = false;
+        var readyReported = false;
+        var errorReported = false;
+
+        function send(message) {
+          try {
+            window.parent.postMessage(message, ORIGIN);
+          } catch (error) {
+            /* The parent frame is gone; nothing to report. */
+          }
+        }
+
+        function reportError(message) {
+          if (errorReported || readyReported) return;
+          errorReported = true;
+          send({ type: 'windy:error', message: message });
+        }
+
+        function currentView() {
+          if (!windyAPI || !windyAPI.map) return null;
+          var center = windyAPI.map.getCenter();
+          return { lat: center.lat, lon: center.lng, zoom: windyAPI.map.getZoom() };
+        }
+
+        function applyView(view) {
+          if (!windyAPI || !windyAPI.map || !view) return;
+          try {
+            windyAPI.map.invalidateSize();
+            windyAPI.map.setView([view.lat, view.lon], view.zoom, { animate: false });
+          } catch (error) {
+            /* Keep the host page stable even if Windy's map rejects a view. */
+          }
+        }
+
+        function setOverlay(overlay) {
+          if (!windyAPI || !windyAPI.store || !overlay) return;
+          try {
+            var result = windyAPI.store.set('overlay', overlay);
+            if (result && typeof result.catch === 'function') {
+              result.catch(function () {
+                /* Overlay not allowed for this API key tier; the host UI already
+                   disables unavailable layers from store.getAllowed('overlay'). */
+              });
+            }
+          } catch (error) {
+            /* Same as above — never surface an unhandled rejection. */
+          }
+        }
+
+        function reportReady() {
+          if (readyReported) return;
+          readyReported = true;
+          var allowedOverlays = [];
+          try {
+            allowedOverlays =
+              (windyAPI && windyAPI.store && windyAPI.store.getAllowed('overlay')) || [];
+          } catch (error) {
+            allowedOverlays = [];
+          }
+          send({ type: 'windy:ready', allowedOverlays: allowedOverlays, view: currentView() });
+        }
+
+        window.addEventListener('message', function (event) {
+          if (event.origin !== ORIGIN) return;
+          var data = event.data || {};
+
+          if (data.type === 'windy:hello') {
+            // The host may attach its listener before or after this page loads;
+            // re-announce until initialization starts so the handshake cannot deadlock.
+            if (!initRequested && !windyAPI) {
+              send({ type: 'windy:loaded' });
+            }
+            return;
+          }
+
+          if (data.type === 'windy:init' && !initRequested && !windyAPI) {
+            initRequested = true;
+            if (typeof window.windyInit !== 'function') {
+              reportError('The Windy Map Forecast library did not load.');
+              return;
+            }
+
+            try {
+              window.windyInit(
+                {
+                  key: data.apikey,
+                  verbose: false,
+                  lat: data.lat,
+                  lon: data.lon,
+                  zoom: data.zoom,
+                  overlay: data.overlay,
+                },
+                function (api) {
+                  windyAPI = api;
+                  applyView({ lat: data.lat, lon: data.lon, zoom: data.zoom });
+                  setOverlay(data.overlay);
+                  reportReady();
+                },
+              );
+            } catch (error) {
+              reportError(
+                error && error.message
+                  ? error.message
+                  : 'Could not initialize the Windy Map Forecast API.',
+              );
+            }
+
+            // windyInit never calls back when the API key is rejected (Windy
+            // replaces this div with an error banner instead), so guard the
+            // handshake with a timeout.
+            window.setTimeout(function () {
+              reportError(
+                'Windy did not respond in time. Check that the API key is valid and allowed for this domain.',
+              );
+            }, 15000);
+            return;
+          }
+
+          if (data.type === 'windy:view') {
+            applyView(data.view);
+            return;
+          }
+
+          if (data.type === 'windy:overlay') {
+            setOverlay(data.overlay);
+          }
+        });
+
+        send({ type: 'windy:loaded' });
+      })();
+    </script>
+  </body>
+</html>

@@ -186,6 +186,13 @@ export function LocationPicker({
 
         if (details) {
             applyResolvedLocation(details);
+            return;
+        }
+
+        // No usable prediction (user typed raw text without selecting one) —
+        // fall back to the manual search instead of doing nothing.
+        if (searchQuery.trim()) {
+            void handleSearch();
         }
     }
 
@@ -265,12 +272,6 @@ export function LocationPicker({
                             type="text"
                             value={searchQuery}
                             onChange={(e) => setSearchQuery(e.target.value)}
-                            onKeyDown={(e) => {
-                                if (e.key === 'Enter') {
-                                    e.preventDefault();
-                                    void handleSearch();
-                                }
-                            }}
                             className="w-full rounded-md border border-input bg-background py-2 pl-10 pr-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
                             placeholder="Search street, purok, landmark, or full address"
                         />

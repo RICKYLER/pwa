@@ -7,6 +7,7 @@ where table_schema = 'public'
     'users',
     'location_master_lists',
     'purok_risk_profiles',
+    'evacuation_centers',
     'households',
     'residents',
     'vulnerability_flags',
@@ -34,6 +35,7 @@ where schemaname = 'public'
   and tablename in (
     'users',
     'purok_risk_profiles',
+    'evacuation_centers',
     'households',
     'residents',
     'vulnerability_flags',

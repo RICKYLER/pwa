@@ -120,6 +120,29 @@ export interface PurokRiskProfile {
   syncStatus: SyncStatus;
 }
 
+export type EvacuationCenterStatus = 'closed' | 'open';
+export type EvacuationCenterActivationSource = 'alert' | 'manual';
+
+export interface EvacuationCenter {
+  id: string;
+  municipality: string;
+  barangay_id: string;
+  name: string;
+  gps_lat?: number;
+  gps_lng?: number;
+  capacity?: number;
+  status: EvacuationCenterStatus;
+  activation_source?: EvacuationCenterActivationSource;
+  activated_at?: Date;
+  activated_by?: string;
+  activated_by_alert_id?: string;
+  deactivated_at?: Date;
+  notes?: string;
+  updatedAt: Date;
+  updatedBy?: string;
+  syncStatus: SyncStatus;
+}
+
 export interface Resident {
   id: string;
   household_id: string;

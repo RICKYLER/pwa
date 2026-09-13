@@ -219,6 +219,27 @@ async function loadPurokRiskProfiles(user: User) {
   return data ?? [];
 }
 
+async function loadEvacuationCenters(user: User) {
+  const supabase = getSupabaseAdminClient();
+  const query = supabase
+    .from('evacuation_centers')
+    .select('*');
+
+  const { data, error } = user.role === 'admin'
+    ? await query.order('name', { ascending: true })
+    : await query.eq('barangay_id', user.barangay_id).order('name', { ascending: true });
+
+  if (error) {
+    if (isMissingTableError(error, 'evacuation_centers')) {
+      return [];
+    }
+
+    throw new Error(error.message);
+  }
+
+  return data ?? [];
+}
+
 async function loadInventoryBundle() {
   const supabase = getSupabaseAdminClient();
   const [items, movements, templates] = await Promise.all([
@@ -535,12 +556,16 @@ async function buildBootstrapPayload(
   const canReadIncidents = ['admin', 'encoder', 'health_worker', 'responder'].includes(user.role);
   const canReadDisasterAlertRules = ['admin', 'responder'].includes(user.role);
   const canReadDisasterAlerts = ['admin', 'responder'].includes(user.role);
+  const canReadEvacuationCenters = ['admin', 'responder'].includes(user.role);
   const remoteUserId = shouldResolveRemoteUserId
     ? await resolveSupabaseUserId(user.id).catch(() => null)
     : null;
   const programsPromise = wants('programs') ? loadPrograms() : null;
   const locationMasterPromise = wants('location_master_lists') ? loadLocationMasters(user) : null;
   const purokRiskProfilesPromise = wants('purok_risk_profiles') ? loadPurokRiskProfiles(user) : null;
+  const evacuationCentersPromise = wants('evacuation_centers') && canReadEvacuationCenters
+    ? loadEvacuationCenters(user)
+    : null;
   const auditLogsPromise = wants('audit_logs') ? loadAuditLogs(remoteUserId, user.role) : null;
   const incidentsPromise = wants('incidents') && canReadIncidents ? loadIncidents() : null;
   const disasterAlertRulesPromise = wants('disaster_alert_rules') && canReadDisasterAlertRules
@@ -616,6 +641,10 @@ async function buildBootstrapPayload(
 
   if (purokRiskProfilesPromise) {
     payload.purok_risk_profiles = await purokRiskProfilesPromise;
+  }
+
+  if (evacuationCentersPromise) {
+    payload.evacuation_centers = await evacuationCentersPromise;
   }
 
   if (auditLogsPromise) {

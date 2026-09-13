@@ -1,5 +1,10 @@
 import { getBarangayLabel } from '@/lib/barangays';
 import { normalizePurokSitio } from '@/lib/geocoding';
+import {
+  DISTRIBUTION_CATEGORY_LABELS,
+  getResidentCategories,
+  type DistributionCategory,
+} from '@/lib/distribution-audience';
 import type {
   DisasterAlert,
   DisasterAlertRule,
@@ -37,6 +42,8 @@ export interface PurokPriorityGroup {
   households: PriorityHousehold[];
   householdCount: number;
   vulnerableResidentCount: number;
+  /** Per-category resident counts (senior, pwd, pregnant, minor, low_income) so responders can spot, e.g., which flood-hit purok has the most seniors. */
+  categoryCounts: Record<DistributionCategory, number>;
   floodProne: boolean;
   floodControlStatus: PurokFloodControlStatus;
   floodControlLabel: string;
@@ -79,7 +86,7 @@ function getPriorityLevel(score: number): PurokPriorityLevel {
   return 'low';
 }
 
-function matchesScopedPurok(
+export function matchesScopedPurok(
   scope: Pick<DisasterAlert | DisasterAlertRule, 'barangay_id' | 'purok_sitio'>,
   barangayId: string,
   purokSitio: string,
@@ -110,6 +117,36 @@ function incidentMatchesPurok(incident: Incident, barangayLabel: string, purokSi
   const barangay = barangayLabel.toLowerCase();
 
   return haystack.includes(purok) || haystack.includes(barangay);
+}
+
+/**
+ * Score a single household for the assist-first queue: vulnerability flags of
+ * its residents + household disaster risk + special-assistance bonus.
+ */
+export function buildPriorityHousehold(
+  household: Household,
+  householdResidents: Resident[],
+  flagsByResidentId: Map<string, VulnerabilityFlags>,
+): PriorityHousehold {
+  const householdFlags = householdResidents
+    .map((resident) => flagsByResidentId.get(resident.id))
+    .filter((flag): flag is VulnerabilityFlags => Boolean(flag));
+  const vulnerabilityScore = getVulnerabilityPriorityScore(householdFlags);
+  const riskScore = getRiskLevelScore(household.disaster_risk_level);
+  const householdReasons = uniqueStrings([
+    household.disaster_risk_level === 'high' ? 'High household risk' : '',
+    household.special_assistance_notes?.trim() ? 'Special assistance noted' : '',
+    ...getVulnerabilityPriorityLabels(householdFlags),
+  ]);
+  const householdScore = vulnerabilityScore + riskScore + (household.special_assistance_notes?.trim() ? 3 : 0);
+
+  return {
+    household,
+    residents: householdResidents,
+    flags: householdFlags,
+    score: householdScore,
+    reasons: householdReasons,
+  };
 }
 
 export function getVulnerabilityPriorityScore(flags: VulnerabilityFlags[]) {
@@ -165,17 +202,7 @@ export function buildPurokPriorityGroups(input: BuildPurokPriorityGroupsInput): 
     const barangayId = household.barangay_id.trim();
     const groupId = buildPurokRiskProfileId(barangayId, purokSitio);
     const householdResidents = residentsByHouseholdId.get(household.id) ?? [];
-    const householdFlags = householdResidents
-      .map((resident) => flagsByResidentId.get(resident.id))
-      .filter((flag): flag is VulnerabilityFlags => Boolean(flag));
-    const vulnerabilityScore = getVulnerabilityPriorityScore(householdFlags);
-    const riskScore = getRiskLevelScore(household.disaster_risk_level);
-    const householdReasons = uniqueStrings([
-      household.disaster_risk_level === 'high' ? 'High household risk' : '',
-      household.special_assistance_notes?.trim() ? 'Special assistance noted' : '',
-      ...getVulnerabilityPriorityLabels(householdFlags),
-    ]);
-    const householdScore = vulnerabilityScore + riskScore + (household.special_assistance_notes?.trim() ? 3 : 0);
+    const priority = buildPriorityHousehold(household, householdResidents, flagsByResidentId);
 
     const existing = groups.get(groupId) ?? {
       barangayId,
@@ -185,18 +212,26 @@ export function buildPurokPriorityGroups(input: BuildPurokPriorityGroupsInput): 
       households: [],
     };
 
-    existing.households.push({
-      household,
-      residents: householdResidents,
-      flags: householdFlags,
-      score: householdScore,
-      reasons: householdReasons,
-    });
+    existing.households.push(priority);
     groups.set(groupId, existing);
   });
 
   return Array.from(groups.entries())
     .map(([id, group]) => {
+      const categoryCounts: Record<DistributionCategory, number> = {
+        senior: 0,
+        pwd: 0,
+        pregnant: 0,
+        minor: 0,
+        low_income: 0,
+      };
+      group.households.forEach((priority) => {
+        priority.residents.forEach((resident) => {
+          getResidentCategories(resident, flagsByResidentId.get(resident.id)).forEach((category) => {
+            categoryCounts[category] += 1;
+          });
+        });
+      });
       const floodProne = Boolean(group.profile?.flood_prone);
       const floodControlStatus = group.profile?.flood_control_status ?? 'unknown';
       const scopedAlerts = (input.alerts ?? []).filter((alert) =>
@@ -250,6 +285,7 @@ export function buildPurokPriorityGroups(input: BuildPurokPriorityGroupsInput): 
         }),
         householdCount: group.households.length,
         vulnerableResidentCount,
+        categoryCounts,
         floodProne,
         floodControlStatus,
         floodControlLabel: PUROK_FLOOD_CONTROL_STATUS_LABELS[floodControlStatus],
@@ -269,14 +305,16 @@ export function buildPurokPriorityGroups(input: BuildPurokPriorityGroupsInput): 
 }
 
 export function matchesPurokPriorityFilters(
-  group: Pick<PurokPriorityGroup, 'floodProne' | 'floodControlStatus'>,
+  group: Pick<PurokPriorityGroup, 'floodProne' | 'floodControlStatus' | 'categoryCounts'>,
   filters: {
     floodProne: 'all' | 'flood_prone' | 'not_flood_prone';
     floodControlStatus: PurokFloodControlStatus | 'all';
+    category?: 'all' | DistributionCategory;
   },
 ) {
   if (filters.floodProne === 'flood_prone' && !group.floodProne) return false;
   if (filters.floodProne === 'not_flood_prone' && group.floodProne) return false;
   if (filters.floodControlStatus !== 'all' && group.floodControlStatus !== filters.floodControlStatus) return false;
+  if (filters.category && filters.category !== 'all' && group.categoryCounts[filters.category] <= 0) return false;
   return true;
 }

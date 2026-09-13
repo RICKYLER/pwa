@@ -1,4 +1,5 @@
 import type { Household } from '@/lib/db/schema';
+import { MABINI_MAP_BOUNDS } from '@/lib/mabini';
 import { DEFAULT_BARANGAY_CENTER } from '@/lib/map-pins';
 
 export interface GeocodedLocation {
@@ -342,28 +343,23 @@ export function buildResponderLocationText(location: {
 }
 
 export function buildDefaultSearchBounds(): google.maps.LatLngBoundsLiteral {
-  return {
-    north: DEFAULT_BARANGAY_CENTER.lat + 0.08,
-    south: DEFAULT_BARANGAY_CENTER.lat - 0.08,
-    east: DEFAULT_BARANGAY_CENTER.lng + 0.08,
-    west: DEFAULT_BARANGAY_CENTER.lng - 0.08,
-  };
+  // Full municipal extent of Mabini, Davao de Oro — a bias box smaller than
+  // the municipality hides streets in the eastern barangays from both the
+  // Autocomplete predictions and the Geocoder.
+  return { ...MABINI_MAP_BOUNDS };
 }
 
-export function buildSearchBoundsFromCenter(
-  center?: google.maps.LatLngLiteral,
-  span = 0.08,
-): google.maps.LatLngBoundsLiteral {
-  if (!center) {
-    return buildDefaultSearchBounds();
-  }
-
-  return {
-    north: center.lat + span,
-    south: center.lat - span,
-    east: center.lng + span,
-    west: center.lng - span,
-  };
+function isWithinBounds(
+  lat: number,
+  lng: number,
+  bounds: google.maps.LatLngBoundsLiteral,
+): boolean {
+  return (
+    lat >= bounds.south
+    && lat <= bounds.north
+    && lng >= bounds.west
+    && lng <= bounds.east
+  );
 }
 
 export function getPlacePinDetails(
@@ -536,6 +532,7 @@ export async function searchLocation(
   }
 
   const locationBias = options?.locationBias ?? DEFAULT_BARANGAY_CENTER;
+  const bounds = options?.bounds ?? buildDefaultSearchBounds();
   const municipality = options?.context?.municipality;
 
   // Helper to score search results
@@ -622,41 +619,57 @@ export async function searchLocation(
     });
   }
 
-  // Strategy 1: Original query with Places textSearch
-  const searchQuery1 = buildSearchQuery(query, options?.context);
-  let topResult = await searchWithPlaces(searchQuery1, options?.radiusMeters ?? 15000);
+  const searchQuery = buildSearchQuery(query, options?.context);
 
-  // Strategy 2: If no street_address found, append municipality context
-  if (!topResult || !topResult.types?.includes('street_address')) {
-    if (municipality && !searchQuery1.toLowerCase().includes(municipality.toLowerCase())) {
-      const searchQuery2 = buildSearchQuery(query, {
+  // Run both engines side by side: the Geocoder is best for street addresses
+  // (it is what Google Maps itself uses), while Places textSearch finds
+  // landmarks and POI names the Geocoder misses.
+  const [geocoded, topPlace] = await Promise.all([
+    geocodeAddress(searchQuery, {
+      bounds,
+      region: options?.region ?? 'ph',
+    }),
+    searchWithPlaces(searchQuery, options?.radiusMeters ?? 20000),
+  ]);
+
+  const placesDetails = topPlace?.place_id
+    ? getPlacePinDetails(await getDetailedPlace(topPlace.place_id, topPlace))
+    : null;
+
+  // Prefer address-accurate matches inside the search bounds, then in-bounds
+  // Places matches, then whatever either engine found (so genuinely valid
+  // out-of-bounds searches still resolve).
+  if (geocoded && isWithinBounds(geocoded.lat, geocoded.lng, bounds)) {
+    return geocoded;
+  }
+  if (placesDetails && isWithinBounds(placesDetails.lat, placesDetails.lng, bounds)) {
+    return placesDetails;
+  }
+  if (geocoded) {
+    return geocoded;
+  }
+  if (placesDetails) {
+    return placesDetails;
+  }
+
+  // Last resort: retry Places with the municipality appended — helps
+  // landmark names that only match once Mabini is part of the query.
+  if (municipality && !searchQuery.toLowerCase().includes(municipality.toLowerCase())) {
+    const retryPlace = await searchWithPlaces(
+      buildSearchQuery(query, {
         ...options?.context,
         municipality,
-      });
-      const result2 = await searchWithPlaces(searchQuery2, options?.radiusMeters ?? 15000);
-      
-      if (result2 && scoreSearchResult(result2) > scoreSearchResult(topResult || {} as any)) {
-        topResult = result2;
-      }
+      }),
+      options?.radiusMeters ?? 20000,
+    );
+
+    if (retryPlace?.place_id) {
+      const detailed = await getDetailedPlace(retryPlace.place_id, retryPlace);
+      return getPlacePinDetails(detailed);
     }
   }
 
-  // Get detailed place info if we have a result
-  if (topResult?.place_id) {
-    const detailedPlace = await getDetailedPlace(topResult.place_id, topResult);
-    const resolvedPlace = getPlacePinDetails(detailedPlace);
-    if (resolvedPlace) {
-      return resolvedPlace;
-    }
-  }
-
-  // Strategy 3: Fallback to Geocoder with full address components
-  const geocoderResult = await geocodeAddress(searchQuery1, {
-    bounds: options?.bounds ?? buildSearchBoundsFromCenter(locationBias, 0.05),
-    region: options?.region ?? 'ph',
-  });
-
-  return geocoderResult;
+  return null;
 }
 
 export async function resolveLocationFromCoordinates(

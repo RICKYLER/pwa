@@ -1851,6 +1851,7 @@ export function HouseholdRegistrationWizard({
                 )}
               </div>
 
+
               {members.length > 0 ? (
                 <div className="mt-4 grid gap-3 md:grid-cols-2">
                   {members.map((member, index) => (
@@ -1898,7 +1899,6 @@ export function HouseholdRegistrationWizard({
                 </div>
               )}
             </div>
-
             <div className="rounded-3xl border border-slate-200 bg-slate-50 p-5 lg:col-span-2">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
@@ -1968,7 +1968,6 @@ export function HouseholdRegistrationWizard({
           </div>
         </div>
       )}
-
       <div className="flex flex-wrap items-center justify-between gap-3">
         <button
           type="button"
@@ -2020,7 +2019,6 @@ export function HouseholdRegistrationWizard({
               </DialogDescription>
             </DialogHeader>
           </div>
-
           <div className="space-y-5 px-6 py-5">
             <div className="grid gap-3">
               {OFFICE_REQUIREMENTS.map((item) => (
@@ -2030,7 +2028,6 @@ export function HouseholdRegistrationWizard({
                 </div>
               ))}
             </div>
-
             <label className="flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
               <input
                 type="checkbox"
@@ -2049,7 +2046,6 @@ export function HouseholdRegistrationWizard({
               </div>
             )}
           </div>
-
           <DialogFooter className="border-t border-slate-200 px-6 py-4 sm:justify-between">
             <button
               type="button"

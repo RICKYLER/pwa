@@ -25,6 +25,27 @@ export const DISTRIBUTION_CATEGORY_LABELS: Record<DistributionCategory, string> 
   low_income: 'Low Income',
 };
 
+// CivicBadge tone per category, mirroring the vulnerability module
+// (PWD/Pregnant -> rose, Senior -> amber, Low Income -> emerald, Minor -> navy).
+export const DISTRIBUTION_CATEGORY_TONES: Record<
+  DistributionCategory,
+  'rose' | 'amber' | 'emerald' | 'navy'
+> = {
+  pwd: 'rose',
+  pregnant: 'rose',
+  senior: 'amber',
+  low_income: 'emerald',
+  minor: 'navy',
+};
+
+export const DISTRIBUTION_CATEGORY_KEYS: DistributionCategory[] = [
+  'senior',
+  'pwd',
+  'pregnant',
+  'minor',
+  'low_income',
+];
+
 export function getResidentCategories(
   resident: Resident,
   flags: VulnerabilityFlags | undefined,

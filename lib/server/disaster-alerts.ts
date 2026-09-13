@@ -16,9 +16,11 @@ import {
   buildGeneratedDisasterAlertMessage,
   evaluateDisasterAlertRule,
 } from '@/lib/disaster-alert-evaluation';
+import { resolveEvacuationCentersForAlert } from '@/lib/evacuation-centers';
 import type {
   DisasterAlertRule,
   DisasterAlertTriggerSource,
+  EvacuationCenter,
   HazardType,
   PurokRiskProfile,
   User,
@@ -32,21 +34,44 @@ import {
 
 // Single source of truth for weather data used in rule evaluation.
 // Uses the same priority as /api/weather: Tomorrow.io → OpenWeather fallback.
+// Short-lived weather cache for alert evaluation. Weather providers resolve
+// rain to forecast cells several km wide, so rounding trigger points to a
+// ~11 km grid (1 decimal) collapses all of Mabini's rules into a handful of
+// lookups; the TTL keeps a 30-min cron cadence within the Tomorrow.io free
+// quota (a few calls per run instead of one per rule) while staying fresh
+// across runs.
+const WEATHER_CACHE_TTL_MS = 10 * 60 * 1000;
+const weatherCache = new Map<string, { payload: FieldResponseWeatherPayload; fetchedAt: number }>();
+
+function getWeatherCacheKey(lat: number, lng: number) {
+  return `${lat.toFixed(1)},${lng.toFixed(1)}`;
+}
+
 async function fetchWeatherForEvaluation(
   lat: number,
   lng: number,
 ): Promise<FieldResponseWeatherPayload> {
+  const cacheKey = getWeatherCacheKey(lat, lng);
+  const cached = weatherCache.get(cacheKey);
+  if (cached && Date.now() - cached.fetchedAt <= WEATHER_CACHE_TTL_MS) {
+    return cached.payload;
+  }
+
   const tomorrowKey = process.env.TOMORROW_IO_API_KEY?.trim();
   if (tomorrowKey) {
     try {
-      return await fetchTomorrowIoFieldResponseWeather(lat, lng, tomorrowKey);
+      const payload = await fetchTomorrowIoFieldResponseWeather(lat, lng, tomorrowKey);
+      weatherCache.set(cacheKey, { payload, fetchedAt: Date.now() });
+      return payload;
     } catch {
       // fall through to OpenWeather
     }
   }
   const owKey = process.env.OPENWEATHER_API_KEY?.trim();
   if (!owKey) throw new Error('No weather API key configured for alert evaluation.');
-  return fetchOpenWeatherFieldResponseWeather(lat, lng, owKey, { cache: 'no-store' });
+  const payload = await fetchOpenWeatherFieldResponseWeather(lat, lng, owKey, { cache: 'no-store' });
+  weatherCache.set(cacheKey, { payload, fetchedAt: Date.now() });
+  return payload;
 }
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
 import { requireSupabaseUserId } from '@/lib/server/supabase-user-ids';
@@ -79,6 +104,7 @@ type DisasterAlertEmitResult = {
   unreachableHouseholdCount: number;
   residentNotificationCount: number;
   responderNotificationCount: number;
+  activatedEvacuationCenterCount: number;
 };
 
 type AlertTargetProfile = Pick<PurokRiskProfile, 'purok_sitio' | 'flood_prone'>;
@@ -755,6 +781,14 @@ async function emitDisasterAlertForRule(params: {
     }
   }
 
+  const activatedEvacuationCenterCount = await activateEvacuationCentersForAlert({
+    alertId: String(createdAlert.id),
+    barangayId,
+    purokSitio,
+    defaultEvacuationSite: scopedDefaultEvacuationSite,
+    activatedAt: params.issuedAt,
+  });
+
   const { error: updateRuleError } = await supabase
     .from('disaster_alert_rules')
     .update({
@@ -775,7 +809,71 @@ async function emitDisasterAlertForRule(params: {
     unreachableHouseholdCount: residentRecipients.unreachableHouseholdCount,
     residentNotificationCount: residentNotificationRows.length,
     responderNotificationCount: responderNotificationRows.length,
+    activatedEvacuationCenterCount,
   };
+}
+
+/**
+ * Auto-activate the registered evacuation centers that serve an emitted
+ * alert's scope. Matching runs through the shared pure helper: purok default
+ * evacuation site names first, then every center in the affected barangay.
+ * Missing-table errors are tolerated so alert evaluation keeps working when
+ * the evacuation_centers migration has not been applied yet.
+ */
+async function activateEvacuationCentersForAlert(input: {
+  alertId: string;
+  barangayId: string;
+  purokSitio: string | null;
+  defaultEvacuationSite: string | null;
+  activatedAt: Date;
+}): Promise<number> {
+  const supabase = getSupabaseAdminClient();
+
+  const { data: centers, error: centersError } = await supabase
+    .from('evacuation_centers')
+    .select('*')
+    .eq('municipality', MABINI_MUNICIPALITY);
+
+  if (centersError) {
+    if (centersError.message.toLowerCase().includes('evacuation_centers')) {
+      return 0;
+    }
+
+    throw new Error(centersError.message);
+  }
+
+  const targets = resolveEvacuationCentersForAlert({
+    barangay_id: input.barangayId,
+    purok_sitio: input.purokSitio,
+    defaultEvacuationSite: input.defaultEvacuationSite,
+    centers: (centers ?? []) as unknown as EvacuationCenter[],
+  })
+    .filter((center) => center.status === 'closed');
+
+  if (targets.length === 0) {
+    return 0;
+  }
+
+  const { error: activationError } = await supabase
+    .from('evacuation_centers')
+    .update({
+      status: 'open',
+      activation_source: 'alert',
+      activated_at: input.activatedAt.toISOString(),
+      activated_by: null,
+      activated_by_alert_id: input.alertId,
+      deactivated_at: null,
+      updated_at: input.activatedAt.toISOString(),
+      sync_status: 'synced',
+    })
+    .in('id', targets.map((center) => center.id))
+    .eq('status', 'closed');
+
+  if (activationError) {
+    throw new Error(activationError.message);
+  }
+
+  return targets.length;
 }
 
 export async function runAutomaticDisasterAlertEvaluation(options?: {
@@ -819,6 +917,7 @@ export async function runAutomaticDisasterAlertEvaluation(options?: {
     suppressed_by_cooldown: boolean;
     reason: string;
     alert_id?: string;
+    activated_evacuation_center_count?: number;
   }> = [];
 
   for (const rule of rules ?? []) {
@@ -890,6 +989,7 @@ export async function runAutomaticDisasterAlertEvaluation(options?: {
       trigger_source: evaluation.triggerSource,
       reachable_household_count: emitted.reachableHouseholdCount,
       unreachable_household_count: emitted.unreachableHouseholdCount,
+      activated_evacuation_center_count: emitted.activatedEvacuationCenterCount,
     });
 
     results.push({
@@ -899,6 +999,7 @@ export async function runAutomaticDisasterAlertEvaluation(options?: {
       suppressed_by_cooldown: false,
       reason: evaluation.triggerReason,
       alert_id: String(emitted.alert.id),
+      activated_evacuation_center_count: emitted.activatedEvacuationCenterCount,
     });
   }
 

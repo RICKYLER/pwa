@@ -11,9 +11,22 @@ import {
   QUICK_LAYER_IDS,
   RESPONDER_BASE_MAP_LAYERS,
 } from '@/lib/responder-map-config';
+import {
+  isWindyLayerOptionEnabled,
+  WINDY_LAYER_OPTIONS,
+  type WindyLayerId,
+} from '@/lib/windy-map';
 import { CivicChipButton, CivicPanel, CivicSectionHeading } from '@/components/ui/civic-primitives';
-import { ChevronDown, ChevronUp, Layers3, SlidersHorizontal } from 'lucide-react';
+import { ChevronDown, ChevronUp, CloudLightning, CloudSun, Cloudy, Layers3, SlidersHorizontal, Thermometer, Wind } from 'lucide-react';
 import { cn } from '@/lib/utils';
+
+const WINDY_LAYER_ICON_MAP: Record<WindyLayerId, typeof Wind> = {
+  none: CloudSun,
+  wind: Wind,
+  temp: Thermometer,
+  rain: CloudLightning,
+  clouds: Cloudy,
+};
 
 interface ResponderMapControlPanelProps {
   activeBaseLayerId: ResponderBaseMapLayerId;
@@ -25,6 +38,9 @@ interface ResponderMapControlPanelProps {
   showWeather: boolean;
   weatherOverlayVisible: boolean;
   windLayerSelected: boolean;
+  windyAvailable: boolean;
+  windyLayer: WindyLayerId;
+  windyAllowedOverlays: string[] | null;
   onActiveBaseLayerChange: (layerId: ResponderBaseMapLayerId) => void;
   onOverlayOpacityChange: (value: number) => void;
   onShowAdvancedLayersChange: (value: boolean) => void;
@@ -32,6 +48,7 @@ interface ResponderMapControlPanelProps {
   onToggleWeatherVisibility: () => void;
   onOpenAllLayers: () => void;
   onClearAllLayers: () => void;
+  onWindyLayerChange: (layerId: WindyLayerId) => void;
   className?: string;
   compact?: boolean;
 }
@@ -46,6 +63,9 @@ export default function ResponderMapControlPanel({
   showWeather,
   weatherOverlayVisible,
   windLayerSelected,
+  windyAvailable,
+  windyLayer,
+  windyAllowedOverlays,
   onActiveBaseLayerChange,
   onOverlayOpacityChange,
   onShowAdvancedLayersChange,
@@ -53,6 +73,7 @@ export default function ResponderMapControlPanel({
   onToggleWeatherVisibility,
   onOpenAllLayers,
   onClearAllLayers,
+  onWindyLayerChange,
   className,
   compact = false,
 }: ResponderMapControlPanelProps) {
@@ -119,6 +140,59 @@ export default function ResponderMapControlPanel({
             );
           })}
         </div>
+      </div>
+
+      <div className="space-y-2">
+        <div className="flex items-center justify-between gap-3">
+          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">
+            Windy weather layers
+          </p>
+          <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-semibold text-slate-500">
+            Visualization
+          </span>
+        </div>
+        <p className="text-[11px] leading-relaxed text-slate-500">
+          Animated Windy Map Forecast visualization under the E-Mabini map layers. The Google
+          weather card stays the source for weather data.
+        </p>
+        {windyAvailable ? (
+          <div className={cn('grid gap-2', compact ? 'grid-cols-1' : 'grid-cols-2')}>
+            {WINDY_LAYER_OPTIONS.map((option) => {
+              const Icon = WINDY_LAYER_ICON_MAP[option.id];
+              const active = windyLayer === option.id;
+              const enabled = isWindyLayerOptionEnabled(option, windyAllowedOverlays);
+              return (
+                <button
+                  key={option.id}
+                  type="button"
+                  onClick={() => onWindyLayerChange(option.id)}
+                  disabled={!enabled}
+                  title={enabled ? option.description : 'Requires a Windy Professional API key'}
+                  className={cn(
+                    'flex items-center gap-2 rounded-2xl border px-3 py-2.5 text-left text-sm font-semibold transition',
+                    active
+                      ? 'border-cyan-900 bg-cyan-950 text-white'
+                      : enabled
+                        ? 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50'
+                        : 'cursor-not-allowed border-slate-200 bg-slate-100/80 text-slate-400',
+                  )}
+                >
+                  <Icon className="h-4 w-4 flex-shrink-0" />
+                  <span className="min-w-0 flex-1 truncate">{option.label}</span>
+                  {!enabled ? (
+                    <span className="rounded-full bg-slate-200 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-slate-500">
+                      Pro
+                    </span>
+                  ) : null}
+                </button>
+              );
+            })}
+          </div>
+        ) : (
+          <p className="rounded-2xl border border-slate-200 bg-slate-50/80 px-3 py-2.5 text-[11px] text-slate-500">
+            Add NEXT_PUBLIC_WINDY_API_KEY to enable Windy layers.
+          </p>
+        )}
       </div>
 
       <div className="space-y-2">
