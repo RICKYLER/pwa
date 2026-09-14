@@ -610,3 +610,4 @@ export async function getAuthenticatedUser(email: string, password: string): Pro
   const result = await authenticateUser(email, password);
   return result.status === 'success' ? result.user : null;
 }
+

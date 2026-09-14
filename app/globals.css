@@ -298,18 +298,11 @@
     linear-gradient(180deg, #eef4ff 0%, #e7f0fb 100%);
 }
 
-/* Windy Map Forecast underlay: the Windy iframe sits beneath the Leaflet map.
-   The map container is lifted above it so every E-Mabini pane (barangay
-   boundaries, weather tiles, markers) stays visible on top of Windy. */
+/* The map container sits above any sibling overlays so every E-Mabini pane
+   (barangay boundaries, weather tiles, markers) stays visible. */
 .responder-leaflet-shell .responder-leaflet-map {
   position: relative;
   z-index: 1;
-}
-
-/* When a Windy layer is active, hide only the base-map tiles so Windy's
-   visualization shows through; removing the class restores the normal map. */
-.responder-leaflet-shell.windy-underlay-active .leaflet-tile-pane {
-  visibility: hidden;
 }
 
 .responder-leaflet-map .leaflet-container {

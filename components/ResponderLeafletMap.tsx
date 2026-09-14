@@ -35,8 +35,6 @@ import {
   type BarangayBoundary,
 } from '@/lib/barangay-geometry';
 import { formatBarangayArea, getBarangayBoundaryColors } from '@/lib/mabini-barangays';
-import { useWindyMapLayer } from '@/hooks/useWindyMapLayer';
-import { WINDY_MAP_PAGE_URL, type WindyLayerId } from '@/lib/windy-map';
 import { cn } from '@/lib/utils';
 import MapLegend from '@/components/MapLegend';
 
@@ -145,6 +143,11 @@ interface LeafletMap {
 
 interface LeafletRuntime {
   divIcon(options?: Record<string, unknown>): unknown;
+  imageOverlay(
+    url: string,
+    bounds: [[number, number], [number, number]],
+    options?: Record<string, unknown>,
+  ): LeafletLayer;
   layerGroup(layers?: LeafletLayer[]): LeafletLayerGroup;
   latLngBounds(points: [number, number][]): unknown;
   map(element: HTMLElement, options?: Record<string, unknown>): LeafletMap;
@@ -183,12 +186,6 @@ interface ResponderLeafletMapProps {
   activeLayerIds: OpenWeatherTileLayerId[];
   showWeather: boolean;
   overlayOpacity: number;
-  /** Windy Map Forecast visualization layer shown under the E-Mabini map layers. */
-  windyLayer?: WindyLayerId;
-  /** Sticky flag: the Windy underlay iframe stays mounted once first enabled. */
-  windyFrameMounted?: boolean;
-  /** Reports store.getAllowed('overlay') back so the control panel can tier-gate layers. */
-  onWindyAllowedOverlaysChange?: (allowedOverlays: string[]) => void;
   refreshVersion?: number;
   containerClassName?: string;
   compactWeather?: boolean;
@@ -830,9 +827,6 @@ export default function ResponderLeafletMap({
   activeLayerIds,
   showWeather,
   overlayOpacity,
-  windyLayer = 'none',
-  windyFrameMounted = false,
-  onWindyAllowedOverlaysChange,
   refreshVersion = 0,
   containerClassName = 'h-full',
   compactWeather = false,
@@ -850,7 +844,6 @@ export default function ResponderLeafletMap({
   const [internalSelectedEvent, setInternalSelectedEvent] = useState<DistributionEvent | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<LeafletMap | null>(null);
-  const [mapInstance, setMapInstance] = useState<LeafletMap | null>(null);
   const onSelectHouseholdRef = useRef(onSelectHousehold);
   const onSelectIncidentRef = useRef(onSelectIncident);
   const onSelectEventRef = useRef(onSelectEvent);
@@ -917,19 +910,6 @@ export default function ResponderLeafletMap({
     [compactWeather, mapViewport?.height, mapViewport?.width, mapViewport?.zoom],
   );
 
-  const windy = useWindyMapLayer({
-    map: mapInstance,
-    layerId: windyLayer,
-    frameMounted: windyFrameMounted,
-  });
-
-  // Surface Windy's allowed overlays (tier-gated) to the control panel.
-  useEffect(() => {
-    if (windy.allowedOverlays) {
-      onWindyAllowedOverlaysChange?.(windy.allowedOverlays);
-    }
-  }, [onWindyAllowedOverlaysChange, windy.allowedOverlays]);
-
   useEffect(() => {
     onSelectHouseholdRef.current = onSelectHousehold;
     onSelectIncidentRef.current = onSelectIncident;
@@ -974,7 +954,6 @@ export default function ResponderLeafletMap({
     });
 
     mapRef.current = map;
-    setMapInstance(map);
     map.setView([DEFAULT_BARANGAY_CENTER.lat, DEFAULT_BARANGAY_CENTER.lng], 14);
 
     zoneLayerRef.current = runtime.layerGroup().addTo(map);
@@ -1071,7 +1050,6 @@ export default function ResponderLeafletMap({
       map.off('click', handleMapClick);
       map.remove();
       mapRef.current = null;
-      setMapInstance(null);
       zoneLayerRef.current = null;
       boundaryLayerRef.current = null;
       householdLayerRef.current = null;
@@ -1940,39 +1918,11 @@ export default function ResponderLeafletMap({
     <div
       className={cn(
         'responder-leaflet-shell relative w-full overflow-hidden rounded-[30px] border border-slate-200/80 bg-slate-100',
-        windy.windyActive && 'windy-underlay-active',
         containerClassName,
       )}
     >
-      {/* Windy Map Forecast underlay: its own isolated Leaflet 1.4 runtime,
-          rendered beneath the E-Mabini map so boundaries and markers stay on
-          top. Pointer events stay on the Leaflet map above. */}
-      {windyFrameMounted ? (
-        <iframe
-          ref={windy.frameRef}
-          src={WINDY_MAP_PAGE_URL}
-          title="Windy weather visualization layer"
-          aria-hidden="true"
-          tabIndex={-1}
-          className={cn(
-            'pointer-events-none absolute inset-0 z-0 h-full w-full border-0',
-            windy.windyActive ? 'block' : 'hidden',
-          )}
-        />
-      ) : null}
-
       <div ref={containerRef} className="responder-leaflet-map h-full w-full" />
       <MapLegend showBarangayColors={barangayBoundaries.length > 0} />
-      {windy.windyError && windyLayer !== 'none' ? (
-        <div className="pointer-events-none absolute bottom-4 left-1/2 z-[420] max-w-[min(420px,calc(100%-24px))] -translate-x-1/2 rounded-full border border-rose-200 bg-white/92 px-3 py-2 text-center text-[11px] font-semibold text-rose-700 shadow-[0_16px_30px_-24px_rgba(15,23,42,0.45)] backdrop-blur">
-          Windy layer unavailable: {windy.windyError}
-        </div>
-      ) : null}
-      {windyFrameMounted && !windy.windyReady && !windy.windyError && windyLayer !== 'none' ? (
-        <div className="pointer-events-none absolute bottom-4 left-4 z-[420] rounded-full border border-white/70 bg-white/88 px-3 py-2 text-[11px] font-semibold text-slate-600 shadow-[0_16px_30px_-24px_rgba(15,23,42,0.45)] backdrop-blur">
-          Loading Windy weather…
-        </div>
-      ) : null}
       {windSurfaceData ? (
         <ResponderWindFieldOverlay
           visible={animatedWindReady}

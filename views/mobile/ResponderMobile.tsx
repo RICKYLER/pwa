@@ -436,9 +436,6 @@ export default function ResponderMobile() {
               showWeather={mapControls.showWeather}
               weatherOverlayVisible={mapControls.weatherOverlayVisible}
               windLayerSelected={mapControls.windLayerSelected}
-              windyAvailable={mapControls.windyAvailable}
-              windyLayer={mapControls.windyLayer}
-              windyAllowedOverlays={mapControls.windyAllowedOverlays}
               onActiveBaseLayerChange={mapControls.handleActiveBaseLayerChange}
               onOverlayOpacityChange={mapControls.handleOverlayOpacityChange}
               onShowAdvancedLayersChange={mapControls.handleShowAdvancedLayersChange}
@@ -446,7 +443,6 @@ export default function ResponderMobile() {
               onToggleWeatherVisibility={mapControls.handleWeatherVisibilityToggle}
               onOpenAllLayers={mapControls.handleOpenAllLayers}
               onClearAllLayers={mapControls.handleClearAllLayers}
-              onWindyLayerChange={mapControls.handleWindyLayerChange}
             />
           </div>
         </DrawerContent>
@@ -993,9 +989,6 @@ export default function ResponderMobile() {
             activeLayerIds={mapControls.activeLayerIds}
             showWeather={mapControls.showWeather}
             overlayOpacity={mapControls.overlayOpacity}
-            windyLayer={mapControls.windyLayer}
-            windyFrameMounted={mapControls.windyFrameMounted}
-            onWindyAllowedOverlaysChange={mapControls.handleWindyAllowedOverlaysChange}
             refreshVersion={mapControls.mapRefreshVersion}
             containerClassName="h-[380px]"
             compactWeather

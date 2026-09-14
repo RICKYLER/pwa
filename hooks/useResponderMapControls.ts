@@ -14,7 +14,6 @@ import {
   type ResponderBaseMapLayerId,
 } from '@/lib/responder-map-config';
 import { getOpenWeatherMapLayer } from '@/lib/openweather-map-layers';
-import { isWindyAvailable, type WindyLayerId } from '@/lib/windy-map';
 
 export function useResponderMapControls() {
   const [activeBaseLayerId, setActiveBaseLayerId] = useState<ResponderBaseMapLayerId>(DEFAULT_BASE_LAYER_ID);
@@ -23,9 +22,6 @@ export function useResponderMapControls() {
   const [overlayOpacity, setOverlayOpacity] = useState(getOpenWeatherMapLayer('PR0')?.defaultOpacity ?? 54);
   const [showAdvancedLayers, setShowAdvancedLayers] = useState(false);
   const [mapRefreshVersion, setMapRefreshVersion] = useState(0);
-  const [windyLayer, setWindyLayer] = useState<WindyLayerId>('none');
-  const [windyFrameMounted, setWindyFrameMounted] = useState(false);
-  const [windyAllowedOverlays, setWindyAllowedOverlays] = useState<string[] | null>(null);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -98,21 +94,6 @@ export function useResponderMapControls() {
     setShowWeather(false);
   }
 
-  function handleWindyLayerChange(layerId: WindyLayerId) {
-    setWindyLayer(layerId);
-    // The Windy iframe mounts on the first selection and then stays alive, so
-    // returning to "None" (or switching layers) never re-initializes Windy.
-    if (layerId !== 'none') {
-      setWindyFrameMounted(true);
-    }
-  }
-
-  function handleWindyAllowedOverlaysChange(allowedOverlays: string[]) {
-    setWindyAllowedOverlays((current) =>
-      JSON.stringify(current) === JSON.stringify(allowedOverlays) ? current : allowedOverlays,
-    );
-  }
-
   return {
     activeBaseLayer,
     activeBaseLayerId,
@@ -125,10 +106,6 @@ export function useResponderMapControls() {
     showWeather,
     weatherOverlayVisible,
     windLayerSelected,
-    windyAvailable: isWindyAvailable(),
-    windyLayer,
-    windyFrameMounted,
-    windyAllowedOverlays,
     handleActiveBaseLayerChange,
     handleOverlayOpacityChange,
     handleShowAdvancedLayersChange,
@@ -136,8 +113,6 @@ export function useResponderMapControls() {
     handleWeatherVisibilityToggle,
     handleOpenAllLayers,
     handleClearAllLayers,
-    handleWindyLayerChange,
-    handleWindyAllowedOverlaysChange,
     requestMapRefresh,
     getLayerDisplayLabel,
   };
