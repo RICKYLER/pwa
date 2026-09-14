@@ -13,6 +13,8 @@ import {
 export const runtime = 'nodejs';
 export const maxDuration = 30;
 
+import fallbackBoundariesGeoJson from '@/lib/mabini-barangay-boundaries-fallback.json';
+
 const GEORISK_LAYER_URL =
   'https://ulap-nga.georisk.gov.ph/arcgis/rest/services/PSA/BarangayPopMF/MapServer/0';
 const GEORISK_QUERY_URL = `${GEORISK_LAYER_URL}/query`;
@@ -295,6 +297,22 @@ async function loadBoundariesPayload(): Promise<string> {
         const body = serializeBoundaries(boundaries);
         cachedPayload = { body, fetchedAt: Date.now() };
         return body;
+      } catch (upstreamError) {
+        console.warn(
+          '[barangay-boundaries] GeoRisk upstream query failed or timed out — activating bundled Mabini fallback:',
+          upstreamError instanceof Error ? upstreamError.message : upstreamError,
+        );
+        try {
+          const { boundaries } = parseBarangayBoundaries(fallbackBoundariesGeoJson);
+          if (boundaries.length > 0) {
+            const body = serializeBoundaries(boundaries);
+            cachedPayload = { body, fetchedAt: Date.now() };
+            return body;
+          }
+        } catch (fallbackError) {
+          console.error('[barangay-boundaries] static fallback parsing failed:', fallbackError);
+        }
+        throw upstreamError;
       } finally {
         clearTimeout(timeoutId);
         inflightRequest = null;
