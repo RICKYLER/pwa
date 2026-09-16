@@ -42,15 +42,19 @@ import ResponderLeafletMap from '@/components/ResponderLeafletMap';
 import ResponderMapControlPanel from '@/components/ResponderMapControlPanel';
 import ResponderSelectionSummary from '@/components/ResponderSelectionSummary';
 import IncidentImpactPanel, { IncidentImpactSummary } from '@/components/IncidentImpactPanel';
+import PriorityAnalytics from '@/components/PriorityAnalytics';
+import PurokCategoryRoster from '@/components/PurokCategoryRoster';
+import TriggerAnalysis, { isTriggerAnalyzableIncident, TriggerAnalysisDialog, useIncidentScopedGroups } from '@/components/TriggerAnalysis';
 import BarangayResponsePanel from '@/components/BarangayResponsePanel';
 import EvacuationCenterPanel, { type EvacuationCenterDraft } from '@/components/EvacuationCenterPanel';
-import { CivicBadge, CivicChipButton, CivicPanel, CivicSearchInput } from '@/components/ui/civic-primitives';
+import { CivicBadge, CivicChipButton, CivicPanel, CivicSearchInput, CivicSectionHeading } from '@/components/ui/civic-primitives';
 import {
   buildFieldResponseZoneMarkers,
   buildPurokRiskProfileMap,
   getPurokRiskProfileForHousehold,
   matchesPurokRiskFilters,
   PUROK_FLOOD_CONTROL_STATUS_LABELS,
+  type FieldResponseZoneMarker,
 } from '@/lib/purok-risk-profiles';
 import {
   buildAffectedAreaLabel,
@@ -58,7 +62,7 @@ import {
   HAZARD_LABELS,
   parseDisasterAlertNotification,
 } from '@/lib/disaster-alerts';
-import { BARANGAY_OPTIONS, type BarangayId } from '@/lib/barangays';
+import { BARANGAY_OPTIONS, getBarangayLabel, type BarangayId } from '@/lib/barangays';
 import { useBarangayBoundaries } from '@/hooks/useBarangayBoundaries';
 import {
   assignIncidentBarangay,
@@ -220,6 +224,8 @@ export default function ResponderDesktop() {
   const [selectedHousehold, setSelectedHousehold] = useState<Household | null>(null);
   const [selectedIncident, setSelectedIncident] = useState<Incident | null>(null);
   const [selectedEvent, setSelectedEvent] = useState<DistributionEvent | null>(null);
+  const [selectedZone, setSelectedZone] = useState<FieldResponseZoneMarker | null>(null);
+  const [triggerDialogOpen, setTriggerDialogOpen] = useState(false);
   const [selectedBarangayId, setSelectedBarangayId] = useState<BarangayId | ''>('');
   const [riskLevelFilter, setRiskLevelFilter] = useState<'all' | 'low' | 'medium' | 'high'>('all');
   const [incidentTypeFilter, setIncidentTypeFilter] = useState<'all' | IncidentType>('all');
@@ -734,6 +740,7 @@ export default function ResponderDesktop() {
       setSelectedIncident(created);
       setSelectedHousehold(null);
       setSelectedEvent(null);
+      setSelectedZone(null);
       setActiveTab('incidents');
       setSuggestionModal(null);
       await load();
@@ -744,6 +751,71 @@ export default function ResponderDesktop() {
     }
   }
 
+
+  // Hook-order safe block: everything here must run before the `!user` early
+  // return below, so the trigger-analysis hooks never become conditional.
+  const filteredPriorityGroups = useMemo(
+    () => priorityGroups.filter((group) => matchesPurokPriorityFilters(group, {
+      floodProne: filterFloodProne,
+      floodControlStatus: filterFloodControlStatus,
+      category: categoryFilter,
+    })),
+    [priorityGroups, filterFloodProne, filterFloodControlStatus, categoryFilter],
+  );
+  const incidentScopedGroups = useIncidentScopedGroups(
+    isTriggerAnalyzableIncident(selectedIncident) ? selectedIncident : null,
+    filteredPriorityGroups,
+  );
+  // A trigger zone's scope is its purok (when the alert rule or flood profile
+  // names one) or its whole barangay — matched by id, not text matching.
+  const zoneScopedGroups = useMemo(
+    () => selectedZone
+      ? filteredPriorityGroups
+        .filter((group) => group.barangayId === selectedZone.barangayId
+          && (!selectedZone.purokSitio || group.purokSitio === selectedZone.purokSitio))
+        .sort((left, right) => right.score - left.score)
+      : [],
+    [selectedZone, filteredPriorityGroups],
+  );
+  const zoneTrigger = useMemo(() => {
+    if (!selectedZone) return null;
+    const barangayLabel = getBarangayLabel(selectedZone.barangayId as BarangayId) ?? selectedZone.barangayId;
+    const zoneAlerts = alerts.filter((alert) => alert.hazard === selectedZone.hazard
+      && (!alert.barangay_id || alert.barangay_id.trim() === selectedZone.barangayId));
+    return {
+      type: selectedZone.hazard,
+      severity: zoneAlerts.length > 0 ? 'warning' : 'monitoring',
+      status: zoneAlerts.length > 0 ? 'alerting' : 'armed',
+      location: selectedZone.purokSitio
+        ? `${selectedZone.purokSitio}, ${barangayLabel}`
+        : barangayLabel,
+      description: selectedZone.source === 'alert_rule'
+        ? `Automatic ${selectedZone.hazard} alert trigger zone${selectedZone.purokSitio ? ` covering ${selectedZone.purokSitio}` : ' covering the whole barangay'}, selected from the field map. ${zoneAlerts.length > 0 ? `${zoneAlerts.length} active ${selectedZone.hazard} alert${zoneAlerts.length > 1 ? 's' : ''} for this area.` : 'No active alerts for this area right now — the trigger is armed and monitoring weather thresholds.'}`
+        : `Flood-prone purok zone${selectedZone.floodControlStatus ? ` (${PUROK_FLOOD_CONTROL_STATUS_LABELS[selectedZone.floodControlStatus].toLowerCase()})` : ''}, selected from the field map.${selectedZone.warningNotes ? ` ${selectedZone.warningNotes}` : ''}`,
+    };
+  }, [selectedZone, alerts]);
+
+  // The trigger the map dialog narrates: a selected trigger zone wins, then a
+  // selected flood-related incident pin. Plain derivation (no hooks).
+  const activeTriggerDialog = selectedZone && zoneTrigger
+    ? {
+        title: `Trigger zone — ${zoneTrigger.location}`,
+        trigger: zoneTrigger,
+        scopedGroups: zoneScopedGroups,
+      }
+    : isTriggerAnalyzableIncident(selectedIncident)
+      ? {
+          title: `Trigger — ${selectedIncident.location}`,
+          trigger: {
+            type: selectedIncident.type,
+            severity: selectedIncident.severity,
+            status: selectedIncident.status,
+            location: selectedIncident.location,
+            description: selectedIncident.description,
+          },
+          scopedGroups: incidentScopedGroups,
+        }
+      : null;
 
   if (!user) return null;
 
@@ -756,11 +828,6 @@ export default function ResponderDesktop() {
     floodControlStatus: filterFloodControlStatus,
   }));
   const visibleFloodZoneCount = buildFieldResponseZoneMarkers(filteredMapHouseholds, purokRiskProfiles, alertRules).length;
-  const filteredPriorityGroups = priorityGroups.filter((group) => matchesPurokPriorityFilters(group, {
-    floodProne: filterFloodProne,
-    floodControlStatus: filterFloodControlStatus,
-    category: categoryFilter,
-  }));
   const filteredPriorityHouseholdCount = filteredPriorityGroups.reduce(
     (total, group) => total + group.householdCount,
     0,
@@ -1082,11 +1149,50 @@ export default function ResponderDesktop() {
               setSelectedHousehold(null);
               setSelectedIncident(null);
               setSelectedEvent(null);
+              setSelectedZone(null);
             }}
             onNavigateHousehold={navigateToHousehold}
             onNavigateIncident={navigateToIncident}
             onNavigateEvent={navigateToEvent}
           />
+
+          {activeTriggerDialog ? (
+            <CivicPanel className="space-y-3">
+              <div className="flex items-start justify-between gap-3">
+                <CivicSectionHeading
+                  icon={Zap}
+                  title="Trigger analysis"
+                  description="Kinsay una tabangan — open the assist-first queue for this trigger's scope."
+                />
+                <CivicBadge
+                  label={activeTriggerDialog.trigger.location}
+                  tone="navy"
+                  className="max-w-[160px] truncate text-[10px]"
+                />
+              </div>
+              <button
+                type="button"
+                onClick={() => setTriggerDialogOpen(true)}
+                className="inline-flex items-center gap-1.5 rounded-full bg-cyan-950 px-4 py-2 text-xs font-semibold text-white transition hover:bg-cyan-900"
+              >
+                <Zap className="h-3.5 w-3.5" aria-hidden />
+                Open trigger analysis
+              </button>
+            </CivicPanel>
+          ) : null}
+
+          {activeTriggerDialog ? (
+            <TriggerAnalysisDialog
+              open={triggerDialogOpen}
+              onOpenChange={setTriggerDialogOpen}
+              title={activeTriggerDialog.title}
+              trigger={activeTriggerDialog.trigger}
+              scopedGroups={activeTriggerDialog.scopedGroups}
+              incidents={incidents}
+              alerts={alerts}
+              onNavigateHousehold={navigateToHousehold}
+            />
+          ) : null}
 
           {selectedIncident ? (
             <IncidentImpactPanel
@@ -1245,6 +1351,7 @@ export default function ResponderDesktop() {
                       setSelectedIncident(incident);
                       setSelectedHousehold(null);
                       setSelectedEvent(null);
+                      setSelectedZone(null);
                     };
                     return (
                       <div
@@ -1318,6 +1425,17 @@ export default function ResponderDesktop() {
                             </button>
                           ))}
                         </div>
+
+                        {isTriggerAnalyzableIncident(incident) ? (
+                          <div className="mt-2">
+                            <TriggerAnalysis
+                              incident={incident}
+                              groups={filteredPriorityGroups}
+                              incidents={incidents}
+                              alerts={alerts}
+                            />
+                          </div>
+                        ) : null}
                       </div>
                     );
                   })
@@ -1529,6 +1647,12 @@ export default function ResponderDesktop() {
                     );
                   })() : null}
 
+                  <PriorityAnalytics
+                    groups={filteredPriorityGroups}
+                    incidents={incidents}
+                    alerts={alerts}
+                  />
+
                   {filteredPriorityGroups.map((group, index) => {
                     const levelTone = group.level === 'critical' ? 'rose' : group.level === 'high' ? 'amber' : group.level === 'medium' ? 'navy' : 'slate';
                     const firstHousehold = group.households.find((priority) => !visitedIds.has(priority.household.id)) ?? group.households[0];
@@ -1648,6 +1772,11 @@ export default function ResponderDesktop() {
                             })}
                           </div>
                         ) : null}
+                        <PurokCategoryRoster
+                          group={group}
+                          residents={allResidents}
+                          flags={allFlags}
+                        />
                       </div>
                     );
                   })}
@@ -2271,6 +2400,7 @@ export default function ResponderDesktop() {
                   setSelectedHousehold(null);
                   setSelectedIncident(null);
                   setSelectedEvent(null);
+                  setSelectedZone(null);
                 }
               }}
               boundaryMode={showBarangayBoundaries}
@@ -2281,6 +2411,7 @@ export default function ResponderDesktop() {
                 if (household) {
                   setSelectedIncident(null);
                   setSelectedEvent(null);
+                  setSelectedZone(null);
                 }
               }}
               selectedIncident={selectedIncident}
@@ -2289,6 +2420,10 @@ export default function ResponderDesktop() {
                 if (incident) {
                   setSelectedHousehold(null);
                   setSelectedEvent(null);
+                  setSelectedZone(null);
+                  if (isTriggerAnalyzableIncident(incident)) {
+                    setTriggerDialogOpen(true);
+                  }
                 }
               }}
               selectedEvent={selectedEvent}
@@ -2297,6 +2432,16 @@ export default function ResponderDesktop() {
                 if (event) {
                   setSelectedHousehold(null);
                   setSelectedIncident(null);
+                  setSelectedZone(null);
+                }
+              }}
+              onSelectZone={(zone) => {
+                setSelectedZone(zone);
+                if (zone) {
+                  setSelectedHousehold(null);
+                  setSelectedIncident(null);
+                  setSelectedEvent(null);
+                  setTriggerDialogOpen(true);
                 }
               }}
               activeBaseLayerId={mapControls.activeBaseLayerId}

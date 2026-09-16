@@ -95,9 +95,13 @@ export function normalizePurokSitio(value: string): string {
   const cleaned = value.replace(/\s+/g, ' ').trim();
   if (!cleaned) return '';
 
-  const purokMatch = cleaned.match(/^(?:purok|prk|pk)\s*([a-z0-9-]+)$/i);
+  const purokMatch = cleaned.match(/^(?:purok|prk|pk)\s*(.+)$/i);
   if (purokMatch?.[1]) {
-    return `Purok ${purokMatch[1].toUpperCase()}`;
+    const name = purokMatch[1].trim();
+    const shorthand = name.match(/^([0-9]+[a-z]?)$/i);
+    // Numeric shorthand stays uppercase ("prk 2a" → "Purok 2A"); named
+    // puroks keep title case ("purok malipayon" → "Purok Malipayon").
+    return `Purok ${shorthand?.[1] ? shorthand[1].toUpperCase() : toTitleCase(name)}`;
   }
 
   const sitioMatch = cleaned.match(/^(?:sitio|stio)\s+(.+)$/i);
@@ -249,6 +253,46 @@ export function mergePurokOptions(values: string[]): string[] {
     .forEach((value) => merged.add(value));
 
   return Array.from(merged).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+}
+
+export interface PurokFieldOptions {
+  /** True when the barangay has an official master list — use a strict dropdown. */
+  strict: boolean;
+  /** Dropdown options: official puroks only, plus the current value if it is a legacy entry. */
+  officialOptions: string[];
+  /** True when the current value is not part of the official list (legacy/typo record). */
+  includesLegacyValue: boolean;
+  /** Free-text suggestions (master list + puroks already used by households). */
+  suggestions: string[];
+}
+
+/**
+ * Derives the purok field options for a barangay. When the barangay has an
+ * official master list the field becomes a strict dropdown limited to that
+ * list; otherwise it stays a free-text input with suggestions.
+ */
+export function buildPurokFieldOptions(input: {
+  masterListPuroks?: readonly string[] | null;
+  householdPuroks?: readonly string[];
+  currentValue?: string | null;
+}): PurokFieldOptions {
+  const officialOptions = mergePurokOptions([...(input.masterListPuroks ?? [])]);
+  const strict = officialOptions.length > 0;
+  const suggestions = mergePurokOptions([
+    ...officialOptions,
+    ...(input.householdPuroks ?? []),
+  ]);
+
+  const currentValue = normalizePurokSitio(input.currentValue ?? '');
+  const includesLegacyValue = strict && Boolean(currentValue) && !officialOptions.includes(currentValue);
+  const dropdownOptions = includesLegacyValue ? [...officialOptions, currentValue] : officialOptions;
+
+  return {
+    strict,
+    officialOptions: dropdownOptions,
+    includesLegacyValue,
+    suggestions,
+  };
 }
 
 function buildHouseholdAddressParts(

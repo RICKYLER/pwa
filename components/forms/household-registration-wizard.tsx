@@ -33,11 +33,10 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { getAllPuroks } from '@/lib/db/households';
 import { getLocationMasterList } from '@/lib/db/location-master';
+import { PurokSelectField } from '@/components/forms/PurokSelectField';
 import { resolveLocationFromCoordinates } from '@/lib/geocoding';
 import {
-  mergePurokOptions,
   normalizeBarangayName,
   normalizeMunicipalityName,
   normalizePurokSitio,
@@ -345,7 +344,6 @@ export function HouseholdRegistrationWizard({
   const [step, setStep] = useState(1);
   const [form, setForm] = useState<RegistrationFormState>(() => buildRegistrationFormState(initialValues));
   const [masterListLocked, setMasterListLocked] = useState(false);
-  const [purokOptions, setPurokOptions] = useState<string[]>([]);
   const [locationMode, setLocationMode] = useState<'current' | 'manual'>('manual');
   const [locationConfirmed, setLocationConfirmed] = useState(false);
   const [isLocating, setIsLocating] = useState(false);
@@ -364,16 +362,12 @@ export function HouseholdRegistrationWizard({
 
     async function loadAddressMaster() {
       try {
-        const [puroks, masterList] = await Promise.all([
-          getAllPuroks(barangayId),
-          getLocationMasterList(barangayId),
-        ]);
+        const masterList = await getLocationMasterList(barangayId);
 
         if (cancelled) {
           return;
         }
 
-        setPurokOptions(mergePurokOptions([...(masterList?.puroks ?? []), ...puroks]));
         setMasterListLocked(Boolean(masterList?.municipality || masterList?.barangay_name));
         setForm((current) => ({
           ...current,
@@ -383,7 +377,6 @@ export function HouseholdRegistrationWizard({
         }));
       } catch {
         if (!cancelled) {
-          setPurokOptions([]);
           setMasterListLocked(false);
         }
       }
@@ -1150,24 +1143,14 @@ export function HouseholdRegistrationWizard({
             </div>
 
             <div>
-              <label className="mb-2 block text-sm font-medium text-slate-700">Purok / Sitio *</label>
-              <input
-                type="text"
-                list="registration-purok-options"
+              <label htmlFor="registration-purok-select" className="mb-2 block text-sm font-medium text-slate-700">Purok / Sitio *</label>
+              <PurokSelectField
+                id="registration-purok-select"
+                barangayId={barangayId}
                 value={form.purok_sitio}
-                onChange={(event) => updateForm('purok_sitio', event.target.value)}
-                onBlur={(event) => updateForm('purok_sitio', normalizePurokSitio(event.target.value))}
+                onChange={(value) => updateForm('purok_sitio', value)}
                 className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
-                placeholder="Type the purok or sitio"
               />
-              <datalist id="registration-purok-options">
-                {purokOptions.map((option) => (
-                  <option key={option} value={option} />
-                ))}
-              </datalist>
-              <p className="mt-2 text-xs text-slate-500">
-                Type a new purok if it is not listed. Saved puroks will appear in suggestions.
-              </p>
             </div>
 
             <div>

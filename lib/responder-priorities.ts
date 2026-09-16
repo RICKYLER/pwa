@@ -102,7 +102,7 @@ export function matchesScopedPurok(
   return normalizePurokSitio(scope.purok_sitio) === normalizePurokSitio(purokSitio);
 }
 
-function incidentMatchesPurok(incident: Incident, barangayLabel: string, purokSitio: string) {
+export function incidentMatchesPurok(incident: Incident, barangayLabel: string, purokSitio: string) {
   if (incident.status === 'resolved') {
     return false;
   }

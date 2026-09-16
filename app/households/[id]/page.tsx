@@ -5,7 +5,7 @@ import { useRouter, useParams } from 'next/navigation';
 import Link from 'next/link';
 import { PurokFloodProfileCard } from '@/components/PurokFloodProfileCard';
 import { getCurrentUser, hasPermission } from '@/lib/auth';
-import { getAllPuroks, getHousehold, updateHousehold, deleteHouseholdPermanently } from '@/lib/db/households';
+import { getHousehold, updateHousehold, deleteHouseholdPermanently } from '@/lib/db/households';
 import { getPurokRiskProfile } from '@/lib/db/purok-risk-profiles';
 import {
   getResidentsInHousehold, createResident, updateResident,
@@ -13,7 +13,8 @@ import {
 } from '@/lib/db/residents';
 import { calculateAge, getBirthdayStatus, getPregnancyProgress } from '@/lib/db/vulnerability';
 import { type DisasterRiskLevel, type FollowUpStatus, type HazardType, type PWDType, Household, PurokRiskProfile, Resident, VulnerabilityFlags } from '@/lib/db/schema';
-import { mergePurokOptions, normalizePurokSitio } from '@/lib/geocoding';
+import { normalizePurokSitio } from '@/lib/geocoding';
+import { PurokSelectField } from '@/components/forms/PurokSelectField';
 import {
   DISASTER_RISK_LEVEL_LABELS,
   HAZARD_LABELS,
@@ -102,8 +103,9 @@ export default function HouseholdDetailsPage() {
   });
   const [isSavingHH, setIsSavingHH] = useState(false);
   const [headNameParts, setHeadNameParts] = useState<NameParts>(() => splitFullName(''));
-  const [purokOptions, setPurokOptions] = useState<string[]>([]);
   const [purokRiskProfile, setPurokRiskProfile] = useState<PurokRiskProfile | null>(null);
+  // Bumped after saving so the purok field reloads its suggestion list.
+  const [purokReloadKey, setPurokReloadKey] = useState(0);
 
   // Resident add / edit state
   const [showAddResident, setShowAddResident] = useState(false);
@@ -154,10 +156,8 @@ export default function HouseholdDetailsPage() {
       setIsLoading(true);
       const hh = await getHousehold(householdId);
       if (!hh) { router.push('/households'); return; }
-      const nextPurokOptions = await getAllPuroks(hh.barangay_id);
       const profile = await getPurokRiskProfile(hh.barangay_id, hh.purok_sitio);
       setHousehold(hh);
-      setPurokOptions(mergePurokOptions([...nextPurokOptions, hh.purok_sitio]));
       setPurokRiskProfile(profile ?? null);
       setHhForm({
         head_name: hh.head_name,
@@ -238,7 +238,7 @@ export default function HouseholdDetailsPage() {
         special_assistance_notes: hhForm.special_assistance_notes.trim(),
         disaster_profile_updated_at: new Date(),
       });
-      setPurokOptions((current) => mergePurokOptions([...current, normalizedPurok]));
+      setPurokReloadKey((current) => current + 1);
       setHousehold(updatedHousehold);
       setHhForm({
         head_name: updatedHousehold.head_name,
@@ -625,24 +625,16 @@ export default function HouseholdDetailsPage() {
 
                   {/* Purok */}
                   <div>
-                    <label className="block text-xs font-semibold text-slate-500 mb-1.5 uppercase tracking-wide">Purok / Sitio *</label>
-                    <input
-                      type="text"
-                      list="household-detail-purok-options"
+                    <label htmlFor="household-detail-purok-select" className="block text-xs font-semibold text-slate-500 mb-1.5 uppercase tracking-wide">Purok / Sitio *</label>
+                    <PurokSelectField
+                      key={purokReloadKey}
+                      id="household-detail-purok-select"
+                      barangayId={household?.barangay_id ?? ''}
                       value={hhForm.purok_sitio}
-                      onChange={e => setHhForm(f => ({ ...f, purok_sitio: e.target.value }))}
-                      onBlur={e => setHhForm(f => ({ ...f, purok_sitio: normalizePurokSitio(e.target.value) }))}
+                      onChange={(value) => setHhForm(f => ({ ...f, purok_sitio: value }))}
                       className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-400 transition-all"
-                      placeholder="Type the purok or sitio"
+                      helperClassName="mt-1 text-xs text-slate-400"
                     />
-                    <datalist id="household-detail-purok-options">
-                      {purokOptions.map((option) => (
-                        <option key={option} value={option} />
-                      ))}
-                    </datalist>
-                    <p className="mt-1 text-xs text-slate-400">
-                      You can type a new purok directly. Saved puroks will appear in suggestions.
-                    </p>
                   </div>
 
                   {/* Contact */}

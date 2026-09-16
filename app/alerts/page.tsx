@@ -46,7 +46,7 @@ import {
   runDisasterAlertEvaluationNow,
   updateDisasterAlertRule,
 } from '@/lib/db/disaster-alerts';
-import { getLocationMasterList } from '@/lib/db/location-master';
+import { PurokSelectField } from '@/components/forms/PurokSelectField';
 import {
   getUserNotifications,
   markUserNotificationRead,
@@ -232,7 +232,6 @@ export default function AlertsPage() {
   const [confirmDeleteRule, setConfirmDeleteRule] = useState<DisasterAlertRule | null>(null);
   const [isDeletingRule, setIsDeletingRule] = useState(false);
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
-  const [purokOptions, setPurokOptions] = useState<string[]>([]);
   const [lastRunSummary, setLastRunSummary] = useState<{
     evaluated_at?: string;
     emitted_count?: number;
@@ -308,30 +307,6 @@ export default function AlertsPage() {
       window.removeEventListener('mswdo-data-changed', handleDataChanged);
     };
   }, [router, user]);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    async function loadPurokOptions() {
-      try {
-        const masterList = await getLocationMasterList(ruleForm.barangay_id);
-        if (!cancelled) {
-          const loadedPuroks = masterList?.puroks ?? [];
-          setPurokOptions(loadedPuroks);
-        }
-      } catch {
-        if (!cancelled) {
-          setPurokOptions([]);
-        }
-      }
-    }
-
-    void loadPurokOptions();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [ruleForm.barangay_id]);
 
   const notificationByAlertId = useMemo(() => {
     const map = new Map<string, UserNotification>();
@@ -646,19 +621,16 @@ export default function AlertsPage() {
                     </div>
 
                     <div className="md:col-span-2">
-                      <label className="mb-2 block text-sm font-medium text-slate-700">Purok / Sitio <span className="font-normal text-slate-400">(optional)</span></label>
-                      <input
-                        list="alert-rule-purok-options"
+                      <label htmlFor="alert-rule-purok-select" className="mb-2 block text-sm font-medium text-slate-700">Purok / Sitio <span className="font-normal text-slate-400">(optional)</span></label>
+                      <PurokSelectField
+                        id="alert-rule-purok-select"
+                        barangayId={ruleForm.barangay_id}
                         value={ruleForm.purok_sitio}
-                        onChange={(event) => setRuleForm((current) => ({ ...current, purok_sitio: event.target.value }))}
+                        onChange={(value) => setRuleForm((current) => ({ ...current, purok_sitio: value }))}
+                        allowEmpty
+                        emptyLabel="All puroks (whole barangay)"
                         className="h-11 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm text-slate-700 outline-none focus:border-cyan-900"
-                        placeholder="Leave blank to cover the whole barangay"
                       />
-                      <datalist id="alert-rule-purok-options">
-                        {purokOptions.map((purok) => (
-                          <option key={purok} value={purok} />
-                        ))}
-                      </datalist>
                     </div>
                   </div>
                 </div>

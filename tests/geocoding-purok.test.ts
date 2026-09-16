@@ -15,6 +15,13 @@ test('normalizePurokSitio accepts both shorthand and custom purok names', () => 
   assert.equal(normalizePurokSitio('lower riverside'), 'Lower Riverside');
 });
 
+test('normalizePurokSitio title-cases named puroks instead of uppercasing them', () => {
+  assert.equal(normalizePurokSitio('Purok Malipayon'), 'Purok Malipayon');
+  assert.equal(normalizePurokSitio('purok mura-murahan'), 'Purok Mura-Murahan');
+  assert.equal(normalizePurokSitio('prk 2a'), 'Purok 2A');
+  assert.equal(normalizePurokSitio('purok2'), 'Purok 2');
+});
+
 test('default search bounds cover the full Mabini municipal extent', () => {
   const bounds = buildDefaultSearchBounds();
   assert.equal(bounds.north, MABINI_MAP_BOUNDS.north);

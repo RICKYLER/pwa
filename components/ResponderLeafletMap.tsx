@@ -182,6 +182,8 @@ interface ResponderLeafletMapProps {
   onSelectIncident?: (incident: Incident | null) => void;
   selectedEvent?: DistributionEvent | null;
   onSelectEvent?: (event: DistributionEvent | null) => void;
+  /** Fired when an alert-rule trigger zone or flood-prone purok zone is clicked. */
+  onSelectZone?: (zone: FieldResponseZoneMarker | null) => void;
   activeBaseLayerId: ResponderBaseMapLayerId;
   activeLayerIds: OpenWeatherTileLayerId[];
   showWeather: boolean;
@@ -823,6 +825,7 @@ export default function ResponderLeafletMap({
   onSelectIncident,
   selectedEvent,
   onSelectEvent,
+  onSelectZone,
   activeBaseLayerId,
   activeLayerIds,
   showWeather,
@@ -847,6 +850,7 @@ export default function ResponderLeafletMap({
   const onSelectHouseholdRef = useRef(onSelectHousehold);
   const onSelectIncidentRef = useRef(onSelectIncident);
   const onSelectEventRef = useRef(onSelectEvent);
+  const onSelectZoneRef = useRef(onSelectZone);
   const selectedHouseholdControlledRef = useRef(selectedHousehold !== undefined);
   const selectedIncidentControlledRef = useRef(selectedIncident !== undefined);
   const selectedEventControlledRef = useRef(selectedEvent !== undefined);
@@ -914,10 +918,11 @@ export default function ResponderLeafletMap({
     onSelectHouseholdRef.current = onSelectHousehold;
     onSelectIncidentRef.current = onSelectIncident;
     onSelectEventRef.current = onSelectEvent;
+    onSelectZoneRef.current = onSelectZone;
     selectedHouseholdControlledRef.current = selectedHousehold !== undefined;
     selectedIncidentControlledRef.current = selectedIncident !== undefined;
     selectedEventControlledRef.current = selectedEvent !== undefined;
-  }, [onSelectHousehold, onSelectIncident, onSelectEvent, selectedHousehold, selectedIncident, selectedEvent]);
+  }, [onSelectHousehold, onSelectIncident, onSelectEvent, onSelectZone, selectedHousehold, selectedIncident, selectedEvent]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1005,6 +1010,7 @@ export default function ResponderLeafletMap({
       onSelectHouseholdRef.current?.(null);
       onSelectIncidentRef.current?.(null);
       onSelectEventRef.current?.(null);
+      onSelectZoneRef.current?.(null);
       if (!selectedHouseholdControlledRef.current) setInternalSelectedHousehold(null);
       if (!selectedIncidentControlledRef.current) setInternalSelectedIncident(null);
       if (!selectedEventControlledRef.current) setInternalSelectedEvent(null);
@@ -1446,11 +1452,13 @@ export default function ResponderLeafletMap({
 
     zoneMarkers.forEach((marker) => {
       const zoneMarker = runtime.marker([marker.lat, marker.lng], {
-        interactive: false,
+        // Clickable trigger: selecting a zone opens the trigger analysis panel
+        // for the puroks within its scope.
+        interactive: true,
         keyboard: false,
         zIndexOffset: -200,
         title: marker.source === 'alert_rule'
-          ? `${marker.label} automatic alert zone`
+          ? `${marker.label} automatic alert trigger`
           : `${marker.label} flood-prone zone`,
         icon: runtime.divIcon({
           className: 'responder-zone-marker',
@@ -1458,6 +1466,23 @@ export default function ResponderLeafletMap({
           iconSize: [92, 92],
           iconAnchor: [46, 46],
         }),
+      });
+
+      zoneMarker.bindTooltip(
+        `${escapeMarkerText(marker.label)}<br/>${escapeMarkerText(marker.subtitle)} — click for trigger analysis`,
+        {
+          className: 'responder-hover-tooltip',
+          direction: 'top',
+          offset: [0, -46],
+          opacity: 1,
+        },
+      );
+
+      zoneMarker.on('click', () => {
+        onSelectZoneRef.current?.(marker);
+        onSelectHouseholdRef.current?.(null);
+        onSelectIncidentRef.current?.(null);
+        onSelectEventRef.current?.(null);
       });
 
       zoneLayerRef.current?.addLayer(zoneMarker);

@@ -18,10 +18,10 @@ import {
   User,
 } from 'lucide-react';
 import { PurokFloodProfileCard } from '@/components/PurokFloodProfileCard';
+import { PurokSelectField } from '@/components/forms/PurokSelectField';
 import { LocationPicker } from '@/components/LocationPicker';
 import { useGoogleMaps } from '@/components/GoogleMapsProvider';
 import { getCurrentUser } from '@/lib/auth';
-import { getAllPuroks } from '@/lib/db/households';
 import { getLocationMasterList } from '@/lib/db/location-master';
 import { getPurokRiskProfile } from '@/lib/db/purok-risk-profiles';
 import { DEFAULT_BARANGAY_CENTER } from '@/lib/map-pins';
@@ -32,7 +32,6 @@ import {
   buildResponderLocationText,
   formatBarangayName,
   getPlacePinDetails,
-  mergePurokOptions,
   normalizeBarangayName,
   normalizePurokSitio,
   searchLocation,
@@ -284,7 +283,6 @@ export function HouseholdForm({ initialData, onSubmit, isLoading = false }: Hous
   const [addressValidation, setAddressValidation] = useState<AddressValidationSummary | null>(null);
   const [isValidatingAddress, setIsValidatingAddress] = useState(false);
   const [lastValidatedAddress, setLastValidatedAddress] = useState('');
-  const [purokOptions, setPurokOptions] = useState<string[]>([]);
   const [purokRiskProfile, setPurokRiskProfile] = useState<PurokRiskProfile | null>(null);
   const [masterListLocked, setMasterListLocked] = useState(false);
   const [manualPinRequired, setManualPinRequired] = useState(false);
@@ -315,7 +313,6 @@ export function HouseholdForm({ initialData, onSubmit, isLoading = false }: Hous
     barangayName: formData.barangay_name,
     municipality: formData.municipality,
   });
-  const verifiedPurokOptions = mergePurokOptions(purokOptions);
   const requiresManualVerification = pinSource === 'manual_pin';
   const memberDraftAge = memberDraft.birthdate ? calculateAge(memberDraft.birthdate) : null;
   const memberDraftAgeCategory = getAgeCategory(memberDraft.birthdate);
@@ -369,12 +366,8 @@ export function HouseholdForm({ initialData, onSubmit, isLoading = false }: Hous
 
     async function loadAddressMaster() {
       try {
-        const [values, masterList] = await Promise.all([
-          getAllPuroks(formData.barangay_id),
-          getLocationMasterList(formData.barangay_id),
-        ]);
+        const masterList = await getLocationMasterList(formData.barangay_id);
         if (!cancelled) {
-          setPurokOptions(mergePurokOptions([...(masterList?.puroks ?? []), ...values]));
           setMasterListLocked(Boolean(masterList?.municipality || masterList?.barangay_name));
 
           if (masterList) {
@@ -388,7 +381,6 @@ export function HouseholdForm({ initialData, onSubmit, isLoading = false }: Hous
         }
       } catch {
         if (!cancelled) {
-          setPurokOptions(mergePurokOptions([]));
           setMasterListLocked(false);
         }
       }
@@ -901,34 +893,20 @@ export function HouseholdForm({ initialData, onSubmit, isLoading = false }: Hous
                 </div>
 
                 <div>
-                  <label className="mb-2 block text-sm font-medium text-foreground">
+                  <label htmlFor="household-purok-select" className="mb-2 block text-sm font-medium text-foreground">
                     Purok / Sitio *
                   </label>
-                  <input
-                    type="text"
-                    list="household-purok-options"
-                    required
+                  <PurokSelectField
+                    id="household-purok-select"
+                    barangayId={formData.barangay_id}
                     value={formData.purok_sitio}
-                    onChange={(e) => {
+                    onChange={(value) => {
                       setMatchedAddress('');
-                      setFormData((prev) => ({ ...prev, purok_sitio: e.target.value }));
-                    }}
-                    onBlur={(e) => {
-                      const normalized = normalizePurokSitio(e.target.value);
-                      setFormData((prev) => ({ ...prev, purok_sitio: normalized }));
+                      setFormData((prev) => ({ ...prev, purok_sitio: value }));
                     }}
                     className="w-full rounded-md border border-input bg-background px-3 py-2 text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
-                    placeholder="Type the purok or sitio"
                     disabled={isLoading}
                   />
-                  <datalist id="household-purok-options">
-                    {verifiedPurokOptions.map((option) => (
-                      <option key={option} value={option} />
-                    ))}
-                  </datalist>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    Type a new purok if it is not listed. Saved puroks will appear in suggestions.
-                  </p>
                 </div>
 
                 <div>
