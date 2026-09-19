@@ -1,18 +1,21 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
   AlertTriangle,
   Archive,
   ArrowDown,
+  ArrowRight,
   ArrowUp,
   Boxes,
   Calendar,
   CalendarClock,
   CheckCircle2,
+  Clock,
   Download,
   FileSpreadsheet,
+  FileText,
   LayoutGrid,
   Package,
   PackageCheck,
@@ -40,6 +43,13 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { getCurrentUser, hasPermission } from '@/lib/auth';
 import {
   addStock,
@@ -183,10 +193,63 @@ type ItemActionDialogState = {
   unit: InventoryItem['unit'];
 };
 
+function getMovementDateKey(timestamp: string | Date): string {
+  const d = new Date(timestamp);
+  if (isNaN(d.getTime())) return 'unknown';
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function formatMovementDateHeader(dateKey: string): {
+  label: string;
+  subLabel: string;
+  isToday: boolean;
+  isYesterday: boolean;
+} {
+  if (dateKey === 'unknown') {
+    return { label: 'Undated', subLabel: '', isToday: false, isYesterday: false };
+  }
+  const [year, month, day] = dateKey.split('-').map(Number);
+  const targetDate = new Date(year, month - 1, day);
+
+  const now = new Date();
+  const todayKey = getMovementDateKey(now);
+  const yesterday = new Date(now);
+  yesterday.setDate(now.getDate() - 1);
+  const yesterdayKey = getMovementDateKey(yesterday);
+
+  if (dateKey === todayKey) {
+    return {
+      label: 'Today',
+      subLabel: targetDate.toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' }),
+      isToday: true,
+      isYesterday: false,
+    };
+  }
+  if (dateKey === yesterdayKey) {
+    return {
+      label: 'Yesterday',
+      subLabel: targetDate.toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' }),
+      isToday: false,
+      isYesterday: true,
+    };
+  }
+
+  return {
+    label: targetDate.toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' }),
+    subLabel: targetDate.toLocaleDateString('en-PH', { weekday: 'short' }),
+    isToday: false,
+    isYesterday: false,
+  };
+}
+
 export default function InventoryDesktop() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const user = getCurrentUser();
+  const historyDateInputRef = useRef<HTMLInputElement>(null);
 
   const [items, setItems] = useState<InventoryItem[]>([]);
   const [trashItems, setTrashItems] = useState<InventoryItem[]>([]);
@@ -215,6 +278,8 @@ export default function InventoryDesktop() {
   const [addItemError, setAddItemError] = useState('');
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
   const [movementScope, setMovementScope] = useState<MovementScope>('all');
+  const [movementDateFilter, setMovementDateFilter] = useState<string>('all');
+  const [selectedMovementForDetail, setSelectedMovementForDetail] = useState<InventoryMovement | null>(null);
   const [transactionItem, setTransactionItem] = useState<InventoryItem | null>(null);
   const [transactionMode, setTransactionMode] = useState<TransactionMode>('add');
   const [transactionQuantity, setTransactionQuantity] = useState('1');
@@ -231,6 +296,29 @@ export default function InventoryDesktop() {
   const [isSavingTemplate, setIsSavingTemplate] = useState(false);
   const issueFilter = searchParams.get('issue');
   const isPackageBlockerMode = issueFilter === 'package_blockers';
+
+  // Date grouping and filtering for Stock Movement History
+  const todayKey = useMemo(() => getMovementDateKey(new Date()), []);
+  const yesterdayKey = useMemo(() => {
+    const y = new Date();
+    y.setDate(y.getDate() - 1);
+    return getMovementDateKey(y);
+  }, []);
+
+  const dateCountsMap = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const m of movements) {
+      const key = getMovementDateKey(m.timestamp);
+      counts.set(key, (counts.get(key) || 0) + 1);
+    }
+    return counts;
+  }, [movements]);
+
+  const filteredMovements = useMemo(() => {
+    if (movementDateFilter === 'all') return movements;
+    return movements.filter((m) => getMovementDateKey(m.timestamp) === movementDateFilter);
+  }, [movements, movementDateFilter]);
+
 
   const [form, setForm] = useState({
     item_name: '',
@@ -349,7 +437,7 @@ export default function InventoryDesktop() {
   async function loadMovements(itemId?: string, scope: MovementScope = movementScope) {
     const recentMovements = await getInventoryMovements({
       item_id: scope === 'selected' ? itemId : undefined,
-      limit: scope === 'selected' ? 16 : 24,
+      limit: scope === 'selected' ? 100 : 150,
     });
     setMovements(recentMovements);
   }
@@ -1788,14 +1876,15 @@ export default function InventoryDesktop() {
                   )
                 ) : null}
 
-                <div className="space-y-2">
+                {/* Stock Movement History Section */}
+                <div className="space-y-3">
                   <div className="flex items-start justify-between gap-3">
                     <div>
                       <p className="text-sm font-bold text-slate-800">Stock Movement History</p>
                       <p className="mt-0.5 text-[11px] text-slate-400">
                         {movementScope === 'all'
-                          ? 'Showing all recent inventory transactions.'
-                          : 'Showing the selected item only.'}
+                          ? 'Organized timeline of inventory transactions.'
+                          : 'Showing transactions for selected item only.'}
                       </p>
                     </div>
                     <div className="flex items-center gap-2">
@@ -1803,10 +1892,11 @@ export default function InventoryDesktop() {
                         <button
                           type="button"
                           onClick={() => setMovementScope('all')}
-                          className={`rounded-full px-2.5 py-1 text-[11px] font-semibold transition ${movementScope === 'all'
+                          className={`rounded-full px-2.5 py-1 text-[11px] font-semibold transition ${
+                            movementScope === 'all'
                               ? 'bg-white text-slate-900 shadow-sm'
                               : 'text-slate-500 hover:text-slate-700'
-                            }`}
+                          }`}
                         >
                           All Items
                         </button>
@@ -1814,70 +1904,172 @@ export default function InventoryDesktop() {
                           type="button"
                           onClick={() => setMovementScope('selected')}
                           disabled={!selectedItem}
-                          className={`rounded-full px-2.5 py-1 text-[11px] font-semibold transition ${movementScope === 'selected'
+                          className={`rounded-full px-2.5 py-1 text-[11px] font-semibold transition ${
+                            movementScope === 'selected'
                               ? 'bg-white text-slate-900 shadow-sm'
                               : 'text-slate-500 hover:text-slate-700'
-                            } disabled:cursor-not-allowed disabled:opacity-50`}
+                          } disabled:cursor-not-allowed disabled:opacity-50`}
                         >
                           Selected
                         </button>
                       </div>
-                      <span className="text-xs text-slate-400">{movements.length} recent</span>
+                      <span className="text-xs font-semibold text-slate-400">
+                        {filteredMovements.length} {filteredMovements.length === 1 ? 'record' : 'records'}
+                      </span>
                     </div>
                   </div>
 
-                  {movements.length > 0 ? (
-                    <div className="space-y-2">
-                      {movements.map((movement) => {
-                        const cfg = MOVEMENT_LABELS[movement.type];
-                        const Icon = cfg.icon;
-                        return (
-                          <div
-                            key={movement.id}
-                            className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3"
-                          >
-                            <div className="flex items-start justify-between gap-3">
-                              <div className="min-w-0">
-                                <span
-                                  className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold ring-1 ${cfg.tone}`}
-                                >
-                                  <Icon className="h-3 w-3" />
-                                  {cfg.label}
-                                </span>
-                                <p className="mt-2 text-sm font-semibold text-slate-900">
-                                  {movement.quantity} {movement.unit}
-                                </p>
-                                {movementScope === 'all' ? (
-                                  <p className="mt-1 text-xs font-semibold text-slate-700">
-                                    {movement.item_name}
-                                  </p>
-                                ) : null}
-                                <p className="mt-0.5 text-[11px] text-slate-500">
-                                  {movement.previous_quantity} to {movement.new_quantity} {movement.unit}
-                                </p>
-                                <p className="mt-1 text-[11px] text-slate-400">
-                                  {movement.performed_by_name || 'System'} ·{' '}
-                                  {new Date(movement.timestamp).toLocaleString('en-PH', {
-                                    month: 'short',
-                                    day: 'numeric',
-                                    hour: '2-digit',
-                                    minute: '2-digit',
-                                  })}
-                                </p>
-                              </div>
-                            </div>
-                            {movement.notes ? (
-                              <p className="mt-2 text-xs text-slate-500">{movement.notes}</p>
-                            ) : null}
-                          </div>
-                        );
-                      })}
+                  {/* Compact Date Filter Row */}
+                  <div className="flex items-center justify-between gap-2 rounded-xl border border-slate-200/80 bg-slate-50/70 p-2 text-xs">
+                    <div className="flex items-center gap-1.5 flex-1 min-w-0">
+                      <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider shrink-0 flex items-center gap-1">
+                        <Calendar className="h-3.5 w-3.5 text-indigo-500" />
+                        Date:
+                      </span>
+                      <select
+                        value={movementDateFilter}
+                        onChange={(e) => setMovementDateFilter(e.target.value)}
+                        className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs font-semibold text-slate-700 shadow-2xs focus:border-indigo-500 focus:outline-none"
+                      >
+                        <option value="all">All Dates ({movements.length})</option>
+                        <option value={todayKey}>Today ({dateCountsMap.get(todayKey) || 0})</option>
+                        {dateCountsMap.has(yesterdayKey) && (
+                          <option value={yesterdayKey}>Yesterday ({dateCountsMap.get(yesterdayKey) || 0})</option>
+                        )}
+                        {Array.from(dateCountsMap.entries())
+                          .filter(([k]) => k !== todayKey && k !== yesterdayKey && k !== 'unknown')
+                          .map(([k, count]) => (
+                            <option key={k} value={k}>
+                              {formatMovementDateHeader(k).label} ({count})
+                            </option>
+                          ))}
+                      </select>
+                    </div>
+
+                    <div className="flex items-center gap-1 shrink-0">
+                      <input
+                        ref={historyDateInputRef}
+                        type="date"
+                        title="Choose custom date"
+                        value={movementDateFilter === 'all' ? '' : movementDateFilter}
+                        onChange={(e) => {
+                          if (e.target.value) setMovementDateFilter(e.target.value);
+                        }}
+                        className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs text-slate-700 font-medium cursor-pointer shadow-2xs focus:border-indigo-500 focus:outline-none"
+                      />
+                      {movementDateFilter !== 'all' && (
+                        <button
+                          type="button"
+                          onClick={() => setMovementDateFilter('all')}
+                          className="rounded-lg border border-slate-200 bg-white p-1 text-slate-500 hover:bg-slate-100 hover:text-slate-800"
+                          title="Show All Dates"
+                        >
+                          <X className="h-3.5 w-3.5" />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Single Unified Movements Table */}
+                  {filteredMovements.length > 0 ? (
+                    <div className="space-y-1.5">
+                      <div className="overflow-hidden rounded-xl border border-slate-200/90 bg-white shadow-xs">
+                        <div className="max-h-[380px] overflow-y-auto">
+                          <table className="w-full border-collapse text-left text-xs">
+                            <thead className="sticky top-0 z-10 border-b border-slate-200 bg-slate-50/95 backdrop-blur-xs text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                              <tr>
+                                <th className="py-2.5 pl-3 pr-1.5 font-semibold">Date / Time</th>
+                                <th className="py-2.5 px-1.5 font-semibold">Action</th>
+                                <th className="py-2.5 px-1.5 font-semibold">Item & Qty</th>
+                                <th className="py-2.5 pr-3 pl-1.5 text-right font-semibold">Balance</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100">
+                              {filteredMovements.map((movement) => {
+                                const cfg = MOVEMENT_LABELS[movement.type];
+                                const Icon = cfg.icon;
+                                const movementDateKey = getMovementDateKey(movement.timestamp);
+                                const header = formatMovementDateHeader(movementDateKey);
+                                const timeStr = new Date(movement.timestamp).toLocaleTimeString('en-PH', {
+                                  hour: '2-digit',
+                                  minute: '2-digit',
+                                });
+                                const displayDate = header.isToday
+                                  ? 'Today'
+                                  : header.isYesterday
+                                  ? 'Yesterday'
+                                  : header.label;
+
+                                return (
+                                  <tr
+                                    key={movement.id}
+                                    onClick={() => setSelectedMovementForDetail(movement)}
+                                    className="cursor-pointer transition-colors hover:bg-indigo-50/70 group"
+                                    title="Click to view details in center"
+                                  >
+                                    <td className="py-2.5 pl-3 pr-1.5 align-middle whitespace-nowrap">
+                                      <p className="font-semibold text-slate-800 text-[11px]">{displayDate}</p>
+                                      <p className="text-[10px] text-slate-400">{timeStr}</p>
+                                    </td>
+                                    <td className="py-2.5 px-1.5 align-middle whitespace-nowrap">
+                                      <span
+                                        className={`inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-bold ring-1 ${cfg.tone}`}
+                                      >
+                                        <Icon className="h-2.5 w-2.5" />
+                                        {cfg.label}
+                                      </span>
+                                    </td>
+                                    <td className="py-2.5 px-1.5 align-middle">
+                                      <div className="min-w-0 max-w-[140px]">
+                                        <p className="font-semibold text-slate-900 group-hover:text-indigo-600 transition-colors truncate">
+                                          {movement.item_name || 'Inventory Item'}
+                                        </p>
+                                        <p
+                                          className={`text-[11px] font-bold ${
+                                            movement.type === 'stock_in'
+                                              ? 'text-emerald-600'
+                                              : movement.type === 'distribution_release' || movement.type === 'stock_out'
+                                              ? 'text-rose-600'
+                                              : 'text-slate-700'
+                                          }`}
+                                        >
+                                          {movement.type === 'stock_in'
+                                            ? '+'
+                                            : movement.type === 'distribution_release' || movement.type === 'stock_out'
+                                            ? '-'
+                                            : ''}
+                                          {movement.quantity} {movement.unit}
+                                        </p>
+                                      </div>
+                                    </td>
+                                    <td className="py-2.5 pr-3 pl-1.5 align-middle text-right whitespace-nowrap">
+                                      <span className="text-[11px] font-medium text-slate-500">
+                                        {movement.previous_quantity} → <span className="font-bold text-slate-900">{movement.new_quantity}</span>
+                                      </span>
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                      <p className="text-[10px] text-slate-400 text-center">
+                        💡 Click any row to view complete transaction details in center
+                      </p>
                     </div>
                   ) : (
-                    <div className="rounded-2xl border border-dashed border-slate-300 px-4 py-8 text-center text-sm text-slate-400">
-                      {movementScope === 'selected'
-                        ? 'No movement history yet for this item.'
-                        : 'No transaction history found yet.'}
+                    <div className="rounded-xl border border-dashed border-slate-300 p-6 text-center text-xs text-slate-500">
+                      <p className="font-medium text-slate-700">
+                        No transactions found for {formatMovementDateHeader(movementDateFilter).label}.
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => setMovementDateFilter('all')}
+                        className="mt-2 rounded-lg bg-indigo-50 px-3 py-1.5 text-xs font-semibold text-indigo-600 hover:bg-indigo-100 transition"
+                      >
+                        View All Dates
+                      </button>
                     </div>
                   )}
                 </div>
@@ -1889,150 +2081,6 @@ export default function InventoryDesktop() {
                   : 'Select an item card to inspect movements and adjust stock.'}
               </div>
             )}
-          </div>
-
-          <div className="rounded-2xl border border-slate-200/60 bg-white p-5 shadow-sm">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <p className="text-sm font-bold text-slate-800">Package Templates</p>
-                <p className="mt-0.5 text-xs text-slate-400">
-                  Reuse standard food packs and relief kits in distribution events.
-                </p>
-              </div>
-              <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-500">
-                {displayedTemplates.length} template{displayedTemplates.length !== 1 ? 's' : ''}
-              </span>
-            </div>
-
-            <form onSubmit={handleCreateTemplate} className="mt-4 space-y-3">
-              <input
-                type="text"
-                required
-                value={templateForm.name}
-                onChange={(e) => setTemplateForm({ ...templateForm, name: e.target.value })}
-                placeholder="Template name"
-                className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/30"
-              />
-              <textarea
-                rows={2}
-                value={templateForm.description}
-                onChange={(e) => setTemplateForm({ ...templateForm, description: e.target.value })}
-                placeholder="Short description"
-                className="w-full resize-none rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/30"
-              />
-
-              <div className="grid grid-cols-[minmax(0,1fr)_96px_auto] gap-2">
-                <select
-                  value={templateForm.selectedItemId}
-                  onChange={(e) =>
-                    setTemplateForm({ ...templateForm, selectedItemId: e.target.value })
-                  }
-                  className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/30"
-                >
-                  {items.map((item) => (
-                    <option key={item.id} value={item.id}>
-                      {item.item_name}
-                    </option>
-                  ))}
-                </select>
-                <input
-                  type="number"
-                  min={0.1}
-                  step={0.1}
-                  value={templateForm.quantity}
-                  onChange={(e) => setTemplateForm({ ...templateForm, quantity: e.target.value })}
-                  className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/30"
-                />
-                <button
-                  type="button"
-                  onClick={addTemplateLine}
-                  className="rounded-xl border border-slate-200 px-3 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
-                >
-                  Add Line
-                </button>
-              </div>
-
-              {templateForm.items.length > 0 ? (
-                <div className="space-y-2">
-                  {templateForm.items.map((item) => (
-                    <div
-                      key={item.item_id}
-                      className="flex items-center justify-between rounded-xl border border-slate-200 bg-slate-50 px-3 py-2"
-                    >
-                      <div className="text-sm text-slate-700">
-                        {item.item_name} · {item.quantity} {item.unit}
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => removeTemplateLine(item.item_id)}
-                        className="rounded-lg p-1.5 text-slate-400 transition hover:bg-white hover:text-rose-500"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="rounded-2xl border border-dashed border-slate-300 px-4 py-6 text-center text-sm text-slate-400">
-                  Add items to build a reusable relief package.
-                </div>
-              )}
-
-              <button
-                type="submit"
-                disabled={isSavingTemplate || templateForm.items.length === 0}
-                className="w-full rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {isSavingTemplate ? 'Saving Template…' : 'Save Package Template'}
-              </button>
-            </form>
-
-            {displayedTemplates.length > 0 ? (
-              <div className="mt-4 space-y-3">
-                {displayedTemplates.map((template) => {
-                  const readiness = blockedTemplates.find((entry) => entry.template.id === template.id);
-                  return (
-                    <div
-                      key={template.id}
-                      className={`rounded-2xl border px-4 py-3 ${readiness ? 'border-amber-200 bg-amber-50/70' : 'border-slate-200 bg-slate-50'
-                        }`}
-                    >
-                      <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <p className="text-sm font-semibold text-slate-900">{template.name}</p>
-                          {template.description ? (
-                            <p className="mt-0.5 text-xs text-slate-500">{template.description}</p>
-                          ) : null}
-                          {readiness ? (
-                            <p className="mt-1 text-[11px] font-semibold text-amber-700">
-                              Blocking items: {readiness.inventory_summary.blocking_items.map((item) => item.item_name).join(', ')}
-                            </p>
-                          ) : null}
-                          <div className="mt-2 flex flex-wrap gap-2">
-                            {template.items.map((item) => (
-                              <span
-                                key={`${template.id}_${item.item_id}`}
-                                className="rounded-full bg-white px-2.5 py-1 text-[10px] font-semibold text-slate-600 ring-1 ring-slate-200"
-                              >
-                                {item.item_name} · {item.quantity} {item.unit}
-                              </span>
-                            ))}
-                          </div>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => void handleDeleteTemplate(template.id)}
-                          className="rounded-lg p-2 text-slate-400 transition hover:bg-white hover:text-rose-500"
-                          title="Delete template"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </button>
-                      </div>
-                    </div>
-                  )
-                })}
-              </div>
-            ) : null}
           </div>
         </div>
       </div>
@@ -2418,6 +2466,164 @@ export default function InventoryDesktop() {
           })()}
         </AlertDialog>
       ) : null}
+
+      {/* Center Modal for Selected Movement History Details */}
+      <Dialog
+        open={Boolean(selectedMovementForDetail)}
+        onOpenChange={(open) => {
+          if (!open) setSelectedMovementForDetail(null);
+        }}
+      >
+        <DialogContent className="max-w-lg overflow-hidden rounded-3xl border border-slate-200/90 bg-white p-0 shadow-2xl">
+          {selectedMovementForDetail && (() => {
+            const movement = selectedMovementForDetail;
+            const cfg = MOVEMENT_LABELS[movement.type];
+            const Icon = cfg.icon;
+            const fullDateStr = new Date(movement.timestamp).toLocaleDateString('en-PH', {
+              weekday: 'long',
+              year: 'numeric',
+              month: 'long',
+              day: 'numeric',
+            });
+            const fullTimeStr = new Date(movement.timestamp).toLocaleTimeString('en-PH', {
+              hour: '2-digit',
+              minute: '2-digit',
+              second: '2-digit',
+            });
+
+            return (
+              <div>
+                {/* Modal Header */}
+                <div className="border-b border-slate-100 bg-gradient-to-r from-slate-50 via-indigo-50/30 to-slate-50 px-6 py-5">
+                  <div className="flex items-start justify-between gap-3 pr-6">
+                    <div className="space-y-1.5">
+                      <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-bold ring-1 ${cfg.tone}`}>
+                        <Icon className="h-3.5 w-3.5" />
+                        {cfg.label}
+                      </span>
+                      <DialogTitle className="text-xl font-bold text-slate-900">
+                        {movement.item_name || 'Inventory Movement Details'}
+                      </DialogTitle>
+                      <DialogDescription className="text-xs text-slate-500 flex items-center gap-1.5">
+                        <Clock className="h-3.5 w-3.5 text-slate-400" />
+                        Recorded on {fullDateStr} at {fullTimeStr}
+                      </DialogDescription>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Modal Body */}
+                <div className="p-6 space-y-4">
+                  {/* Metric Summary Cards */}
+                  <div className="grid grid-cols-3 gap-3">
+                    <div className="rounded-2xl border border-slate-100 bg-slate-50/80 p-3 text-center">
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Previous Stock</span>
+                      <p className="mt-1 text-base font-bold text-slate-700">
+                        {movement.previous_quantity} {movement.unit}
+                      </p>
+                    </div>
+
+                    <div
+                      className={`rounded-2xl border p-3 text-center ${
+                        movement.type === 'stock_in'
+                          ? 'border-emerald-200 bg-emerald-50/60'
+                          : movement.type === 'distribution_release' || movement.type === 'stock_out'
+                          ? 'border-rose-200 bg-rose-50/60'
+                          : 'border-indigo-200 bg-indigo-50/60'
+                      }`}
+                    >
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Qty Changed</span>
+                      <p
+                        className={`mt-1 text-base font-black ${
+                          movement.type === 'stock_in'
+                            ? 'text-emerald-700'
+                            : movement.type === 'distribution_release' || movement.type === 'stock_out'
+                            ? 'text-rose-700'
+                            : 'text-indigo-700'
+                        }`}
+                      >
+                        {movement.type === 'stock_in' ? '+' : movement.type === 'distribution_release' || movement.type === 'stock_out' ? '-' : ''}
+                        {movement.quantity} {movement.unit}
+                      </p>
+                    </div>
+
+                    <div className="rounded-2xl border border-slate-100 bg-slate-50/80 p-3 text-center">
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">New Balance</span>
+                      <p className="mt-1 text-base font-bold text-slate-900">
+                        {movement.new_quantity} {movement.unit}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Property Details */}
+                  <div className="rounded-2xl border border-slate-200/80 bg-white overflow-hidden text-xs">
+                    <div className="divide-y divide-slate-100">
+                      <div className="flex items-center justify-between px-4 py-2.5">
+                        <span className="text-slate-500 font-medium">Recorded By</span>
+                        <span className="font-semibold text-slate-900">{movement.performed_by_name || 'System'}</span>
+                      </div>
+                      <div className="flex items-center justify-between px-4 py-2.5 bg-slate-50/40">
+                        <span className="text-slate-500 font-medium">Transaction Date</span>
+                        <span className="font-semibold text-slate-900">{fullDateStr}</span>
+                      </div>
+                      <div className="flex items-center justify-between px-4 py-2.5">
+                        <span className="text-slate-500 font-medium">Exact Time</span>
+                        <span className="font-semibold text-slate-900">{fullTimeStr}</span>
+                      </div>
+                      {movement.reference_type && (
+                        <div className="flex items-center justify-between px-4 py-2.5 bg-slate-50/40">
+                          <span className="text-slate-500 font-medium">Reference Type</span>
+                          <span className="font-semibold text-slate-700 uppercase tracking-wide text-[11px]">
+                            {movement.reference_type}
+                          </span>
+                        </div>
+                      )}
+                      {movement.reference_id && (
+                        <div className="flex items-center justify-between px-4 py-2.5">
+                          <span className="text-slate-500 font-medium">Reference ID</span>
+                          <span className="font-mono text-[11px] text-slate-600 bg-slate-100 px-2 py-0.5 rounded-md">
+                            {movement.reference_id}
+                          </span>
+                        </div>
+                      )}
+                      <div className="flex items-center justify-between px-4 py-2.5 bg-slate-50/40">
+                        <span className="text-slate-500 font-medium">Movement ID</span>
+                        <span className="font-mono text-[11px] text-slate-400">
+                          {movement.id}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Notes & Remarks Section */}
+                  <div className="rounded-2xl border border-slate-200/80 bg-slate-50/60 p-4">
+                    <div className="flex items-center gap-1.5 text-slate-600 mb-1.5">
+                      <FileText className="h-3.5 w-3.5 text-indigo-500" />
+                      <span className="text-[11px] font-bold uppercase tracking-wider">
+                        Transaction Notes / Remarks
+                      </span>
+                    </div>
+                    <p className="text-xs leading-relaxed text-slate-700">
+                      {movement.notes || 'No remarks or special notes entered for this transaction.'}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Modal Footer */}
+                <div className="border-t border-slate-100 bg-slate-50/80 px-6 py-3.5 flex justify-end">
+                  <button
+                    type="button"
+                    onClick={() => setSelectedMovementForDetail(null)}
+                    className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-100 transition shadow-xs"
+                  >
+                    Close
+                  </button>
+                </div>
+              </div>
+            );
+          })()}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
