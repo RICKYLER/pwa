@@ -1,8 +1,10 @@
-﻿'use client';
+'use client';
 
 import { useCallback, useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { AlertTriangle, Filter, Package, Plus, Search, X } from 'lucide-react';
+import { AlertTriangle, Boxes, Calendar, CheckCircle2, FileSpreadsheet, Filter, Package, Plus, Search, X } from 'lucide-react';
+import { computeBodegaStats, getBodegaAuditCycle, exportBodegaAuditCsv } from '@/lib/inventory-audit';
+import { ForecastingInsightsCard } from '@/components/forecasting/ForecastingInsightsCard';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Drawer, DrawerContent, DrawerDescription, DrawerHeader, DrawerTitle } from '@/components/ui/drawer';
@@ -149,6 +151,8 @@ export default function InventoryMobile() {
 
   const maxQty = Math.max(...items.map((item) => item.quantity_available), 1);
   const canManage = hasPermission('manage_inventory');
+  const auditCycle = getBodegaAuditCycle();
+  const bodegaStats = computeBodegaStats(items);
 
   return (
     <>
@@ -236,16 +240,76 @@ export default function InventoryMobile() {
       </Drawer>
 
       <CivicPage className="space-y-4 px-4 py-4">
-        <MobilePageHeader
-          title="Inventory"
-          subtitle={isLoading ? 'Loading stock records...' : `${items.length} item types are tracked across the active inventory.`}
-          primaryAction={canManage ? (
-            <Button type="button" onClick={() => setShowForm(true)} className="h-11 rounded-[18px] px-4 text-sm font-semibold">
-              <Plus className="h-4 w-4" />
-              Add
+        {/* Top Bodega Mobile Header */}
+        <div className="space-y-2 border-b border-slate-200/80 pb-3">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <span className="rounded-lg bg-slate-900 px-2 py-0.5 font-mono text-[11px] font-bold uppercase tracking-wider text-amber-400">
+                E-MABINI
+              </span>
+              <span className="text-sm font-bold text-slate-900">
+                Bodega Tracking
+              </span>
+            </div>
+            <div className="inline-flex items-center gap-1 rounded-lg border border-amber-200 bg-amber-50 px-2 py-0.5 font-mono text-[11px] font-bold text-amber-900">
+              <Calendar className="h-3 w-3 text-amber-600" />
+              {auditCycle.currentAuditMonth}
+            </div>
+          </div>
+          <p className="text-xs text-slate-500">
+            MSWDO & MDRRMO Prepositioned Relief Inventory
+          </p>
+        </div>
+
+        {/* 3 Mobile Stats Overview Cards */}
+        <div className="grid grid-cols-3 gap-2">
+          <div className="rounded-xl border border-slate-200 bg-white p-2.5 shadow-sm text-center">
+            <p className="text-[10px] font-mono font-semibold uppercase text-slate-400">Stock</p>
+            <p className="text-base font-black text-slate-900 mt-0.5">{bodegaStats.totalUnits.toLocaleString()}</p>
+            <p className="text-[10px] text-slate-500">Units</p>
+          </div>
+          <div className={`rounded-xl border p-2.5 shadow-sm text-center ${
+            bodegaStats.ffpBufferMet ? 'border-emerald-200 bg-emerald-50/50' : 'border-amber-200 bg-amber-50/50'
+          }`}>
+            <p className="text-[10px] font-mono font-semibold uppercase text-emerald-800">FFP Buffer</p>
+            <p className="text-base font-black text-slate-900 mt-0.5">{bodegaStats.ffpStock.toLocaleString()}</p>
+            <p className="text-[10px] text-emerald-700 font-semibold">{bodegaStats.ffpPercentage}% / 2k</p>
+          </div>
+          <div className={`rounded-xl border p-2.5 shadow-sm text-center ${
+            bodegaStats.lowStockCount > 0 ? 'border-amber-300 bg-amber-50/60' : 'border-slate-200 bg-white'
+          }`}>
+            <p className="text-[10px] font-mono font-semibold uppercase text-amber-800">Alerts</p>
+            <p className="text-base font-black text-slate-900 mt-0.5">{bodegaStats.lowStockCount}</p>
+            <p className="text-[10px] text-amber-700">Below Min</p>
+          </div>
+        </div>
+
+        {/* Quick Actions Row */}
+        <div className="flex items-center justify-between gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => exportBodegaAuditCsv(items, auditCycle.currentAuditMonth)}
+            className="h-9 rounded-xl border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700"
+          >
+            <FileSpreadsheet className="mr-1.5 h-3.5 w-3.5 text-emerald-600" />
+            Export Audit
+          </Button>
+
+          {canManage ? (
+            <Button
+              type="button"
+              onClick={() => setShowForm(true)}
+              className="h-9 rounded-xl px-3.5 text-xs font-semibold"
+            >
+              <Plus className="mr-1 h-3.5 w-3.5" />
+              Add Item
             </Button>
           ) : null}
-        />
+        </div>
+
+        {/* MSWDO Relief Demand Forecasting Card */}
+        <ForecastingInsightsCard currentStockpile={bodegaStats.ffpStock || 2000} className="mt-1" />
 
         {lowStock.length > 0 && !isLoading ? (
           <Alert className="rounded-[22px] border-amber-200 bg-amber-50 text-amber-700">
@@ -380,6 +444,14 @@ export default function InventoryMobile() {
             description="Try clearing filters or add a new stock item."
           />
         )}
+
+        {/* Monthly cycle check footer */}
+        <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3.5 text-center text-xs text-slate-600">
+          <span className="font-mono font-medium text-slate-700">
+            * Monthly cycle check: Next required physical bodega count on{' '}
+            <span className="font-bold text-slate-900">{auditCycle.nextCycleCheckDate}</span>
+          </span>
+        </div>
       </CivicPage>
     </>
   );

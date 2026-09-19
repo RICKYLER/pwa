@@ -20,6 +20,13 @@ import { getAnalyticsScopeLabel } from '@/lib/analytics-scope';
 import { getCurrentUser, hasPermission } from '@/lib/auth';
 import AppShell from '@/components/AppShell';
 import MapLocationPicker from '@/components/MapLocationPicker';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { buildDistributionInventorySummary } from '@/lib/distribution-insights';
 import {
   createDistributionEvent,
@@ -1001,13 +1008,6 @@ export default function NewDistributionPage() {
                   </div>
                 ) : null}
 
-                {error ? (
-                  <div className="flex items-center gap-2 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700">
-                    <span className="h-1.5 w-1.5 flex-shrink-0 rounded-full bg-red-500" />
-                    {error}
-                  </div>
-                ) : null}
-
                 <div className="rounded-2xl border border-slate-200/60 bg-white p-4 shadow-sm">
                   <div className="flex items-center justify-between gap-2">
                     <p className="text-xs font-bold uppercase tracking-wider text-slate-500">
@@ -1049,6 +1049,45 @@ export default function NewDistributionPage() {
             </div>
           </form>
         )}
+
+        <Dialog open={Boolean(error)} onOpenChange={(open) => { if (!open) setError(''); }}>
+          <DialogContent
+            showCloseButton={true}
+            className="max-w-md overflow-hidden rounded-2xl border border-rose-200/80 bg-white p-0 shadow-2xl sm:max-w-md"
+          >
+            <div className="border-b border-rose-100 bg-rose-50/80 px-6 pt-6 pb-5">
+              <div className="flex items-start gap-3.5">
+                <div className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-2xl bg-rose-100 text-rose-600 shadow-sm ring-4 ring-rose-100/50">
+                  <AlertTriangle className="h-6 w-6" />
+                </div>
+                <div className="flex-1 pt-0.5">
+                  <DialogHeader className="space-y-1 text-left">
+                    <DialogTitle className="text-base font-bold text-slate-900">
+                      Inventory & Validation Notice
+                    </DialogTitle>
+                    <DialogDescription className="text-xs font-medium text-rose-600/90">
+                      Action required before proceeding
+                    </DialogDescription>
+                  </DialogHeader>
+                </div>
+              </div>
+            </div>
+            <div className="px-6 py-5">
+              <div className="rounded-xl border border-rose-200 bg-rose-50/50 p-4 text-sm font-medium leading-relaxed text-rose-950">
+                {error}
+              </div>
+              <div className="mt-5 flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => setError('')}
+                  className="inline-flex w-full items-center justify-center rounded-xl bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition-all hover:bg-slate-800 active:scale-[0.98] sm:w-auto"
+                >
+                  Okay, Understood
+                </button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
       </div>
     </AppShell>
   );

@@ -7,6 +7,7 @@ import PwaBootstrap from '@/components/PwaBootstrap'
 import { Toaster } from '@/components/ui/toaster'
 import { PwaInstallProvider } from '@/hooks/usePwaInstall'
 import './globals.css'
+import 'leaflet/dist/leaflet.css'
 
 const inter = Inter({ subsets: ['latin'], variable: '--font-sans' })
 

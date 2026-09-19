@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { GoogleMap, InfoWindow, Marker } from '@react-google-maps/api';
+import AdminReviewLeafletMap from '@/components/AdminReviewLeafletMap';
 import {
   ArrowUpRight,
   CheckCircle2,
@@ -25,7 +25,6 @@ import {
   Users,
 } from 'lucide-react';
 import AppShell from '@/components/AppShell';
-import { useGoogleMaps } from '@/components/GoogleMapsProvider';
 import { getCurrentUser } from '@/lib/auth';
 import { getHouseholds, updateHousehold } from '@/lib/db/households';
 import { getLocationMasterList, saveLocationMasterList } from '@/lib/db/location-master';
@@ -130,27 +129,6 @@ function getPinQaTone(status: PinQaStatus): string {
   }
 }
 
-function getReviewMarkerIcon(
-  household: Household,
-  selected: boolean,
-  pinQaStatus: PinQaStatus,
-): google.maps.Symbol {
-  const fillColor = pinQaStatus === 'valid'
-    ? '#10b981'
-    : pinQaStatus === 'duplicate'
-      ? '#ef4444'
-      : getConfidenceColor(household.location_confidence, household.location_verified);
-
-  return {
-    path: google.maps.SymbolPath.CIRCLE,
-    scale: selected ? 11 : 9,
-    fillColor,
-    fillOpacity: 1,
-    strokeWeight: selected ? 3 : 2.5,
-    strokeColor: '#ffffff',
-  };
-}
-
 function formatDate(value?: Date): string {
   if (!value) {
     return 'Waiting for review';
@@ -243,7 +221,6 @@ export default function AdminLocationReviewPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const user = getCurrentUser();
-  const { isLoaded } = useGoogleMaps();
 
   const [isLoading, setIsLoading] = useState(true);
   const [isSavingMaster, setIsSavingMaster] = useState(false);
@@ -270,7 +247,6 @@ export default function AdminLocationReviewPage() {
     pin_qa_status: 'needs_verification',
     pin_qa_notes: '',
   });
-  const [map, setMap] = useState<google.maps.Map | null>(null);
   const toastTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
@@ -280,19 +256,6 @@ export default function AdminLocationReviewPage() {
       }
     };
   }, []);
-
-  useEffect(() => {
-    if (!map) return;
-
-    const selectedHousehold = households.find((household) => household.id === selectedId) || null;
-    if (selectedHousehold && hasHouseholdPin(selectedHousehold)) {
-      map.panTo({ lat: selectedHousehold.gps_lat, lng: selectedHousehold.gps_long });
-      map.setZoom(18);
-      return;
-    }
-
-    focusMapOnPinnedHouseholds(map, households, DEFAULT_BARANGAY_CENTER);
-  }, [households, map, selectedId]);
 
   useEffect(() => {
     const nextTab = searchParams.get('tab');
@@ -962,63 +925,12 @@ export default function AdminLocationReviewPage() {
                 </p>
               </div>
               <div className="h-[440px]">
-                {!isLoaded ? (
-                  <div className="flex h-full items-center justify-center bg-slate-100">
-                    <Loader2 className="h-6 w-6 animate-spin text-slate-400" />
-                  </div>
-                ) : (
-                  <GoogleMap
-                    mapContainerStyle={{ width: '100%', height: '100%' }}
-                    center={DEFAULT_BARANGAY_CENTER}
-                    zoom={14}
-                    onLoad={(loadedMap) => setMap(loadedMap)}
-                    onUnmount={() => setMap(null)}
-                    options={{
-                      disableDefaultUI: false,
-                      zoomControl: true,
-                      mapTypeControl: false,
-                      streetViewControl: false,
-                      fullscreenControl: true,
-                      gestureHandling: 'greedy',
-                      styles: [
-                        { elementType: 'geometry', stylers: [{ color: '#f5f5f5' }] },
-                        { featureType: 'road', elementType: 'geometry', stylers: [{ color: '#ffffff' }] },
-                        { featureType: 'water', elementType: 'geometry', stylers: [{ color: '#c9d8e8' }] },
-                        { featureType: 'poi', stylers: [{ visibility: 'off' }] },
-                      ],
-                    }}
-                  >
-                    {filteredHouseholds.filter(hasHouseholdPin).map((household) => (
-                      <Marker
-                        key={household.id}
-                        position={{ lat: household.gps_lat, lng: household.gps_long }}
-                        icon={getReviewMarkerIcon(
-                          household,
-                          selectedId === household.id,
-                          getStoredOrDerivedPinQaStatus(household, households),
-                        )}
-                        onClick={() => setSelectedId(household.id)}
-                        title={household.head_name}
-                      />
-                    ))}
-
-                    {selectedHousehold && hasHouseholdPin(selectedHousehold) && (
-                      <InfoWindow
-                        position={{ lat: selectedHousehold.gps_lat, lng: selectedHousehold.gps_long }}
-                        onCloseClick={() => setSelectedId(null)}
-                      >
-                        <div className="min-w-[220px] text-sm text-slate-800">
-                          <p className="font-bold">{selectedHousehold.head_name}</p>
-                          <p className="mt-1 text-xs text-slate-500">{selectedHousehold.street_address}</p>
-                          <p className="text-xs text-slate-500">{selectedHousehold.purok_sitio}</p>
-                          <p className="mt-1 text-xs text-slate-500">
-                            {formatRegistrationStatusLabel(getHouseholdRegistrationStatus(selectedHousehold))}
-                          </p>
-                        </div>
-                      </InfoWindow>
-                    )}
-                  </GoogleMap>
-                )}
+                <AdminReviewLeafletMap
+                  households={filteredHouseholds}
+                  selectedId={selectedId}
+                  onSelectHousehold={setSelectedId}
+                  getPinQaStatus={(h) => getStoredOrDerivedPinQaStatus(h, households)}
+                />
               </div>
             </div>
 
