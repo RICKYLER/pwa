@@ -171,9 +171,9 @@ export function ForecastingInsightsCard({
         return;
       }
 
-      // Step 3: Compress Dataset via GZIP & calculate metrics
+      // Step 3: Process Dataset & calculate accuracy metrics
       setImportStatus({
-        message: `Step 2/3: Compressing ${result.importedCount} records via GZIP...`,
+        message: `Step 2/3: Processing & validating ${result.importedCount} historical records...`,
         isError: false,
       });
 
@@ -181,9 +181,9 @@ export function ForecastingInsightsCard({
       const summary = calculateDatasetSummary(result.events);
       const accuracyMetrics = evaluateForecastingAccuracy(result.events);
 
-      // Step 4: Save to Supabase & local cache store
+      // Step 4: Save dataset & update forecasting model
       setImportStatus({
-        message: `Step 3/3: Saving to Supabase & logging to history...`,
+        message: `Step 3/3: Saving dataset & updating forecasting model...`,
         isError: false,
       });
 
@@ -216,8 +216,8 @@ export function ForecastingInsightsCard({
 
       setIsUploading(false);
       setImportStatus({
-        message: `Successfully uploaded to Supabase! Loaded ${result.importedCount} cleansed records from "${file.name}".`,
-        compressionNote: `GZIP Compression: ${formatBytes(file.size)} → ${formatBytes(compression.compressedSizeBytes)} (-${compression.savedPercentage}% saved)`,
+        message: `Successfully loaded ${result.importedCount} historical disaster records from "${file.name}".`,
+        compressionNote: `Forecasting engine calibrated with ${accuracyMetrics.overallAccuracyRate}% overall accuracy.`,
         isError: false,
       });
       setShowHistoryModal(true);
@@ -317,7 +317,7 @@ export function ForecastingInsightsCard({
           <button
             type="button"
             onClick={() => setShowUploadHistoryModal(true)}
-            title="View Supabase upload history & dataset details"
+            title="View dataset upload history & accuracy metrics"
             className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700/80"
           >
             <History className="h-3.5 w-3.5 text-indigo-600" />
@@ -687,6 +687,7 @@ export function ForecastingInsightsCard({
         activeUploadId={activeUploadId || undefined}
         onSelectDataset={handleSelectHistoryDataset}
         onReloadHistory={refreshHistory}
+        currentStockpile={currentStockpile}
       />
     </div>
   );

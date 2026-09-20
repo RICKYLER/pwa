@@ -27,6 +27,7 @@ import {
   deleteDatasetUpload,
 } from '@/lib/forecasting/forecasting-upload-store';
 import { formatBytes } from '@/lib/forecasting/compression-helper';
+import { MSWDO_CONSTANTS } from '@/lib/forecasting/demand-predictor';
 import * as XLSX from 'xlsx';
 
 interface ForecastingUploadHistoryModalProps {
@@ -36,6 +37,7 @@ interface ForecastingUploadHistoryModalProps {
   activeUploadId?: string;
   onSelectDataset: (record: ForecastingUploadRecord) => void;
   onReloadHistory: () => void;
+  currentStockpile?: number;
 }
 
 export function ForecastingUploadHistoryModal({
@@ -45,6 +47,7 @@ export function ForecastingUploadHistoryModal({
   activeUploadId,
   onSelectDataset,
   onReloadHistory,
+  currentStockpile = MSWDO_CONSTANTS.MDRRMO_BODEGA_STOCKPILE_BUFFER,
 }: ForecastingUploadHistoryModalProps) {
   const [selectedRecordForDetails, setSelectedRecordForDetails] = useState<ForecastingUploadRecord | null>(null);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
@@ -147,7 +150,7 @@ export function ForecastingUploadHistoryModal({
                 </span>
               </div>
               <p className="text-xs text-slate-500 dark:text-slate-400">
-                Tracked in Supabase with GZIP compression & accuracy evaluation records
+                Disaster relief historical records & demand forecasting accuracy evaluation
               </p>
             </div>
           </div>
@@ -171,17 +174,13 @@ export function ForecastingUploadHistoryModal({
                 No Uploaded Datasets Yet
               </h4>
               <p className="mt-1 max-w-sm text-xs text-slate-500 dark:text-slate-400">
-                When you upload historical Excel (.xlsx) or CSV disaster records, they will automatically be compressed, saved to Supabase, and logged here with complete details.
+                When you upload historical Excel (.xlsx) or CSV disaster records, they will automatically be evaluated and logged here to power the demand forecasting model.
               </p>
             </div>
           ) : (
             <div className="space-y-3">
               {uploads.map((upload) => {
                 const isActive = activeUploadId === upload.id || upload.is_active;
-                const savedPercentage = upload.file_size_bytes > 0 && upload.compressed_size_bytes > 0
-                  ? Math.max(0, Math.round((1 - upload.compressed_size_bytes / upload.file_size_bytes) * 100))
-                  : 0;
-
                 const isDetailsOpen = selectedRecordForDetails?.id === upload.id;
 
                 return (
@@ -231,11 +230,6 @@ export function ForecastingUploadHistoryModal({
                             <span className="inline-flex items-center gap-1">
                               <HardDrive className="h-3.5 w-3.5 text-slate-400" />
                               <span>{formatBytes(upload.file_size_bytes)}</span>
-                              {upload.compressed_size_bytes > 0 && (
-                                <span className="text-emerald-600 dark:text-emerald-400 font-medium">
-                                  → {formatBytes(upload.compressed_size_bytes)} (-{savedPercentage}%)
-                                </span>
-                              )}
                             </span>
 
                             <span className="inline-flex items-center gap-1">
@@ -328,48 +322,48 @@ export function ForecastingUploadHistoryModal({
                     {/* Detailed Breakdown Accordion */}
                     {isDetailsOpen && (
                       <div className="border-t border-slate-100 bg-slate-50/50 p-4 dark:border-slate-800 dark:bg-slate-900/40 space-y-4">
-                        {/* Summary Metrics Cards */}
-                        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-                          <div className="rounded-lg border border-slate-200/80 bg-white p-2.5 dark:border-slate-800 dark:bg-slate-900">
-                            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
-                              Accuracy Score
+                        {/* Summary Metrics Cards (Matching Forecasting Operational KPIs) */}
+                        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                          <div className="rounded-xl border border-slate-100 bg-slate-50/60 p-3 dark:border-slate-800/80 dark:bg-slate-800/40">
+                            <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
+                              Overall Accuracy
                             </span>
-                            <p className="text-base font-black text-emerald-600 dark:text-emerald-400">
+                            <p className="mt-1 text-xl font-black text-emerald-600 dark:text-emerald-400">
                               {upload.accuracy_rate}%
                             </p>
-                            <span className="text-[10px] text-slate-400">MAPE: {upload.mape_percent}%</span>
+                            <span className="text-[10px] text-slate-400">Based on 100% - MAPE</span>
                           </div>
 
-                          <div className="rounded-lg border border-slate-200/80 bg-white p-2.5 dark:border-slate-800 dark:bg-slate-900">
-                            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
-                              Mean Error (MAE)
+                          <div className="rounded-xl border border-slate-100 bg-slate-50/60 p-3 dark:border-slate-800/80 dark:bg-slate-800/40">
+                            <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
+                              MAPE Error Rate
                             </span>
-                            <p className="text-base font-black text-indigo-600 dark:text-indigo-400">
-                              ±{upload.mae_error} packs
+                            <p className="mt-1 text-xl font-black text-indigo-600 dark:text-indigo-400">
+                              {upload.mape_percent}%
                             </p>
-                            <span className="text-[10px] text-slate-400">Per calamity event</span>
-                          </div>
-
-                          <div className="rounded-lg border border-slate-200/80 bg-white p-2.5 dark:border-slate-800 dark:bg-slate-900">
-                            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
-                              GZIP Compression
-                            </span>
-                            <p className="text-base font-black text-slate-800 dark:text-slate-200">
-                              -{savedPercentage}% Saved
-                            </p>
-                            <span className="text-[10px] text-emerald-600">
-                              {formatBytes(upload.compressed_size_bytes)} in Supabase
+                            <span className={`text-[10px] font-medium ${upload.mape_percent <= 1 ? 'text-emerald-600 dark:text-emerald-400' : upload.mape_percent <= 10 ? 'text-indigo-600 dark:text-indigo-400' : 'text-amber-600 dark:text-amber-400'}`}>
+                              {upload.mape_percent <= 1 ? 'High precision (<1%)' : upload.mape_percent <= 10 ? 'Reliable (<10%)' : 'Moderate (>10%)'}
                             </span>
                           </div>
 
-                          <div className="rounded-lg border border-slate-200/80 bg-white p-2.5 dark:border-slate-800 dark:bg-slate-900">
-                            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
-                              Storage Target
+                          <div className="rounded-xl border border-slate-100 bg-slate-50/60 p-3 dark:border-slate-800/80 dark:bg-slate-800/40">
+                            <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
+                              Mean Abs Error (MAE)
                             </span>
-                            <p className="text-sm font-bold text-slate-700 dark:text-slate-300 truncate">
-                              Supabase DB + Cache
+                            <p className="mt-1 text-xl font-black text-slate-800 dark:text-slate-200">
+                              ±{upload.mae_error}
                             </p>
-                            <span className="text-[10px] text-slate-400">Encrypted JSONB</span>
+                            <span className="text-[10px] text-slate-400">Packs deviation per event</span>
+                          </div>
+
+                          <div className="rounded-xl border border-slate-100 bg-slate-50/60 p-3 dark:border-slate-800/80 dark:bg-slate-800/40">
+                            <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
+                              Bodega Stockpile
+                            </span>
+                            <p className="mt-1 text-xl font-black text-amber-600 dark:text-amber-400">
+                              {currentStockpile.toLocaleString()}
+                            </p>
+                            <span className="text-[10px] text-slate-400">MDRRMO Standby Buffer</span>
                           </div>
                         </div>
 
@@ -443,7 +437,7 @@ export function ForecastingUploadHistoryModal({
         {/* Footer */}
         <div className="flex items-center justify-between border-t border-slate-200 px-6 py-3 bg-slate-50/50 dark:border-slate-800 dark:bg-slate-900/50">
           <p className="text-xs text-slate-500 dark:text-slate-400">
-            Upload limit: <strong>10 MB</strong> • Formats: <strong>.xlsx, .xls, .csv</strong> • GZIP Compressed
+            Upload limit: <strong>10 MB</strong> • Formats: <strong>.xlsx, .xls, .csv</strong> • Disaster Relief Historical Data
           </p>
           <button
             type="button"
