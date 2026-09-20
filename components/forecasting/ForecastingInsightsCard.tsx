@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useMemo, useRef } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import {
   TrendingUp,
   AlertTriangle,
@@ -15,6 +15,10 @@ import {
   Upload,
   Download,
   RotateCcw,
+  History,
+  HardDrive,
+  Loader2,
+  Database,
 } from 'lucide-react';
 import { BARANGAY_REGISTRY } from '@/lib/mabini-barangays';
 import {
@@ -39,6 +43,19 @@ import {
   downloadExcelTemplate,
   downloadCsvTemplate,
 } from '@/lib/forecasting/csv-importer';
+import {
+  validateDatasetFile,
+  compressJsonPayload,
+  calculateDatasetSummary,
+  formatBytes,
+  MAX_FORECASTING_FILE_SIZE_MB,
+} from '@/lib/forecasting/compression-helper';
+import {
+  fetchUploadHistory,
+  saveDatasetUpload,
+  type ForecastingUploadRecord,
+} from '@/lib/forecasting/forecasting-upload-store';
+import { ForecastingUploadHistoryModal } from './ForecastingUploadHistoryModal';
 
 interface ForecastingInsightsCardProps {
   currentStockpile?: number;
@@ -51,8 +68,40 @@ export function ForecastingInsightsCard({
 }: ForecastingInsightsCardProps) {
   // Dataset State (default to synthetic, can be replaced by uploaded Excel/CSV)
   const [activeDataset, setActiveDataset] = useState<HistoricalDisasterEvent[]>(MABINI_SYNTHETIC_DISASTER_HISTORY);
-  const [importStatus, setImportStatus] = useState<{ message: string; isError?: boolean } | null>(null);
+  const [activeUploadId, setActiveUploadId] = useState<string | null>(null);
+  const [activeFileName, setActiveFileName] = useState<string | null>(null);
+  const [uploadHistory, setUploadHistory] = useState<ForecastingUploadRecord[]>([]);
+  const [showUploadHistoryModal, setShowUploadHistoryModal] = useState<boolean>(false);
+  const [isUploading, setIsUploading] = useState<boolean>(false);
+  const [importStatus, setImportStatus] = useState<{
+    message: string;
+    isError?: boolean;
+    compressionNote?: string;
+  } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Load upload history and restore active dataset on mount
+  useEffect(() => {
+    let isMounted = true;
+    fetchUploadHistory().then((history) => {
+      if (!isMounted) return;
+      setUploadHistory(history);
+      const activeRecord = history.find((h) => h.is_active);
+      if (activeRecord && Array.isArray(activeRecord.dataset_events) && activeRecord.dataset_events.length > 0) {
+        setActiveDataset(activeRecord.dataset_events);
+        setActiveUploadId(activeRecord.id);
+        setActiveFileName(activeRecord.file_name);
+      }
+    });
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  const refreshHistory = async () => {
+    const history = await fetchUploadHistory();
+    setUploadHistory(history);
+  };
 
   // Simulator State
   const [selectedBarangay, setSelectedBarangay] = useState<string>('cadunan');
@@ -85,35 +134,119 @@ export function ForecastingInsightsCard({
     return compareBaselineVsProposed(activeDataset);
   }, [activeDataset]);
 
-  // Handle Excel (.xlsx, .xls) / CSV upload
+  // Handle Excel (.xlsx, .xls) / CSV upload with real Supabase storage, 10MB limit & compression
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
+    // Reset input so same file can be re-selected if needed
+    e.target.value = '';
+
+    // Step 1: File Size Limit Check (Max 10 MB)
+    const sizeCheck = validateDatasetFile(file, MAX_FORECASTING_FILE_SIZE_MB);
+    if (!sizeCheck.valid) {
+      setImportStatus({
+        message: sizeCheck.error || `File exceeds the ${MAX_FORECASTING_FILE_SIZE_MB} MB limit.`,
+        isError: true,
+      });
+      return;
+    }
+
     try {
-      setImportStatus({ message: `Reading and cleansing "${file.name}"...`, isError: false });
+      setIsUploading(true);
+      setImportStatus({
+        message: `Step 1/3: Cleansing "${file.name}" (${sizeCheck.sizeFormatted})...`,
+        isError: false,
+      });
+
+      // Step 2: Parse & Cleanse Excel / CSV data
       const result = await parseExcelOrCsvFile(file);
 
-      if (result.success && result.events.length > 0) {
-        setActiveDataset(result.events);
+      if (!result.success || result.events.length === 0) {
+        setIsUploading(false);
         setImportStatus({
-          message: `Successfully cleansed and loaded ${result.importedCount} records from "${file.name}"!`,
-          isError: false,
-        });
-        setShowHistoryModal(true);
-      } else {
-        setImportStatus({
-          message: result.errors[0] || 'Failed to parse file. Please verify columns.',
+          message: result.errors[0] || 'Failed to parse file. Please verify column format.',
           isError: true,
         });
+        return;
       }
+
+      // Step 3: Compress Dataset via GZIP & calculate metrics
+      setImportStatus({
+        message: `Step 2/3: Compressing ${result.importedCount} records via GZIP...`,
+        isError: false,
+      });
+
+      const compression = await compressJsonPayload(result.events);
+      const summary = calculateDatasetSummary(result.events);
+      const accuracyMetrics = evaluateForecastingAccuracy(result.events);
+
+      // Step 4: Save to Supabase & local cache store
+      setImportStatus({
+        message: `Step 3/3: Saving to Supabase & logging to history...`,
+        isError: false,
+      });
+
+      const ext = file.name.toLowerCase().endsWith('.csv')
+        ? 'csv'
+        : file.name.toLowerCase().endsWith('.xls')
+        ? 'xls'
+        : 'xlsx';
+
+      const saved = await saveDatasetUpload({
+        file_name: file.name,
+        file_size_bytes: file.size,
+        compressed_size_bytes: compression.compressedSizeBytes,
+        file_type: ext,
+        records_count: result.importedCount,
+        accuracy_rate: accuracyMetrics.overallAccuracyRate,
+        mape_percent: accuracyMetrics.meanAbsolutePercentageError,
+        mae_error: accuracyMetrics.meanAbsoluteError,
+        uploaded_by: 'MSWDO Staff',
+        is_active: true,
+        metadata: summary,
+        dataset_events: result.events,
+      });
+
+      // Activate dataset in live engine
+      setActiveDataset(result.events);
+      setActiveUploadId(saved.id);
+      setActiveFileName(file.name);
+      await refreshHistory();
+
+      setIsUploading(false);
+      setImportStatus({
+        message: `Successfully uploaded to Supabase! Loaded ${result.importedCount} cleansed records from "${file.name}".`,
+        compressionNote: `GZIP Compression: ${formatBytes(file.size)} → ${formatBytes(compression.compressedSizeBytes)} (-${compression.savedPercentage}% saved)`,
+        isError: false,
+      });
+      setShowHistoryModal(true);
     } catch (err: any) {
-      setImportStatus({ message: err?.message || 'Error reading file.', isError: true });
+      setIsUploading(false);
+      setImportStatus({
+        message: err?.message || 'Error processing file upload.',
+        isError: true,
+      });
+    }
+  };
+
+  const handleSelectHistoryDataset = (record: ForecastingUploadRecord) => {
+    if (Array.isArray(record.dataset_events) && record.dataset_events.length > 0) {
+      setActiveDataset(record.dataset_events);
+      setActiveUploadId(record.id);
+      setActiveFileName(record.file_name);
+      setImportStatus({
+        message: `Active Dataset: "${record.file_name}" (${record.records_count} records, ${record.accuracy_rate}% accuracy).`,
+        compressionNote: `Storage size: ${formatBytes(record.compressed_size_bytes)}`,
+        isError: false,
+      });
     }
   };
 
   const handleResetToDefault = () => {
     setActiveDataset(MABINI_SYNTHETIC_DISASTER_HISTORY);
+    setActiveUploadId(null);
+    setActiveFileName(null);
     setImportStatus(null);
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
@@ -134,26 +267,27 @@ export function ForecastingInsightsCard({
       {/* Header Banner */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between border-b border-slate-100 pb-4 dark:border-slate-800/60">
         <div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <h3 className="font-bold text-slate-900 dark:text-slate-100">
               MSWDO Relief Demand Forecasting
             </h3>
-              <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-semibold text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400 border border-emerald-200/60">
-                <CheckCircle2 className="h-3 w-3" />
-                {accuracyReport.overallAccuracyRate}% Model Accuracy
+            <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-semibold text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400 border border-emerald-200/60">
+              <CheckCircle2 className="h-3 w-3" />
+              {accuracyReport.overallAccuracyRate}% Model Accuracy
+            </span>
+            {isCustomDataset && (
+              <span className="inline-flex items-center gap-1 rounded-full bg-indigo-50 px-2 py-0.5 text-[10px] font-bold text-indigo-700 dark:bg-indigo-950/50 dark:text-indigo-300 border border-indigo-200">
+                <Database className="h-3 w-3" />
+                {activeFileName || 'Custom File Active'}
               </span>
-              {isCustomDataset && (
-                <span className="inline-flex items-center rounded-full bg-indigo-50 px-2 py-0.5 text-[10px] font-bold text-indigo-700 dark:bg-indigo-950/50 dark:text-indigo-300 border border-indigo-200">
-                  Custom File Active
-                </span>
-              )}
-            </div>
-            <p className="text-xs text-slate-500 dark:text-slate-400">
-              Standard 3 families per HH (1 HH = 3 FFPs) • 2,000 MDRRMO Bodega Buffer
-            </p>
+            )}
           </div>
+          <p className="text-xs text-slate-500 dark:text-slate-400">
+            Standard 3 families per HH (1 HH = 3 FFPs) • 2,000 MDRRMO Bodega Buffer
+          </p>
+        </div>
 
-        {/* Action Buttons: Template, Upload CSV, Accuracy */}
+        {/* Action Buttons: Template, Upload CSV, History, Accuracy */}
         <div className="flex flex-wrap items-center gap-2 self-start">
           <button
             type="button"
@@ -167,12 +301,32 @@ export function ForecastingInsightsCard({
 
           <button
             type="button"
+            disabled={isUploading}
             onClick={() => fileInputRef.current?.click()}
-            title="Upload real MSWDO historical disaster data"
-            className="inline-flex items-center gap-1 rounded-lg border border-indigo-200 bg-indigo-50/80 px-2.5 py-1.5 text-xs font-semibold text-indigo-700 hover:bg-indigo-100 dark:border-indigo-800 dark:bg-indigo-950/60 dark:text-indigo-300"
+            title={`Upload real MSWDO historical disaster data (Limit: ${MAX_FORECASTING_FILE_SIZE_MB} MB)`}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-indigo-200 bg-indigo-50/80 px-2.5 py-1.5 text-xs font-semibold text-indigo-700 hover:bg-indigo-100 disabled:opacity-50 dark:border-indigo-800 dark:bg-indigo-950/60 dark:text-indigo-300"
           >
-            <Upload className="h-3.5 w-3.5 text-indigo-600" />
-            <span>Upload Excel/CSV</span>
+            {isUploading ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin text-indigo-600" />
+            ) : (
+              <Upload className="h-3.5 w-3.5 text-indigo-600" />
+            )}
+            <span>{isUploading ? 'Uploading...' : 'Upload Excel/CSV'}</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setShowUploadHistoryModal(true)}
+            title="View Supabase upload history & dataset details"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700/80"
+          >
+            <History className="h-3.5 w-3.5 text-indigo-600" />
+            <span>History</span>
+            {uploadHistory.length > 0 && (
+              <span className="rounded-full bg-indigo-100 px-1.5 py-0.2 text-[10px] font-bold text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300">
+                {uploadHistory.length}
+              </span>
+            )}
           </button>
 
           {isCustomDataset && (
@@ -211,7 +365,14 @@ export function ForecastingInsightsCard({
             ) : (
               <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" />
             )}
-            <span>{importStatus.message}</span>
+            <div>
+              <p className="font-medium">{importStatus.message}</p>
+              {importStatus.compressionNote && (
+                <p className="text-[11px] font-semibold opacity-85 text-emerald-700 dark:text-emerald-300">
+                  {importStatus.compressionNote}
+                </p>
+              )}
+            </div>
           </div>
           <button
             type="button"
@@ -517,6 +678,16 @@ export function ForecastingInsightsCard({
           <span>{forecast.bodegaStatus.operationalNote}</span>
         </div>
       </div>
+
+      {/* Upload History & Details Modal */}
+      <ForecastingUploadHistoryModal
+        isOpen={showUploadHistoryModal}
+        onClose={() => setShowUploadHistoryModal(false)}
+        uploads={uploadHistory}
+        activeUploadId={activeUploadId || undefined}
+        onSelectDataset={handleSelectHistoryDataset}
+        onReloadHistory={refreshHistory}
+      />
     </div>
   );
 }
