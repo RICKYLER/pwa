@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   generateSampleCsvTemplate,
   parseAndCleanseDisasterCsv,
+  buildExcelWorkbook,
 } from '../lib/forecasting/csv-importer';
 
 test('1. Generates valid CSV template with correct MSWDO headers', () => {
@@ -42,3 +43,38 @@ test('3. Handles missing columns and cleanses numbers with commas (e.g. "1,200")
   assert.equal(result.events[0].actualDistributed.familyFoodPacks, 3600);
   assert.equal(result.events[0].hazardType, 'flashflood');
 });
+
+test('4. Builds Excel workbook from disaster events with headers and correct row mapping', () => {
+  const sampleEvents = [
+    {
+      id: 'e-1',
+      eventName: 'Test Event Cadunan',
+      date: '2024-04-01',
+      barangayId: 'cadunan',
+      barangayName: 'Cadunan',
+      hazardType: 'flashflood' as const,
+      severityLevel: 'moderate' as const,
+      affectedHouseholds: 50,
+      affectedFamilies: 150,
+      displacementDays: 3,
+      vulnerability: { seniorsCount: 5, pwdsCount: 2, infantsCount: 3, lactatingMothersCount: 2 },
+      actualDistributed: { familyFoodPacks: 155, kitchenSets: 25, hygieneKits: 50, infantCarePacks: 0, seniorCarePacks: 0 },
+      notes: 'Road flooded',
+    },
+  ];
+
+  const wb = buildExcelWorkbook(sampleEvents);
+  assert.ok(wb.SheetNames.includes('Disaster Data'));
+  const sheet = wb.Sheets['Disaster Data'];
+  assert.ok(sheet);
+
+  // Check columns and values
+  assert.equal(sheet['A1'].v, 'Event Name');
+  assert.equal(sheet['A2'].v, 'Test Event Cadunan');
+  assert.equal(sheet['C2'].v, 'Cadunan');
+  assert.equal(sheet['F2'].v, 50);
+  assert.equal(sheet['G2'].v, 150);
+  assert.equal(sheet['I2'].v, 155);
+  assert.equal(sheet['L2'].v, 'Road flooded');
+});
+

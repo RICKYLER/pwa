@@ -69,12 +69,142 @@ export function downloadExcelTemplate(): void {
       ['2024 Upland Landslide', '2024-03-12', 'Golden Valley', 'landslide', 'critical', 145, 435, 5, 460, 140, 145, 'Sitio isolated road block'],
     ];
     const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
+    ws['!cols'] = [
+      { wch: 32 },
+      { wch: 16 },
+      { wch: 18 },
+      { wch: 15 },
+      { wch: 22 },
+      { wch: 20 },
+      { wch: 22 },
+      { wch: 18 },
+      { wch: 24 },
+      { wch: 24 },
+      { wch: 24 },
+      { wch: 35 },
+    ];
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Disaster Data');
-    XLSX.writeFile(wb, `MSWDO_Relief_Forecasting_Template_${new Date().toISOString().slice(0, 10)}.xlsx`);
+    if (typeof window !== 'undefined') {
+      XLSX.writeFile(wb, `MSWDO_Relief_Forecasting_Template_${new Date().toISOString().slice(0, 10)}.xlsx`);
+    }
   } catch (err) {
     // Fallback to CSV if browser environment prevents direct XLSX write
     downloadCsvTemplate();
+  }
+}
+
+/**
+ * Builds a structured Microsoft Excel (.xlsx) workbook from HistoricalDisasterEvent array
+ */
+export function buildExcelWorkbook(events: HistoricalDisasterEvent[]): XLSX.WorkBook {
+  const headers = CSV_TEMPLATE_HEADERS;
+  const rows = (events || []).map((e) => [
+    e.eventName || '',
+    e.date || '',
+    e.barangayName || e.barangayId || '',
+    e.hazardType || 'flashflood',
+    e.severityLevel || 'moderate',
+    e.affectedHouseholds ?? 0,
+    e.affectedFamilies ?? (e.affectedHouseholds ? e.affectedHouseholds * 3 : 0),
+    e.displacementDays ?? 1,
+    e.actualDistributed?.familyFoodPacks ?? 0,
+    e.actualDistributed?.kitchenSets ?? 0,
+    e.actualDistributed?.hygieneKits ?? 0,
+    e.notes || '',
+  ]);
+
+  const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
+  ws['!cols'] = [
+    { wch: 32 }, // Event Name
+    { wch: 16 }, // Date (YYYY-MM-DD)
+    { wch: 18 }, // Barangay
+    { wch: 15 }, // Hazard Type
+    { wch: 22 }, // Severity (low/moderate/severe/critical)
+    { wch: 20 }, // Affected Households
+    { wch: 22 }, // Affected Families (optional)
+    { wch: 18 }, // Displacement Days
+    { wch: 24 }, // Actual FFPs Distributed
+    { wch: 24 }, // Kitchen Sets Distributed
+    { wch: 24 }, // Hygiene Kits Distributed
+    { wch: 35 }, // Notes
+  ];
+
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Disaster Data');
+  return wb;
+}
+
+/**
+ * Trigger browser download of historical disaster events as a formatted Microsoft Excel (.xlsx) file.
+ * Enables downloading whatever dataset was uploaded or is currently active.
+ */
+export function exportEventsToExcel(
+  events: HistoricalDisasterEvent[],
+  filenamePrefix: string = 'MSWDO_Disaster_Data'
+): void {
+  try {
+    if (!events || events.length === 0) {
+      downloadExcelTemplate();
+      return;
+    }
+
+    const wb = buildExcelWorkbook(events);
+    const cleanName = (filenamePrefix || 'MSWDO_Disaster_Data')
+      .replace(/\.[^/.]+$/, '')
+      .replace(/[^a-zA-Z0-9_\-\s]/g, '_')
+      .trim();
+    const finalFilename = `${cleanName}_${new Date().toISOString().slice(0, 10)}.xlsx`;
+
+    if (typeof window !== 'undefined') {
+      XLSX.writeFile(wb, finalFilename);
+    }
+  } catch (err) {
+    console.warn('[exportEventsToExcel] Falling back to CSV export:', err);
+    exportEventsToCsv(events, filenamePrefix);
+  }
+}
+
+/**
+ * Fallback browser download of disaster events as CSV
+ */
+export function exportEventsToCsv(
+  events: HistoricalDisasterEvent[],
+  filenamePrefix: string = 'MSWDO_Disaster_Data'
+): void {
+  try {
+    const headers = CSV_TEMPLATE_HEADERS.join(',');
+    const rows = (events || []).map((e) => [
+      `"${(e.eventName || '').replace(/"/g, '""')}"`,
+      `"${e.date || ''}"`,
+      `"${(e.barangayName || e.barangayId || '').replace(/"/g, '""')}"`,
+      `"${e.hazardType || ''}"`,
+      `"${e.severityLevel || ''}"`,
+      e.affectedHouseholds ?? 0,
+      e.affectedFamilies ?? (e.affectedHouseholds ? e.affectedHouseholds * 3 : ''),
+      e.displacementDays ?? 1,
+      e.actualDistributed?.familyFoodPacks ?? 0,
+      e.actualDistributed?.kitchenSets ?? 0,
+      e.actualDistributed?.hygieneKits ?? 0,
+      `"${(e.notes || '').replace(/"/g, '""')}"`,
+    ].join(','));
+
+    const content = [headers, ...rows].join('\r\n');
+    const blob = new Blob([content], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.setAttribute('href', url);
+    const cleanName = (filenamePrefix || 'MSWDO_Disaster_Data')
+      .replace(/\.[^/.]+$/, '')
+      .replace(/[^a-zA-Z0-9_\-\s]/g, '_')
+      .trim();
+    link.setAttribute('download', `${cleanName}_${new Date().toISOString().slice(0, 10)}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  } catch (err) {
+    console.error('Failed to export CSV:', err);
   }
 }
 

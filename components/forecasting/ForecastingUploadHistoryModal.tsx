@@ -28,7 +28,7 @@ import {
 } from '@/lib/forecasting/forecasting-upload-store';
 import { formatBytes } from '@/lib/forecasting/compression-helper';
 import { MSWDO_CONSTANTS } from '@/lib/forecasting/demand-predictor';
-import * as XLSX from 'xlsx';
+import { exportEventsToExcel } from '@/lib/forecasting/csv-importer';
 
 interface ForecastingUploadHistoryModalProps {
   isOpen: boolean;
@@ -75,29 +75,7 @@ export function ForecastingUploadHistoryModal({
   };
 
   const handleDownloadDataset = (record: ForecastingUploadRecord) => {
-    try {
-      const rows = record.dataset_events.map((e) => ({
-        'Event Name': e.eventName,
-        'Date': e.date,
-        'Barangay': e.barangayName,
-        'Hazard Type': e.hazardType,
-        'Severity Level': e.severityLevel,
-        'Affected Households': e.affectedHouseholds,
-        'Affected Families': e.affectedFamilies,
-        'Displacement Days': e.displacementDays,
-        'Actual FFPs Distributed': e.actualDistributed?.familyFoodPacks || 0,
-        'Kitchen Sets': e.actualDistributed?.kitchenSets || 0,
-        'Hygiene Kits': e.actualDistributed?.hygieneKits || 0,
-        'Notes': e.notes || '',
-      }));
-
-      const ws = XLSX.utils.json_to_sheet(rows);
-      const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, ws, 'Disaster Events');
-      XLSX.writeFile(wb, `${record.file_name.replace(/\.[^/.]+$/, '')}_exported.xlsx`);
-    } catch (err) {
-      console.error('Failed to export dataset:', err);
-    }
+    exportEventsToExcel(record.dataset_events, record.file_name);
   };
 
   const formatDateTime = (isoString: string) => {
@@ -284,9 +262,9 @@ export function ForecastingUploadHistoryModal({
                           type="button"
                           onClick={() => handleDownloadDataset(upload)}
                           className="rounded-lg border border-slate-200 bg-white p-1.5 text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300"
-                          title="Export / Download Excel"
+                          title="Download uploaded dataset as Excel (.xlsx)"
                         >
-                          <Download className="h-3.5 w-3.5" />
+                          <Download className="h-3.5 w-3.5 text-emerald-600" />
                         </button>
 
                         {deleteConfirmId === upload.id ? (
