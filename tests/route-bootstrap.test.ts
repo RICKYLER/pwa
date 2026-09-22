@@ -37,3 +37,10 @@ test('member approvals route bootstraps households, residents and audit logs', (
     ['households', 'residents', 'audit_logs'],
   );
 });
+
+test('forecast route bootstraps inventory items for bodega buffer tracking', () => {
+  assert.deepEqual(
+    getRouteBootstrapTables('/forecast'),
+    ['inventory_items'],
+  );
+});

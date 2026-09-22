@@ -3,7 +3,25 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { AlertTriangle, Activity, Baby, FileText, Home, Package, Radio, ShieldAlert, Users, CheckCircle2 } from 'lucide-react';
+import {
+  AlertTriangle,
+  Activity,
+  Baby,
+  FileText,
+  Home,
+  Package,
+  Radio,
+  ShieldAlert,
+  Users,
+  CheckCircle2,
+  TrendingUp,
+  Plus,
+  ArrowRight,
+  ArrowUpRight,
+  MapPin,
+  HeartPulse,
+  ChevronRight,
+} from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { getAnalyticsBarangayScope, getAnalyticsScopeLabel } from '@/lib/analytics-scope';
 import { db } from '@/lib/db/indexeddb';
@@ -13,14 +31,6 @@ import { getIncidents } from '@/lib/db/incidents';
 import { getReportsVulnerableTotal } from '@/lib/reports-preview-data';
 import { getDefaultRouteForUser, hasPermission, restoreSession } from '@/lib/auth';
 import type { DistributionEvent, Incident } from '@/lib/db/schema';
-import {
-  CivicBadge,
-  CivicHero,
-  CivicKpiCard,
-  CivicPage,
-  CivicPanel,
-  CivicSectionHeading,
-} from '@/components/ui/civic-primitives';
 
 interface Stats {
   total_households: number;
@@ -111,205 +121,230 @@ export default function DashboardMobile() {
 
   const totalVulnerable = getReportsVulnerableTotal(stats);
   const scopeLabel = getAnalyticsScopeLabel(user);
-  const heroDescription = user.role === 'admin'
-    ? `${(stats?.total_population ?? 0).toLocaleString()} residents are represented across all barangays.`
-    : `${(stats?.total_population ?? 0).toLocaleString()} residents are represented in ${scopeLabel}.`;
 
-  const quickActions = [
-    hasPermission('create_household') && { href: '/households/new', label: 'Add household', icon: Home },
-    hasPermission('view_vulnerability') && { href: '/vulnerability', label: 'Risk profiles', icon: ShieldAlert },
-    hasPermission('view_reports') && { href: '/distribution', label: 'Distribution', icon: Package },
-    hasPermission('view_reports') && { href: '/reports', label: 'Reports', icon: FileText },
-  ].filter(Boolean) as { href: string; label: string; icon: typeof Home }[];
-  const adminReviewShortcuts = user.role === 'admin' ? [
-    {
-      href: '/admin/location-review?tab=pending',
-      label: 'Pending review',
-      description: 'Start with the oldest pending registration.',
-    },
-    {
-      href: '/admin/location-review?tab=approved&issue=missing_coordinates',
-      label: 'Missing coordinates',
-      description: 'Fix approved records that still need a map pin.',
-    },
-    {
-      href: '/admin/location-review?tab=needs_correction',
-      label: 'Needs correction',
-      description: 'Review registrations that were sent back for updates.',
-    },
-  ] : [];
-
-  const attentionRows = [
-    { label: 'Children', value: stats?.children_count ?? 0, color: 'bg-cyan-950' },
-    { label: 'Seniors', value: stats?.seniors_count ?? 0, color: 'bg-amber-500' },
-    { label: 'PWD', value: stats?.pwd_count ?? 0, color: 'bg-rose-500' },
-    { label: 'Pregnant', value: stats?.pregnant_count ?? 0, color: 'bg-teal-600' },
-    { label: 'Chronic', value: stats?.chronic_count ?? 0, color: 'bg-slate-700' },
-    { label: 'Low income', value: stats?.low_income_count ?? 0, color: 'bg-emerald-600' },
+  const vulnerabilityRows = [
+    { label: 'Seniors', value: stats?.seniors_count ?? 0, icon: '👴', color: 'bg-amber-500' },
+    { label: 'PWDs', value: stats?.pwd_count ?? 0, icon: '♿', color: 'bg-rose-500' },
+    { label: 'Children (0-17)', value: stats?.children_count ?? 0, icon: '👶', color: 'bg-cyan-600' },
+    { label: 'Pregnant', value: stats?.pregnant_count ?? 0, icon: '🤰', color: 'bg-teal-600' },
+    { label: 'Chronic', value: stats?.chronic_count ?? 0, icon: '🩺', color: 'bg-indigo-600' },
+    { label: 'Low-income', value: stats?.low_income_count ?? 0, icon: '🏷️', color: 'bg-emerald-600' },
   ];
 
   return (
-    <CivicPage className="space-y-4 px-4 py-4">
-      <CivicHero
-        eyebrow="Municipal Operations Hub"
-        title={`${greeting()}, ${user.name?.split(' ')[0] ?? 'Official'}`}
-        description={isLoading ? 'Loading executive briefing...' : heroDescription}
-        className="px-4 py-4 sm:px-5 sm:py-5"
-      >
-        <div className="mt-4 flex flex-wrap gap-2">
-          <CivicBadge label={`${stats?.total_households ?? 0} households`} tone="teal" />
-          <CivicBadge label={`${totalVulnerable} vulnerable`} tone="amber" />
-          {activeIncidents.length > 0 && <CivicBadge label={`${activeIncidents.length} active incidents`} tone="rose" />}
-          {activeEvents.length > 0 && <CivicBadge label={`${activeEvents.length} distributions`} tone="navy" />}
+    <div className="space-y-4 px-3 py-4">
+      {/* Top Header & Municipal Pulse */}
+      <div className="rounded-2xl border border-slate-200/90 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+        <div className="flex items-center justify-between">
+          <span className="rounded-md bg-cyan-950 px-2 py-0.5 font-mono text-[10px] font-bold text-cyan-300">
+            MSWDO MABINI
+          </span>
+          {activeIncidents.length > 0 ? (
+            <span className="inline-flex items-center gap-1 rounded-full bg-rose-50 px-2 py-0.5 text-[10px] font-bold text-rose-700 border border-rose-200">
+              <span className="h-1.5 w-1.5 rounded-full bg-rose-600 animate-ping" />
+              {activeIncidents.length} Alert Active
+            </span>
+          ) : (
+            <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-bold text-emerald-700 border border-emerald-200">
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+              Normal Operations
+            </span>
+          )}
         </div>
 
-        <div className="mt-5 grid grid-cols-2 gap-2">
-          {quickActions.map((link) => {
-            const Icon = link.icon;
+        <h1 className="mt-2.5 text-lg font-black text-slate-900 dark:text-slate-100">
+          {greeting()}, {user.name?.split(' ')[0] ?? 'Official'}
+        </h1>
+        <p className="text-xs text-slate-500">{scopeLabel}</p>
+
+        {/* Quick Action Pills */}
+        <div className="mt-3.5 flex flex-wrap items-center gap-1.5">
+          {hasPermission('create_household' as never) && (
+            <Link
+              href="/households/new"
+              className="inline-flex items-center gap-1 rounded-lg bg-cyan-950 px-2.5 py-1.5 text-xs font-semibold text-white shadow-xs"
+            >
+              <Plus className="h-3 w-3 text-cyan-300" />
+              <span>Add HH</span>
+            </Link>
+          )}
+
+          <Link
+            href="/vulnerability"
+            className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-xs font-semibold text-slate-700"
+          >
+            <ShieldAlert className="h-3 w-3 text-rose-600" />
+            <span>Risk</span>
+          </Link>
+
+          <Link
+            href="/forecast"
+            className="inline-flex items-center gap-1 rounded-lg border border-cyan-200 bg-cyan-50 px-2.5 py-1.5 text-xs font-semibold text-cyan-950"
+          >
+            <TrendingUp className="h-3 w-3 text-cyan-700" />
+            <span>Forecast</span>
+          </Link>
+
+          <Link
+            href="/reports"
+            className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-xs font-semibold text-slate-700"
+          >
+            <FileText className="h-3 w-3 text-slate-500" />
+            <span>Reports</span>
+          </Link>
+        </div>
+
+        {/* 4 Core Vitals Grid */}
+        <div className="mt-4 grid grid-cols-2 gap-2 border-t border-slate-100 pt-3 dark:border-slate-800">
+          <div className="rounded-xl bg-slate-50/70 p-2.5 dark:bg-slate-800/40">
+            <span className="text-[10px] font-bold uppercase text-slate-400">Population</span>
+            <p className="text-lg font-black text-slate-900 dark:text-slate-100">
+              {isLoading ? '—' : stats?.total_population.toLocaleString() ?? '0'}
+            </p>
+          </div>
+
+          <div className="rounded-xl bg-slate-50/70 p-2.5 dark:bg-slate-800/40">
+            <span className="text-[10px] font-bold uppercase text-slate-400">Households</span>
+            <p className="text-lg font-black text-slate-900 dark:text-slate-100">
+              {isLoading ? '—' : stats?.total_households.toLocaleString() ?? '0'}
+            </p>
+          </div>
+
+          <div className="rounded-xl bg-rose-50/50 p-2.5 dark:bg-rose-950/20">
+            <span className="text-[10px] font-bold uppercase text-rose-700">Vulnerable</span>
+            <p className="text-lg font-black text-rose-600">
+              {isLoading ? '—' : totalVulnerable.toLocaleString()}
+            </p>
+          </div>
+
+          <div className="rounded-xl bg-slate-50/70 p-2.5 dark:bg-slate-800/40">
+            <span className="text-[10px] font-bold uppercase text-slate-400">Operations</span>
+            <p className="text-lg font-black text-slate-900 dark:text-slate-100">
+              {activeIncidents.length + activeEvents.length} Active
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {error && (
+        <Alert className="rounded-2xl border-red-200 bg-red-50 text-red-700">
+          <AlertTriangle className="h-4 w-4" />
+          <AlertTitle>Notice</AlertTitle>
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      )}
+
+      {/* Vulnerability Distribution Radar */}
+      <div className="rounded-2xl border border-slate-200/90 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+        <div className="flex items-center justify-between border-b border-slate-100 pb-2.5 dark:border-slate-800">
+          <div className="flex items-center gap-1.5">
+            <HeartPulse className="h-4 w-4 text-rose-600" />
+            <h3 className="text-xs font-bold uppercase tracking-wider text-slate-800 dark:text-slate-200">
+              Vulnerability Breakdown
+            </h3>
+          </div>
+          <Link href="/vulnerability" className="text-[11px] font-semibold text-indigo-600">
+            View All ➔
+          </Link>
+        </div>
+
+        <div className="mt-3 space-y-2.5">
+          {vulnerabilityRows.map((row) => {
+            const pct = totalVulnerable > 0 ? Math.round((row.value / totalVulnerable) * 100) : 0;
             return (
-              <Link
-                key={link.href}
-                href={link.href}
-                className="rounded-[22px] border border-white/70 bg-white/88 px-4 py-4 shadow-[0_16px_42px_-30px_rgba(15,23,42,0.22)] transition hover:border-slate-200 hover:bg-white"
-              >
-                <div className="flex h-10 w-10 items-center justify-center rounded-[18px] bg-slate-100 text-slate-800">
-                  <Icon className="h-4 w-4" />
+              <div key={row.label} className="text-xs">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="flex items-center gap-1.5 font-medium text-slate-700 dark:text-slate-300">
+                    <span>{row.icon}</span>
+                    <span>{row.label}</span>
+                  </span>
+                  <span className="font-bold text-slate-900 dark:text-slate-100 font-mono">
+                    {row.value} ({pct}%)
+                  </span>
                 </div>
-                <p className="mt-3 text-sm font-bold text-slate-950">{link.label}</p>
-              </Link>
+                <div className="h-1.5 w-full rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden">
+                  <div style={{ width: `${Math.max(pct, 4)}%` }} className={`h-full rounded-full ${row.color}`} />
+                </div>
+              </div>
             );
           })}
         </div>
-      </CivicHero>
-
-      {error ? (
-        <Alert className="rounded-[24px] border-red-200 bg-red-50 text-red-700">
-          <AlertTriangle className="h-4 w-4" />
-          <AlertTitle>Unable to refresh the dashboard</AlertTitle>
-          <AlertDescription>{error}</AlertDescription>
-        </Alert>
-      ) : null}
-
-      <div className="grid grid-cols-2 gap-3">
-        <CivicKpiCard className="rounded-[22px] p-4" icon={Home} label="Households" value={isLoading ? '--' : stats?.total_households ?? 0} tone="navy" />
-        <CivicKpiCard className="rounded-[22px] p-4" icon={Users} label="Population" value={isLoading ? '--' : stats?.total_population ?? 0} tone="teal" />
-        <CivicKpiCard className="rounded-[22px] p-4" icon={Baby} label="Children" value={isLoading ? '--' : stats?.children_count ?? 0} tone="amber" />
-        <CivicKpiCard className="rounded-[22px] p-4" icon={ShieldAlert} label="Vulnerable" value={isLoading ? '--' : totalVulnerable} tone="rose" />
       </div>
 
-      <CivicPanel className="space-y-4 rounded-[24px] p-4 bg-slate-50/50">
-        <CivicSectionHeading
-          icon={Activity}
-          title="Live Operations"
-          description="Current field operations."
-        />
-        <div className="space-y-3">
-          {isLoading ? (
-            <p className="text-sm text-slate-500">Loading operations...</p>
-          ) : activeIncidents.length === 0 && activeEvents.length === 0 ? (
-            <div className="rounded-[20px] border border-dashed border-slate-300 bg-white px-4 py-6 text-center text-slate-500">
-              <CheckCircle2 className="mx-auto h-6 w-6 text-emerald-400" />
-              <p className="mt-2 text-sm font-medium text-slate-900">All clear</p>
+      {/* Field Operations & Incidents */}
+      <div className="rounded-2xl border border-slate-200/90 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+        <div className="flex items-center justify-between border-b border-slate-100 pb-2.5 dark:border-slate-800">
+          <div className="flex items-center gap-1.5">
+            <Radio className="h-4 w-4 text-rose-600" />
+            <h3 className="text-xs font-bold uppercase tracking-wider text-slate-800 dark:text-slate-200">
+              Field Operations
+            </h3>
+          </div>
+          <Link href="/responder" className="text-[11px] font-semibold text-rose-600">
+            Map ➔
+          </Link>
+        </div>
+
+        <div className="mt-3 space-y-2">
+          {activeIncidents.length === 0 && activeEvents.length === 0 ? (
+            <div className="p-3 text-center text-xs text-slate-500">
+              <CheckCircle2 className="mx-auto h-5 w-5 text-emerald-500" />
+              <p className="mt-1 font-semibold text-slate-800 dark:text-slate-200">All clear</p>
+              <p className="text-[10px] text-slate-400">No active incidents or distributions.</p>
             </div>
           ) : (
             <>
-              {activeIncidents.slice(0, 3).map((incident) => (
-                <div key={incident.id} className="rounded-[20px] border border-rose-100 bg-white p-3 shadow-sm flex items-start gap-3">
-                  <div className="rounded-full bg-rose-100 p-2 text-rose-600">
-                    <Radio className="h-4 w-4" />
+              {activeIncidents.map((incident) => (
+                <div key={incident.id} className="rounded-xl border border-rose-100 bg-rose-50/50 p-2.5 text-xs">
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold uppercase text-rose-700">{incident.type.replace('_', ' ')}</span>
+                    <span className="text-[10px] text-rose-500">Reported</span>
                   </div>
-                  <div>
-                    <p className="text-[10px] font-bold uppercase tracking-wider text-rose-700">{incident.type.replace('_', ' ')}</p>
-                    <p className="mt-0.5 text-sm font-semibold text-slate-900">{incident.location}</p>
-                  </div>
+                  <p className="mt-0.5 text-slate-800 font-semibold">{incident.location}</p>
                 </div>
               ))}
-              {activeEvents.slice(0, 3).map((event) => (
-                <div key={event.id} className="rounded-[20px] border border-sky-100 bg-white p-3 shadow-sm flex items-start gap-3">
-                  <div className="rounded-full bg-sky-100 p-2 text-sky-600">
-                    <Package className="h-4 w-4" />
-                  </div>
-                  <div>
-                    <p className="text-[10px] font-bold uppercase tracking-wider text-sky-700">Relief Ongoing</p>
-                    <p className="mt-0.5 text-sm font-semibold text-slate-900">{event.event_name}</p>
-                  </div>
+              {activeEvents.map((event) => (
+                <div key={event.id} className="rounded-xl border border-sky-100 bg-sky-50/50 p-2.5 text-xs">
+                  <span className="font-bold uppercase text-sky-700">Relief Event</span>
+                  <p className="mt-0.5 text-slate-800 font-semibold">{event.event_name}</p>
                 </div>
               ))}
             </>
           )}
         </div>
-      </CivicPanel>
+      </div>
 
-      <CivicPanel className="space-y-5 rounded-[24px] p-4">
-        <CivicSectionHeading
-          icon={ShieldAlert}
-          title="Attention today"
-          description="The largest monitored groups in the current household census."
-        />
-        <div className="space-y-3">
-          {attentionRows.map((row) => (
-            <div key={row.label} className="grid grid-cols-[84px_minmax(0,1fr)_44px] items-center gap-3">
-              <span className="text-xs font-medium text-slate-600">{row.label}</span>
-              <div className="h-2 overflow-hidden rounded-full bg-slate-100">
-                <div
-                  className={`h-full rounded-full ${row.color}`}
-                  style={{ width: totalVulnerable > 0 ? `${Math.max((row.value / Math.max(totalVulnerable, 1)) * 100, row.value > 0 ? 8 : 0)}%` : '0%' }}
-                />
-              </div>
-              <span className="text-right text-xs font-bold text-slate-900">{row.value}</span>
-            </div>
-          ))}
-        </div>
-      </CivicPanel>
-
-      {user.role === 'admin' && dataQuality ? (
-        <CivicPanel className="space-y-4 rounded-[24px] p-4">
-          <CivicSectionHeading
-            icon={AlertTriangle}
-            title="Action Center"
-            description="Tasks and records requiring executive attention."
-          />
-          <div className="space-y-2">
-            {adminReviewShortcuts.map((shortcut) => (
-              <Link
-                key={shortcut.href}
-                href={shortcut.href}
-                className="block rounded-[22px] border border-slate-200 bg-slate-50 px-4 py-4"
-              >
-                <p className="text-sm font-bold text-slate-950">{shortcut.label}</p>
-                <p className="mt-1 text-xs leading-5 text-slate-500">{shortcut.description}</p>
-              </Link>
-            ))}
+      {/* Action Center (Admin Task Queue) */}
+      {user.role === 'admin' && dataQuality && (
+        <div className="rounded-2xl border border-slate-200/90 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+          <div className="flex items-center gap-1.5 border-b border-slate-100 pb-2.5 dark:border-slate-800">
+            <AlertTriangle className="h-4 w-4 text-amber-600" />
+            <h3 className="text-xs font-bold uppercase tracking-wider text-slate-800 dark:text-slate-200">
+              Action Verification Queue
+            </h3>
           </div>
-          <div className="space-y-2">
+
+          <div className="mt-2.5 space-y-2">
             {dataQuality.issues.map((issue) => (
               <Link
                 key={issue.key}
                 href={issue.href}
-                className={`block rounded-[22px] border px-4 py-4 ${
-                  issue.count > 0
-                    ? 'border-amber-200 bg-amber-50/80'
-                    : 'border-slate-200 bg-slate-50'
-                }`}
+                className="flex items-center justify-between rounded-xl border border-slate-100 bg-slate-50/60 p-2.5 text-xs hover:bg-slate-100/70"
               >
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <p className="text-sm font-bold text-slate-950">{issue.label}</p>
-                    <p className="mt-1 text-xs leading-5 text-slate-500">{issue.description}</p>
-                  </div>
-                  <CivicBadge
-                    label={`${issue.count}`}
-                    tone={issue.count > 0 ? 'amber' : 'emerald'}
-                  />
+                <div>
+                  <span className="font-bold text-slate-900 dark:text-slate-100">{issue.label}</span>
+                  <span className="block text-[10px] text-slate-400">{issue.description}</span>
                 </div>
-                <p className="mt-2 text-[11px] text-slate-500">
-                  {issue.sample_labels.length > 0 ? `Sample: ${issue.sample_labels.join(', ')}` : 'No issues detected right now.'}
-                </p>
+                <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
+                  issue.count > 0 ? 'bg-amber-200 text-amber-900' : 'bg-emerald-100 text-emerald-800'
+                }`}>
+                  {issue.count}
+                </span>
               </Link>
             ))}
           </div>
-        </CivicPanel>
-      ) : null}
-    </CivicPage>
+        </div>
+      )}
+    </div>
   );
 }

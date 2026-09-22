@@ -3,7 +3,20 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { Activity, Filter, Home, Plus, Users } from 'lucide-react';
+import {
+  AlertTriangle,
+  Cake,
+  CheckCircle2,
+  ChevronRight,
+  Filter,
+  Home,
+  MapPin,
+  Plus,
+  Search,
+  Sparkles,
+  Users,
+  X,
+} from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   Select,
@@ -18,7 +31,7 @@ import { getPurokRiskProfiles } from '@/lib/db/purok-risk-profiles';
 import { getResidentsInHousehold } from '@/lib/db/residents';
 import { isBirthdayThisMonth } from '@/lib/db/vulnerability';
 import type { DisasterRiskLevel, HazardType, Household, PurokFloodControlStatus, PurokRiskProfile } from '@/lib/db/schema';
-import { formatRegistrationStatusLabel, getHouseholdRegistrationStatus } from '@/lib/household-registration';
+import { getHouseholdRegistrationStatus } from '@/lib/household-registration';
 import { hasHouseholdPin } from '@/lib/map-pins';
 import {
   DISASTER_RISK_LEVEL_LABELS,
@@ -36,27 +49,20 @@ import {
   CivicChipButton,
   CivicEmptyState,
   CivicPage,
-  CivicSearchInput,
 } from '@/components/ui/civic-primitives';
-import { MobileFilterSheet, MobileListCard, MobilePageHeader } from '@/components/mobile/mobile-primitives';
+import { MobileFilterSheet } from '@/components/mobile/mobile-primitives';
 
 const STATUS_CFG = {
-  active: { label: 'Active', tone: 'emerald' as const },
-  moved_out: { label: 'Moved out', tone: 'amber' as const },
-  deceased: { label: 'Deceased', tone: 'slate' as const },
-};
-
-const REGISTRATION_TONE = {
-  approved: 'emerald' as const,
-  pending: 'amber' as const,
-  needs_correction: 'amber' as const,
-  rejected: 'rose' as const,
+  active: { label: 'Active', tone: 'emerald' as const, dot: 'bg-emerald-500' },
+  moved_out: { label: 'Moved out', tone: 'amber' as const, dot: 'bg-amber-500' },
+  deceased: { label: 'Deceased', tone: 'slate' as const, dot: 'bg-slate-400' },
 };
 
 const DEFAULT_STATUS = 'active' as const;
 
 type HouseholdFilterStatus = 'all' | 'active' | 'moved_out' | 'deceased' | 'pending';
 type HouseholdSort = 'recent' | 'name' | 'members';
+
 const HAZARD_FILTER_OPTIONS: HazardType[] = [
   'flood',
   'typhoon',
@@ -65,6 +71,7 @@ const HAZARD_FILTER_OPTIONS: HazardType[] = [
   'fire',
   'earthquake',
 ];
+
 const DISASTER_RISK_OPTIONS: DisasterRiskLevel[] = ['low', 'medium', 'high'];
 const PUROK_FLOOD_CONTROL_OPTIONS: PurokFloodControlStatus[] = ['protected', 'partial', 'none', 'unknown'];
 type PurokFloodProneFilter = 'all' | 'flood_prone' | 'not_flood_prone';
@@ -73,6 +80,7 @@ export default function HouseholdsMobile() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const user = getCurrentUser();
+
   const [households, setHouseholds] = useState<Household[]>([]);
   const [purokRiskProfiles, setPurokRiskProfiles] = useState<PurokRiskProfile[]>([]);
   const [puroks, setPuroks] = useState<string[]>([]);
@@ -92,6 +100,7 @@ export default function HouseholdsMobile() {
   const [memberCounts, setMemberCounts] = useState<Record<string, number>>({});
   const [hasUnverifiedMembers, setHasUnverifiedMembers] = useState<Record<string, boolean>>({});
   const [birthdayMembers, setBirthdayMembers] = useState<Record<string, string[]>>({});
+
   const issueFilter = searchParams.get('issue');
   const isMissingLocationMode = issueFilter === 'missing_location';
   const purokRiskProfileMap = buildPurokRiskProfileMap(purokRiskProfiles);
@@ -121,7 +130,7 @@ export default function HouseholdsMobile() {
     for (const household of allHouseholds) {
       const hhResidents = await getResidentsInHousehold(household.id);
       counts[household.id] = hhResidents.length;
-      unverified[household.id] = hhResidents.some(r => r.verification_status === 'pending');
+      unverified[household.id] = hhResidents.some((r) => r.verification_status === 'pending');
       birthdays[household.id] = hhResidents
         .filter((resident) => resident.status === 'active' && isBirthdayThisMonth(resident.birthdate))
         .map((resident) => resident.full_name);
@@ -163,8 +172,6 @@ export default function HouseholdsMobile() {
 
   if (!user) return null;
 
-  // Distinct barangays present in the loaded records; the picker hides itself
-  // when there is only one (a barangay-scoped officer's roster).
   const barangays = [...new Map(
     households
       .filter((household) => household.barangay_id)
@@ -198,14 +205,14 @@ export default function HouseholdsMobile() {
     .filter((household) => !filterUnverifiedOnly || hasUnverifiedMembers[household.id])
     .filter((household) => !filterBirthdayThisMonth || (birthdayMembers[household.id]?.length ?? 0) > 0)
     .filter((household) => {
-      if (!search) {
-        return true;
-      }
-
-      const query = search.toLowerCase();
-      return household.head_name.toLowerCase().includes(query)
-        || household.street_address.toLowerCase().includes(query)
-        || household.purok_sitio.toLowerCase().includes(query);
+      if (!search) return true;
+      const query = search.toLowerCase().trim();
+      return (
+        household.head_name.toLowerCase().includes(query) ||
+        household.street_address.toLowerCase().includes(query) ||
+        household.purok_sitio.toLowerCase().includes(query) ||
+        household.id.toLowerCase().includes(query)
+      );
     })
     .sort((left, right) => {
       if (sortBy === 'name') {
@@ -217,379 +224,402 @@ export default function HouseholdsMobile() {
       return new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime();
     });
 
-  const pendingCount = households.filter((household) => getHouseholdRegistrationStatus(household) === 'pending').length;
-  const hasFilters = Boolean(search)
-    || filterPurok !== 'all'
-    || filterBarangay !== 'all'
-    || filterStatus !== DEFAULT_STATUS
-    || filterHazard !== 'all'
-    || filterRiskLevel !== 'all'
-    || filterFloodProne !== 'all'
-    || filterFloodControlStatus !== 'all'
-    || filterUnverifiedOnly
-    || filterBirthdayThisMonth
-    || sortBy !== 'recent'
-    || isMissingLocationMode;
+  const activeCount = households.filter((h) => h.status === 'active').length;
+  const pendingCount = households.filter((h) => getHouseholdRegistrationStatus(h) === 'pending').length;
+  const unverifiedCount = Object.values(hasUnverifiedMembers).filter(Boolean).length;
   const birthdayHouseholdCount = Object.values(birthdayMembers).filter((names) => names.length > 0).length;
+  const pinnedCount = households.filter((h) => hasHouseholdPin(h)).length;
+  const pinRate = households.length > 0 ? Math.round((pinnedCount / households.length) * 100) : 0;
+
+  const hasFilters =
+    Boolean(search) ||
+    filterPurok !== 'all' ||
+    filterBarangay !== 'all' ||
+    filterStatus !== DEFAULT_STATUS ||
+    filterHazard !== 'all' ||
+    filterRiskLevel !== 'all' ||
+    filterFloodProne !== 'all' ||
+    filterFloodControlStatus !== 'all' ||
+    filterUnverifiedOnly ||
+    filterBirthdayThisMonth ||
+    sortBy !== 'recent' ||
+    isMissingLocationMode;
+
   const statusOptions = [
     { key: 'all' as const, label: 'All', count: households.length },
-    { key: 'active' as const, label: 'Active', count: households.filter((household) => household.status === 'active').length },
+    { key: 'active' as const, label: 'Active', count: activeCount },
     { key: 'pending' as const, label: 'Pending', count: pendingCount },
-    { key: 'moved_out' as const, label: 'Moved', count: households.filter((household) => household.status === 'moved_out').length },
-    { key: 'deceased' as const, label: 'Deceased', count: households.filter((household) => household.status === 'deceased').length },
+    { key: 'moved_out' as const, label: 'Moved', count: households.filter((h) => h.status === 'moved_out').length },
+    { key: 'deceased' as const, label: 'Deceased', count: households.filter((h) => h.status === 'deceased').length },
   ];
 
   return (
-    <CivicPage className="space-y-4 px-4 py-4">
-      <MobilePageHeader
-        title="Households"
-        subtitle={isLoading
-          ? 'Loading household records...'
-          : user.role === 'admin'
-            ? `${households.length} records across all barangays.`
-            : `${households.length} records in the current barangay roster.`}
-        primaryAction={hasPermission('create_household') ? (
-          <Button asChild className="h-11 rounded-[18px] px-4 text-sm font-semibold">
+    <CivicPage className="space-y-4 px-3 py-4">
+      {/* ── Mobile Executive Header ── */}
+      <div className="flex items-center justify-between gap-2">
+        <div>
+          <div className="flex items-center gap-1.5">
+            <span className="inline-flex items-center gap-1 text-[11px] font-bold uppercase tracking-wider text-cyan-800">
+              <Sparkles className="h-3 w-3 text-cyan-600" />
+              Census Registry
+            </span>
+            {pendingCount > 0 ? (
+              <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-bold text-amber-800 border border-amber-200">
+                <span className="h-1.5 w-1.5 rounded-full bg-amber-500 animate-pulse" />
+                {pendingCount} Pending
+              </span>
+            ) : null}
+          </div>
+          <h1 className="text-xl font-black tracking-tight text-slate-950">Households</h1>
+        </div>
+
+        {hasPermission('create_household') ? (
+          <Button asChild size="sm" className="h-9 rounded-xl bg-cyan-950 px-3 text-xs font-semibold text-white">
             <Link href="/households/register">
-              <Plus className="h-4 w-4" />
-              Add
+              <Plus className="h-3.5 w-3.5 mr-1" />
+              Register
             </Link>
           </Button>
         ) : null}
-        secondaryActions={pendingCount > 0 ? (
-          user.role === 'admin' ? (
-            <Link href="/admin/location-review?tab=pending">
-              <CivicBadge label={`${pendingCount} pending review`} tone="amber" />
-            </Link>
-          ) : (
-            <CivicBadge label={`${pendingCount} pending review`} tone="amber" />
-          )
-        ) : null}
-      />
+      </div>
 
-      <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2">
-        <CivicSearchInput
-          value={search}
-          onChange={(event) => setSearch(event.target.value)}
-          placeholder="Search households, puroks, or addresses..."
-        />
+      {/* ── Mobile Vitals Strip (Scrollable) ── */}
+      <div className="flex items-center gap-2 overflow-x-auto pb-1 no-scrollbar text-xs">
+        <div className="shrink-0 flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-xs">
+          <Home className="h-3.5 w-3.5 text-cyan-800" />
+          <span className="text-slate-500">Total:</span>
+          <strong className="font-mono text-slate-900">{isLoading ? '—' : households.length}</strong>
+        </div>
+        <div className="shrink-0 flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-xs">
+          <span className="h-2 w-2 rounded-full bg-emerald-500" />
+          <span className="text-slate-500">Active:</span>
+          <strong className="font-mono text-emerald-900">{isLoading ? '—' : activeCount}</strong>
+        </div>
+        <div className="shrink-0 flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-xs">
+          <AlertTriangle className="h-3.5 w-3.5 text-rose-500" />
+          <span className="text-slate-500">Unverified:</span>
+          <strong className="font-mono text-rose-900">{isLoading ? '—' : unverifiedCount}</strong>
+        </div>
+        <div className="shrink-0 flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-xs">
+          <MapPin className="h-3.5 w-3.5 text-cyan-700" />
+          <span className="text-slate-500">GPS:</span>
+          <strong className="font-mono text-cyan-900">{isLoading ? '—' : `${pinRate}%`}</strong>
+        </div>
+      </div>
+
+      {/* ── Search Bar & Filter Sheet Trigger ── */}
+      <div className="flex items-center gap-2">
+        <div className="relative flex-1">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search head, address, purok..."
+            className="h-10 w-full rounded-xl border border-slate-200 bg-white pl-9 pr-8 text-xs text-slate-800 outline-none focus:border-cyan-900"
+          />
+          {search ? (
+            <button
+              type="button"
+              onClick={() => setSearch('')}
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          ) : null}
+        </div>
         <Button
           type="button"
           variant="outline"
           onClick={() => setFilterSheetOpen(true)}
-          className="h-11 rounded-[18px] border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700"
+          className={`h-10 shrink-0 rounded-xl border px-3 text-xs font-semibold ${
+            hasFilters ? 'border-cyan-400 bg-cyan-50 text-cyan-950 font-bold' : 'border-slate-200 bg-white text-slate-700'
+          }`}
         >
-          <Filter className="h-4 w-4" />
-          Filters
+          <Filter className="h-3.5 w-3.5 mr-1" />
+          Filter
+          {hasFilters ? <span className="ml-1 h-1.5 w-1.5 rounded-full bg-cyan-600" /> : null}
         </Button>
       </div>
 
-      <div className="flex flex-wrap gap-2">
-        <CivicBadge label={`${filteredHouseholds.length} showing`} tone="slate" />
-        {isMissingLocationMode ? <CivicBadge label="Missing coordinates" tone="amber" /> : null}
-        {filterStatus !== DEFAULT_STATUS ? <CivicBadge label={STATUS_CFG[filterStatus as keyof typeof STATUS_CFG]?.label || 'All status'} tone="navy" /> : null}
-        {filterBarangay !== 'all' ? <CivicBadge label={barangays.find((barangay) => barangay.id === filterBarangay)?.label || filterBarangay} tone="navy" /> : null}
-        {filterPurok !== 'all' ? <CivicBadge label={filterPurok} tone="teal" /> : null}
-        {filterHazard !== 'all' ? <CivicBadge label={HAZARD_LABELS[filterHazard]} tone="teal" /> : null}
-        {filterRiskLevel !== 'all' ? <CivicBadge label={DISASTER_RISK_LEVEL_LABELS[filterRiskLevel]} tone="amber" /> : null}
-        {filterFloodProne !== 'all' ? <CivicBadge label={filterFloodProne === 'flood_prone' ? 'Flood-prone puroks' : 'Not flood-prone'} tone="rose" /> : null}
-        {filterFloodControlStatus !== 'all' ? <CivicBadge label={PUROK_FLOOD_CONTROL_STATUS_LABELS[filterFloodControlStatus]} tone="slate" /> : null}
-        {filterUnverifiedOnly ? <CivicBadge label="Unverified Members" tone="rose" className="animate-pulse" /> : null}
-        {filterBirthdayThisMonth ? <CivicBadge label="🎂 Birthdays this month" tone="teal" /> : null}
-        {sortBy !== 'recent' ? <CivicBadge label={sortBy === 'name' ? 'Sorted by name' : 'Sorted by members'} tone="slate" /> : null}
+      {/* ── Active Filter Badges ── */}
+      <div className="flex items-center justify-between gap-2 text-xs">
+        <span className="font-semibold text-slate-500">
+          Showing <strong className="text-slate-900">{filteredHouseholds.length}</strong> of {households.length}
+        </span>
+        {hasFilters ? (
+          <button
+            type="button"
+            onClick={() => {
+              setSearch('');
+              setFilterPurok('all');
+              setFilterBarangay('all');
+              setFilterStatus(DEFAULT_STATUS);
+              setFilterHazard('all');
+              setFilterRiskLevel('all');
+              setFilterFloodProne('all');
+              setFilterFloodControlStatus('all');
+              setFilterUnverifiedOnly(false);
+              setFilterBirthdayThisMonth(false);
+              setSortBy('recent');
+            }}
+            className="text-[11px] font-bold text-rose-600 underline"
+          >
+            Reset Filters
+          </button>
+        ) : null}
       </div>
 
+      {/* ── Missing Location Warning ── */}
       {isMissingLocationMode ? (
-        <div className="rounded-[22px] border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-          <p>Showing approved active households that still need a map pin.</p>
-          {user.role === 'admin' ? (
-            <Link href="/admin/location-review?tab=approved&issue=missing_coordinates" className="mt-2 inline-block text-xs font-semibold text-amber-900 underline underline-offset-4">
-              Open review queue
-            </Link>
-          ) : null}
+        <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
+          <p className="font-bold">Missing GPS Coordinates</p>
+          <p className="mt-0.5 text-[11px]">Showing active households needing verified map pins.</p>
         </div>
       ) : null}
 
+      {/* ── Mobile Filter Sheet ── */}
       <MobileFilterSheet
         open={filterSheetOpen}
         onOpenChange={setFilterSheetOpen}
-        title="Refine households"
-        description="Status, purok, and sorting are grouped here so the list stays focused on mobile."
-        resultCount={<span>Showing <strong>{filteredHouseholds.length}</strong> of <strong>{households.length}</strong> households</span>}
+        title="Filter Households"
+        description="Filter by registration status, purok, or disaster risk exposure."
+        resultCount={<span>Showing <strong>{filteredHouseholds.length}</strong> records</span>}
         filters={(
           <>
-            <div className="space-y-2">
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Status</p>
-              <div className="flex flex-wrap gap-2">
+            <div className="space-y-1.5">
+              <p className="text-xs font-bold uppercase tracking-wider text-slate-400">Status</p>
+              <div className="flex flex-wrap gap-1.5">
                 {statusOptions.map((option) => (
-                  <CivicChipButton key={option.key} active={filterStatus === option.key} onClick={() => setFilterStatus(option.key)}>
+                  <CivicChipButton
+                    key={option.key}
+                    active={filterStatus === option.key}
+                    onClick={() => setFilterStatus(option.key)}
+                  >
                     {option.label}
-                    <span className={`rounded-full px-2 py-0.5 text-[10px] ${filterStatus === option.key ? 'bg-white/12 text-white' : 'bg-slate-100 text-slate-500'}`}>
-                      {isLoading ? '--' : option.count}
+                    <span className="ml-1 text-[10px] font-mono">
+                      ({isLoading ? '—' : option.count})
                     </span>
                   </CivicChipButton>
                 ))}
               </div>
             </div>
 
-            <div className="space-y-2">
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Member Verification</p>
-              <div className="flex flex-wrap gap-2">
-                <CivicChipButton active={filterUnverifiedOnly} onClick={() => setFilterUnverifiedOnly(!filterUnverifiedOnly)}>
-                  Unverified Members Only
-                  <span className={`rounded-full px-2 py-0.5 text-[10px] ${filterUnverifiedOnly ? 'bg-white/12 text-white' : 'bg-rose-100 text-rose-600'}`}>
-                    {isLoading ? '--' : Object.values(hasUnverifiedMembers).filter(Boolean).length}
-                  </span>
+            <div className="space-y-1.5">
+              <p className="text-xs font-bold uppercase tracking-wider text-slate-400">Special Flags</p>
+              <div className="flex flex-wrap gap-1.5">
+                <CivicChipButton
+                  active={filterUnverifiedOnly}
+                  onClick={() => setFilterUnverifiedOnly(!filterUnverifiedOnly)}
+                >
+                  <AlertTriangle className="h-3 w-3 mr-1 text-rose-500" />
+                  Unverified Only ({unverifiedCount})
                 </CivicChipButton>
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Birthdays</p>
-              <div className="flex flex-wrap gap-2">
-                <CivicChipButton active={filterBirthdayThisMonth} onClick={() => setFilterBirthdayThisMonth(!filterBirthdayThisMonth)}>
-                  🎂 Birthdays this month
-                  <span className={`rounded-full px-2 py-0.5 text-[10px] ${filterBirthdayThisMonth ? 'bg-white/12 text-white' : 'bg-teal-100 text-teal-600'}`}>
-                    {isLoading ? '--' : birthdayHouseholdCount}
-                  </span>
+                <CivicChipButton
+                  active={filterBirthdayThisMonth}
+                  onClick={() => setFilterBirthdayThisMonth(!filterBirthdayThisMonth)}
+                >
+                  <Cake className="h-3 w-3 mr-1 text-teal-600" />
+                  Birthdays ({birthdayHouseholdCount})
                 </CivicChipButton>
               </div>
             </div>
 
             {barangays.length > 1 ? (
-              <div className="space-y-2">
-                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Barangay</p>
+              <div className="space-y-1.5">
+                <p className="text-xs font-bold uppercase tracking-wider text-slate-400">Barangay</p>
                 <Select value={filterBarangay} onValueChange={setFilterBarangay}>
-                  <SelectTrigger className="h-11 w-full rounded-[18px] border-slate-200 bg-white px-4 text-sm text-slate-700">
+                  <SelectTrigger className="h-10 w-full rounded-xl border-slate-200 bg-white px-3 text-xs">
                     <SelectValue placeholder="All barangays" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="all">All barangays</SelectItem>
-                    {barangays.map((barangay) => (
-                      <SelectItem key={barangay.id} value={barangay.id}>{barangay.label}</SelectItem>
+                    <SelectItem value="all">All Barangays</SelectItem>
+                    {barangays.map((b) => (
+                      <SelectItem key={b.id} value={b.id}>{b.label}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
               </div>
             ) : null}
 
-            <div className="space-y-2">
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Purok</p>
+            <div className="space-y-1.5">
+              <p className="text-xs font-bold uppercase tracking-wider text-slate-400">Purok</p>
               <Select value={filterPurok} onValueChange={setFilterPurok}>
-                <SelectTrigger className="h-11 w-full rounded-[18px] border-slate-200 bg-white px-4 text-sm text-slate-700">
+                <SelectTrigger className="h-10 w-full rounded-xl border-slate-200 bg-white px-3 text-xs">
                   <SelectValue placeholder="All puroks" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">All puroks</SelectItem>
-                  {puroks.map((purok) => (
-                    <SelectItem key={purok} value={purok}>{purok}</SelectItem>
+                  <SelectItem value="all">All Puroks</SelectItem>
+                  {puroks.map((p) => (
+                    <SelectItem key={p} value={p}>{p}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
 
-            <div className="space-y-2">
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Hazard</p>
-              <Select value={filterHazard} onValueChange={(value) => setFilterHazard(value as HazardType | 'all')}>
-                <SelectTrigger className="h-11 w-full rounded-[18px] border-slate-200 bg-white px-4 text-sm text-slate-700">
+            <div className="space-y-1.5">
+              <p className="text-xs font-bold uppercase tracking-wider text-slate-400">Hazard Profile</p>
+              <Select value={filterHazard} onValueChange={(v) => setFilterHazard(v as HazardType | 'all')}>
+                <SelectTrigger className="h-10 w-full rounded-xl border-slate-200 bg-white px-3 text-xs">
                   <SelectValue placeholder="All hazards" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">All hazards</SelectItem>
-                  {HAZARD_FILTER_OPTIONS.map((hazard) => (
-                    <SelectItem key={hazard} value={hazard}>{HAZARD_LABELS[hazard]}</SelectItem>
+                  <SelectItem value="all">All Hazards</SelectItem>
+                  {HAZARD_FILTER_OPTIONS.map((h) => (
+                    <SelectItem key={h} value={h}>{HAZARD_LABELS[h]}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
 
-            <div className="space-y-2">
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Risk level</p>
-              <Select value={filterRiskLevel} onValueChange={(value) => setFilterRiskLevel(value as DisasterRiskLevel | 'all')}>
-                <SelectTrigger className="h-11 w-full rounded-[18px] border-slate-200 bg-white px-4 text-sm text-slate-700">
+            <div className="space-y-1.5">
+              <p className="text-xs font-bold uppercase tracking-wider text-slate-400">Risk Level</p>
+              <Select value={filterRiskLevel} onValueChange={(v) => setFilterRiskLevel(v as DisasterRiskLevel | 'all')}>
+                <SelectTrigger className="h-10 w-full rounded-xl border-slate-200 bg-white px-3 text-xs">
                   <SelectValue placeholder="All risk levels" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">All risk levels</SelectItem>
-                  {DISASTER_RISK_OPTIONS.map((riskLevel) => (
-                    <SelectItem key={riskLevel} value={riskLevel}>{DISASTER_RISK_LEVEL_LABELS[riskLevel]}</SelectItem>
+                  <SelectItem value="all">All Risk Levels</SelectItem>
+                  {DISASTER_RISK_OPTIONS.map((r) => (
+                    <SelectItem key={r} value={r}>{DISASTER_RISK_LEVEL_LABELS[r]}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
-
-            <div className="space-y-2">
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Flood-prone purok</p>
-              <Select value={filterFloodProne} onValueChange={(value) => setFilterFloodProne(value as PurokFloodProneFilter)}>
-                <SelectTrigger className="h-11 w-full rounded-[18px] border-slate-200 bg-white px-4 text-sm text-slate-700">
-                  <SelectValue placeholder="All puroks" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All puroks</SelectItem>
-                  <SelectItem value="flood_prone">Flood-prone only</SelectItem>
-                  <SelectItem value="not_flood_prone">Not flood-prone</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-2">
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Flood control</p>
-              <Select value={filterFloodControlStatus} onValueChange={(value) => setFilterFloodControlStatus(value as PurokFloodControlStatus | 'all')}>
-                <SelectTrigger className="h-11 w-full rounded-[18px] border-slate-200 bg-white px-4 text-sm text-slate-700">
-                  <SelectValue placeholder="All flood control statuses" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All flood control statuses</SelectItem>
-                  {PUROK_FLOOD_CONTROL_OPTIONS.map((status) => (
-                    <SelectItem key={status} value={status}>{PUROK_FLOOD_CONTROL_STATUS_LABELS[status]}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            {hasFilters ? (
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => {
-                  setSearch('');
-                  setFilterPurok('all');
-                  setFilterBarangay('all');
-                  setFilterStatus(DEFAULT_STATUS);
-                  setFilterHazard('all');
-                  setFilterRiskLevel('all');
-                  setFilterFloodProne('all');
-                  setFilterFloodControlStatus('all');
-                  setFilterUnverifiedOnly(false);
-                  setFilterBirthdayThisMonth(false);
-                  setSortBy('recent');
-                }}
-                className="h-11 rounded-[18px] border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700"
-              >
-                Clear filters
-              </Button>
-            ) : null}
           </>
         )}
         sort={(
-          <Select value={sortBy} onValueChange={(value) => setSortBy(value as HouseholdSort)}>
-            <SelectTrigger className="h-11 w-full rounded-[18px] border-slate-200 bg-white px-4 text-sm text-slate-700">
+          <Select value={sortBy} onValueChange={(v) => setSortBy(v as HouseholdSort)}>
+            <SelectTrigger className="h-10 w-full rounded-xl border-slate-200 bg-white px-3 text-xs">
               <SelectValue placeholder="Most recent" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="recent">Most recent</SelectItem>
-              <SelectItem value="name">Head name</SelectItem>
-              <SelectItem value="members">Most members</SelectItem>
+              <SelectItem value="recent">Most Recent</SelectItem>
+              <SelectItem value="name">Head Name</SelectItem>
+              <SelectItem value="members">Most Members</SelectItem>
             </SelectContent>
           </Select>
         )}
       />
 
+      {/* ── Household Dossier Cards (Mobile - Zero Badge Soup) ── */}
       {isLoading ? (
-        <div className="space-y-2">
-          {[...Array(5)].map((_, index) => (
-            <div key={index} className="h-28 animate-pulse rounded-[24px] bg-slate-100" />
+        <div className="space-y-2.5">
+          {[...Array(4)].map((_, index) => (
+            <div key={index} className="h-28 animate-pulse rounded-2xl bg-slate-100" />
           ))}
         </div>
       ) : filteredHouseholds.length > 0 ? (
-        <div className="space-y-2">
+        <div className="space-y-2.5">
           {filteredHouseholds.map((household) => {
             const status = STATUS_CFG[household.status as keyof typeof STATUS_CFG] ?? STATUS_CFG.active;
             const registrationStatus = getHouseholdRegistrationStatus(household);
-            const memberCount = memberCounts[household.id] ?? 0;
-            const householdHazards = parseHazardTags(household.hazard_tags);
+            const residentCount = memberCounts[household.id] || 0;
+            const isPinned = hasHouseholdPin(household);
+            const hasUnverified = hasUnverifiedMembers[household.id];
             const purokRiskProfile = getPurokRiskProfileForHousehold(household, purokRiskProfileMap);
-            const locationSummary = user.role === 'admin'
-              ? [
-                household.barangay_name || household.barangay_id,
-                household.purok_sitio,
-                household.street_address,
-              ].filter(Boolean).join(' | ')
-              : `${household.purok_sitio} | ${household.street_address}`;
+            const bdays = birthdayMembers[household.id] || [];
 
             return (
-              <Link key={household.id} href={`/households/${household.id}`} className="block">
-                <MobileListCard
-                  title={household.head_name}
-                  subtitle={locationSummary}
-                  leading={<span className="text-sm font-bold">{household.head_name.charAt(0).toUpperCase()}</span>}
-                  trailing={<CivicBadge label={`${memberCount}`} tone="slate" className="text-[10px]" />}
-                  status={(
-                    <>
-                      {birthdayMembers[household.id]?.length ? (
-                        <CivicBadge
-                          label={birthdayMembers[household.id].length > 1
-                            ? `🎂 ${birthdayMembers[household.id].length} birthdays this month`
-                            : '🎂 Birthday this month'}
-                          tone="teal"
-                          className="text-[10px]"
-                        />
-                      ) : null}
-                      <CivicBadge label={status.label} tone={status.tone} className="text-[10px]" />
-                      <CivicBadge
-                        label={formatRegistrationStatusLabel(registrationStatus)}
-                        tone={REGISTRATION_TONE[registrationStatus] ?? 'slate'}
-                        className="text-[10px]"
-                      />
-                      <CivicBadge
-                        label={DISASTER_RISK_LEVEL_LABELS[household.disaster_risk_level ?? 'medium']}
-                        tone={
-                          household.disaster_risk_level === 'high'
-                            ? 'rose'
-                            : household.disaster_risk_level === 'medium'
-                              ? 'amber'
-                              : 'emerald'
-                        }
-                        className="text-[10px]"
-                      />
-                      {hasHouseholdPin(household) ? <CivicBadge label="Pinned" tone="navy" className="text-[10px]" /> : null}
-                      {hasUnverifiedMembers[household.id] ? (
-                        <CivicBadge label="Unverified Member" tone="rose" className="text-[10px] animate-pulse" />
-                      ) : null}
-                    </>
-                  )}
-                  meta={(
-                    <div className="space-y-2 text-xs text-slate-500">
-                      <div className="flex items-center justify-between gap-3">
-                        <div className="inline-flex items-center gap-1.5">
-                          <Users className="h-3.5 w-3.5" />
-                          <span>{memberCount} members</span>
-                        </div>
-                        <div className="inline-flex items-center gap-1.5 text-slate-400">
-                          <Home className="h-3.5 w-3.5" />
-                          <span>Open record</span>
-                        </div>
-                      </div>
-                      <div className="flex flex-wrap gap-1.5">
-                        <CivicBadge
-                          label={purokRiskProfile?.flood_prone ? 'Flood-prone purok' : 'Not flood-prone'}
-                          tone={purokRiskProfile?.flood_prone ? 'rose' : 'emerald'}
-                          className="text-[10px]"
-                        />
-                        <CivicBadge
-                          label={PUROK_FLOOD_CONTROL_STATUS_LABELS[purokRiskProfile?.flood_control_status ?? 'unknown']}
-                          tone="slate"
-                          className="text-[10px]"
-                        />
-                        {householdHazards.length > 0 ? householdHazards.slice(0, 3).map((hazard) => (
-                          <CivicBadge key={hazard} label={HAZARD_LABELS[hazard]} tone="teal" className="text-[10px]" />
-                        )) : (
-                          <CivicBadge label="No hazard tags" tone="slate" className="text-[10px]" />
-                        )}
-                        {householdHazards.length > 3 ? (
-                          <CivicBadge label={`+${householdHazards.length - 3} more`} tone="slate" className="text-[10px]" />
-                        ) : null}
-                      </div>
+              <Link
+                key={household.id}
+                href={`/households/${household.id}`}
+                className="block rounded-2xl border border-slate-200/80 bg-white p-4 shadow-xs active:bg-slate-50 transition"
+              >
+                {/* Header: Initial, Name, Status */}
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-xs font-black text-slate-800">
+                      {household.head_name
+                        .split(' ')
+                        .map((n) => n[0])
+                        .slice(0, 2)
+                        .join('')
+                        .toUpperCase()}
                     </div>
+                    <div className="min-w-0">
+                      <h2 className="text-sm font-bold text-slate-900 truncate">
+                        {household.head_name}
+                      </h2>
+                      <p className="text-[11px] text-slate-500 truncate">
+                        {household.purok_sitio || 'Purok —'} · {household.street_address}
+                      </p>
+                    </div>
+                  </div>
+
+                  {registrationStatus === 'pending' ? (
+                    <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-bold text-amber-800 border border-amber-200 shrink-0">
+                      <span className="h-1.5 w-1.5 rounded-full bg-amber-500 animate-pulse" />
+                      Pending
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-700 shrink-0">
+                      <span className={`h-1.5 w-1.5 rounded-full ${status.dot}`} />
+                      {status.label}
+                    </span>
                   )}
-                />
+                </div>
+
+                {/* High-Signal Alerts (NO negative badges) */}
+                <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
+                  {purokRiskProfile?.flood_prone ? (
+                    <span className="rounded bg-rose-50 px-1.5 py-0.5 text-[10px] font-bold text-rose-800 border border-rose-200">
+                      🌊 Flood-Prone
+                    </span>
+                  ) : null}
+
+                  {household.disaster_risk_level === 'high' ? (
+                    <span className="rounded bg-rose-50 px-1.5 py-0.5 text-[10px] font-bold text-rose-800 border border-rose-200">
+                      ⚠️ High Risk
+                    </span>
+                  ) : null}
+
+                  {hasUnverified ? (
+                    <span className="rounded bg-rose-50 px-1.5 py-0.5 text-[10px] font-bold text-rose-800 border border-rose-200">
+                      ⚠️ Unverified
+                    </span>
+                  ) : null}
+
+                  {bdays.length > 0 ? (
+                    <span className="rounded bg-teal-50 px-1.5 py-0.5 text-[10px] font-bold text-teal-800 border border-teal-200">
+                      🎂 Birthday
+                    </span>
+                  ) : null}
+                </div>
+
+                {/* Footer: Resident count + GPS Pin + Open chevron */}
+                <div className="mt-3 flex items-center justify-between border-t border-slate-100 pt-2.5 text-xs text-slate-500">
+                  <div className="flex items-center gap-3">
+                    <span className="inline-flex items-center gap-1 font-semibold text-slate-700">
+                      <Users className="h-3.5 w-3.5 text-slate-400" />
+                      <span>{residentCount} {residentCount === 1 ? 'resident' : 'residents'}</span>
+                    </span>
+
+                    {isPinned ? (
+                      <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-cyan-800">
+                        <CheckCircle2 className="h-3 w-3 text-cyan-600" />
+                        Pinned
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-amber-700">
+                        <AlertTriangle className="h-3 w-3 text-amber-500" />
+                        No Pin
+                      </span>
+                    )}
+                  </div>
+
+                  <span className="inline-flex items-center gap-0.5 font-bold text-cyan-950">
+                    Open
+                    <ChevronRight className="h-3.5 w-3.5" />
+                  </span>
+                </div>
               </Link>
             );
           })}
         </div>
       ) : (
         <CivicEmptyState
-          icon={Activity}
+          icon={Home}
           title="No households found"
           description={hasFilters ? 'No household matches the current filters.' : 'Household records will appear here after registration.'}
         />

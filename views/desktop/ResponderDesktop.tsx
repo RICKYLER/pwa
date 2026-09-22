@@ -36,7 +36,7 @@ import type {
   UserNotification,
   VulnerabilityFlags,
 } from '@/lib/db/schema';
-import { AlertCircle, BellRing, CheckCircle2, CloudRain, Edit2, MapPin, Package, Radio, RefreshCw, ShieldAlert, Siren, Users, Wind, Zap } from 'lucide-react';
+import { AlertCircle, BellRing, CheckCircle2, CloudRain, Edit2, Layers3, MapPin, Package, Radio, RefreshCw, ShieldAlert, Siren, Users, Wind, X, Zap } from 'lucide-react';
 import WeatherWidget from '@/components/WeatherWidget';
 import ResponderLeafletMap from '@/components/ResponderLeafletMap';
 import ResponderMapControlPanel from '@/components/ResponderMapControlPanel';
@@ -232,7 +232,26 @@ export default function ResponderDesktop() {
   const [showBarangayBoundaries, setShowBarangayBoundaries] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const barangayBoundaryState = useBarangayBoundaries();
-  const [activeTab, setActiveTab] = useState<'incidents' | 'suggestions' | 'priorities' | 'events' | 'zones'>('incidents');
+  const [tacticalTab, setTacticalTab] = useState<'incidents' | 'priorities' | 'logistics' | 'telemetry'>('incidents');
+  const [incidentSubTab, setIncidentSubTab] = useState<'active' | 'suggestions'>('active');
+  const [layersMenuOpen, setLayersMenuOpen] = useState(false);
+  const [activeTab, _setActiveTab] = useState<'incidents' | 'suggestions' | 'priorities' | 'events' | 'zones'>('incidents');
+  const setActiveTab = (tab: 'incidents' | 'suggestions' | 'priorities' | 'events' | 'zones') => {
+    _setActiveTab(tab);
+    if (tab === 'incidents') {
+      setTacticalTab('incidents');
+      setIncidentSubTab('active');
+    } else if (tab === 'suggestions') {
+      setTacticalTab('incidents');
+      setIncidentSubTab('suggestions');
+    } else if (tab === 'priorities') {
+      setTacticalTab('priorities');
+    } else if (tab === 'events') {
+      setTacticalTab('logistics');
+    } else if (tab === 'zones') {
+      setTacticalTab('telemetry');
+    }
+  };
   const [updatingId, setUpdatingId] = useState<string | null>(null);
   const [creatingFromAlertId, setCreatingFromAlertId] = useState<string | null>(null);
   const [visitedIds, setVisitedIds] = useState<Set<string>>(new Set());
@@ -916,744 +935,547 @@ export default function ResponderDesktop() {
   const hasPurokFilters = filterFloodProne !== 'all' || filterFloodControlStatus !== 'all' || categoryFilter !== 'all';
 
   return (
-    <div className="flex h-full min-h-0 gap-5 p-5">
-      <aside className="w-[410px] shrink-0 overflow-y-auto pr-1">
-        <div className="space-y-4">
-          <CivicPanel className="overflow-hidden border-cyan-100 bg-[linear-gradient(135deg,#083344,#164e63)] text-white shadow-[0_28px_60px_-36px_rgba(8,47,73,0.7)]">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-cyan-100/70">Response Operations</p>
-                <h2 className="mt-3 text-2xl font-black tracking-tight">{user.name}</h2>
-                <p className="mt-1 text-sm text-cyan-100/80">{getResponderCoverageLabel(user)}</p>
-              </div>
-              <button
-                onClick={() => void load()}
-                className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/10 px-3 py-2 text-xs font-semibold text-white transition hover:bg-white/15"
-              >
-                <RefreshCw className="h-3.5 w-3.5" />
-                Refresh
-              </button>
-            </div>
-            <div className="mt-5 grid grid-cols-3 gap-2">
-              {[
-                { label: 'Active', value: activeIncidents.length },
-                { label: 'Priority', value: filteredPriorityGroups.length },
-                { label: 'Resolved', value: resolvedCount },
-              ].map((metric) => (
-                <div key={metric.label} className="rounded-[20px] border border-white/10 bg-white/10 px-3 py-3">
-                  <p className="text-2xl font-black">{loading ? '—' : metric.value}</p>
-                  <p className="mt-1 text-[11px] uppercase tracking-[0.14em] text-cyan-100/70">{metric.label}</p>
-                </div>
-              ))}
-            </div>
-          </CivicPanel>
-
-          {topPriorityGroup && topPriorityHousehold ? (() => {
-            const levelTone = topPriorityGroup.level === 'critical' ? 'rose' : topPriorityGroup.level === 'high' ? 'amber' : topPriorityGroup.level === 'medium' ? 'navy' : 'slate';
-            return (
-              <CivicPanel className="space-y-3 border-cyan-200 bg-cyan-50/80">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-cyan-700">Recommended first response</p>
-                    <h3 className="mt-1 text-base font-black text-slate-950">{topPriorityGroup.purokSitio}</h3>
-                    <p className="mt-1 text-sm text-slate-600">
-                      Unahon si <span className="font-bold text-slate-950">{topPriorityHousehold.household.head_name}</span>
-                    </p>
-                  </div>
-                  <CivicBadge label={topPriorityGroup.level.toUpperCase()} tone={levelTone} className="text-[10px]" />
-                </div>
-                <div className="flex flex-wrap gap-1.5">
-                  <CivicBadge label={`Score ${topPriorityGroup.score}`} tone="amber" className="text-[10px]" />
-                  <CivicBadge label={`${topPriorityGroup.vulnerableResidentCount} vulnerable`} tone="rose" className="text-[10px]" />
-                  {topPriorityGroup.reasons.slice(0, 3).map((reason) => (
-                    <CivicBadge key={reason} label={reason} tone="navy" className="text-[10px]" />
-                  ))}
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setSelectedHousehold(topPriorityHousehold.household);
-                      setSelectedIncident(null);
-                      setSelectedEvent(null);
-                      setActiveTab('priorities');
-                    }}
-                    className="rounded-full bg-cyan-950 px-3 py-2 text-xs font-semibold text-white transition hover:bg-cyan-900"
-                  >
-                    View priority
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => navigateToHousehold(topPriorityHousehold.household)}
-                    className="rounded-full border border-cyan-200 bg-white px-3 py-2 text-xs font-semibold text-cyan-900 transition hover:bg-cyan-50"
-                  >
-                    Navigate
-                  </button>
-                </div>
-              </CivicPanel>
-            );
-          })() : null}
-
-          <WeatherWidget
-            mode="compact"
-            className="civic-card-shadow"
-            lat={activeRule?.trigger_lat}
-            lng={activeRule?.trigger_lng}
-          />
-
-          {/* Auto-Alert Trigger Status — mirrors the Alerts page weather preview */}
-          {activeRule && (
-            <CivicPanel className="space-y-3">
-              <div>
-                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Auto-Alert Monitor</p>
-                <h3 className="mt-1 text-base font-black tracking-tight text-slate-950">Live trigger status</h3>
-                <p className="mt-1 text-xs text-slate-500">
-                  Matches the <span className="font-semibold">{activeRule.hazard.replaceAll('_', ' ')}</span> rule at
-                  {' '}<span className="font-medium text-slate-700">{activeRule.trigger_lat.toFixed(4)}, {activeRule.trigger_lng.toFixed(4)}</span>.
-                </p>
-              </div>
-
-              {/* Threshold vs Current grid */}
-              <div className="grid grid-cols-2 gap-2">
-                {[
-                  {
-                    icon: CloudRain,
-                    label: 'Rain Chance',
-                    current: liveWeather?.current.rainChance ?? null,
-                    threshold: activeRule.min_rain_chance ?? null,
-                    unit: '%',
-                    format: (v: number) => `${Math.round(v)}%`,
-                  },
-                  {
-                    icon: CloudRain,
-                    label: 'Rain Intensity',
-                    current: liveWeather?.current.rainIntensity ?? null,
-                    threshold: activeRule.min_rain_intensity_mm_per_hr ?? null,
-                    unit: 'mm/hr',
-                    format: (v: number) => `${v.toFixed(1)} mm/hr`,
-                  },
-                  {
-                    icon: CloudRain,
-                    label: 'Next-Hour Rain',
-                    current: liveWeather?.current.nextHourPrecipitationPeak ?? null,
-                    threshold: activeRule.min_next_hour_precip_mm ?? null,
-                    unit: 'mm',
-                    format: (v: number) => `${v.toFixed(1)} mm`,
-                  },
-                  {
-                    icon: Wind,
-                    label: 'Wind Gust',
-                    current: liveWeather?.current.windGust ?? null,
-                    threshold: activeRule.min_wind_gust_kph ?? null,
-                    unit: 'kph',
-                    format: (v: number) => `${Math.round(v)} kph`,
-                  },
-                ].map((metric) => {
-                  const Icon = metric.icon;
-                  const willTrigger = metric.threshold !== null && metric.current !== null && metric.current >= metric.threshold;
-                  const hasData = metric.current !== null;
-                  const tone = willTrigger
-                    ? 'border-rose-200 bg-rose-50 text-rose-800'
-                    : hasData
-                      ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
-                      : 'border-slate-200 bg-slate-50 text-slate-500';
-                  return (
-                    <div key={metric.label} className={`rounded-[20px] border px-3 py-3 ${tone}`}>
-                      <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.14em] opacity-70">
-                        <Icon className="h-3 w-3" />
-                        {metric.label}
-                      </div>
-                      <p className="mt-1.5 text-base font-black">
-                        {hasData ? metric.format(metric.current!) : 'No data'}
-                      </p>
-                      {metric.threshold !== null && (
-                        <p className="mt-0.5 text-[10px] opacity-60">
-                          Triggers at ≥ {metric.format(metric.threshold)}
-                        </p>
-                      )}
-                      {willTrigger && (
-                        <p className="mt-1 flex items-center gap-1 text-[10px] font-bold text-rose-700">
-                          <AlertCircle className="h-3 w-3" /> Threshold met
-                        </p>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-
-              {/* Lead weather alert from same data source */}
-              {liveWeather && liveWeather.alerts.length > 0 && (() => {
-                const lead = liveWeather.alerts[0];
-                const isWarning = lead.severity === 'warning';
-                return (
-                  <div className={`rounded-[18px] border px-3 py-3 ${
-                    isWarning ? 'border-rose-200 bg-rose-50' : 'border-amber-200 bg-amber-50'
-                  }`}>
-                    <div className="flex items-start gap-2">
-                      <ShieldAlert className={`mt-0.5 h-4 w-4 shrink-0 ${isWarning ? 'text-rose-600' : 'text-amber-600'}`} />
-                      <div>
-                        <p className={`text-xs font-semibold ${isWarning ? 'text-rose-800' : 'text-amber-800'}`}>{lead.title}</p>
-                        <p className="mt-0.5 text-[11px] leading-5 text-slate-600">{lead.detail}</p>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })()}
-            </CivicPanel>
-          )}
-
-          <ResponderMapControlPanel
-            activeBaseLayerId={mapControls.activeBaseLayerId}
-            activeLayerIds={mapControls.activeLayerIds}
-            activeLayerSummary={mapControls.activeLayerSummary}
-            allLayersSelected={mapControls.allLayersSelected}
-            overlayOpacity={mapControls.overlayOpacity}
-            showAdvancedLayers={mapControls.showAdvancedLayers}
-            showWeather={mapControls.showWeather}
-            weatherOverlayVisible={mapControls.weatherOverlayVisible}
-            windLayerSelected={mapControls.windLayerSelected}
-            onActiveBaseLayerChange={mapControls.handleActiveBaseLayerChange}
-            onOverlayOpacityChange={mapControls.handleOverlayOpacityChange}
-            onShowAdvancedLayersChange={mapControls.handleShowAdvancedLayersChange}
-            onToggleLayer={mapControls.handleLayerToggle}
-            onToggleWeatherVisibility={mapControls.handleWeatherVisibilityToggle}
-            onOpenAllLayers={mapControls.handleOpenAllLayers}
-            onClearAllLayers={mapControls.handleClearAllLayers}
-          />
-
-          {selectedBarangaySummary ? (
-            <BarangayResponsePanel
-              summary={selectedBarangaySummary}
-              onClose={() => setSelectedBarangayId('')}
-            />
-          ) : null}
-
-          <EvacuationCenterPanel
-            centers={evacuationCenters}
-            canManageRegistry={user?.role === 'admin'}
-            savingCenterId={savingCenterId}
-            onSetStatus={(centerId, status) => {
-              void handleSetEvacuationCenterStatus(centerId, status);
-            }}
-            onSaveCenters={handleSaveEvacuationCenters}
-            onDeleteCenter={(centerId) => {
-              void handleDeleteEvacuationCenter(centerId);
-            }}
-          />
-
-          <ResponderSelectionSummary
-            household={selectedHousehold}
-            incident={selectedIncident}
-            event={selectedEvent}
-            onClear={() => {
-              setSelectedHousehold(null);
-              setSelectedIncident(null);
-              setSelectedEvent(null);
-              setSelectedZone(null);
-            }}
-            onNavigateHousehold={navigateToHousehold}
-            onNavigateIncident={navigateToIncident}
-            onNavigateEvent={navigateToEvent}
-          />
-
-          {activeTriggerDialog ? (
-            <CivicPanel className="space-y-3">
-              <div className="flex items-start justify-between gap-3">
-                <CivicSectionHeading
-                  icon={Zap}
-                  title="Trigger analysis"
-                  description="Kinsay una tabangan — open the assist-first queue for this trigger's scope."
-                />
-                <CivicBadge
-                  label={activeTriggerDialog.trigger.location}
-                  tone="navy"
-                  className="max-w-[160px] truncate text-[10px]"
-                />
-              </div>
-              <button
-                type="button"
-                onClick={() => setTriggerDialogOpen(true)}
-                className="inline-flex items-center gap-1.5 rounded-full bg-cyan-950 px-4 py-2 text-xs font-semibold text-white transition hover:bg-cyan-900"
-              >
-                <Zap className="h-3.5 w-3.5" aria-hidden />
-                Open trigger analysis
-              </button>
-            </CivicPanel>
-          ) : null}
-
-          {activeTriggerDialog ? (
-            <TriggerAnalysisDialog
-              open={triggerDialogOpen}
-              onOpenChange={setTriggerDialogOpen}
-              title={activeTriggerDialog.title}
-              trigger={activeTriggerDialog.trigger}
-              scopedGroups={activeTriggerDialog.scopedGroups}
-              incidents={incidents}
-              alerts={alerts}
-              onNavigateHousehold={navigateToHousehold}
-            />
-          ) : null}
-
-          {selectedIncident ? (
-            <IncidentImpactPanel
-              analysis={incidentImpactAnalyses.get(selectedIncident.id) ?? null}
-              visitedHouseholdIds={visitedIds}
-              onNavigateHousehold={navigateToHousehold}
-              onCheckIn={(householdId) => {
-                setVisitedIds((current) => {
-                  const next = new Set(current);
-                  if (next.has(householdId)) {
-                    next.delete(householdId);
-                  } else {
-                    next.add(householdId);
-                  }
-                  return next;
-                });
-              }}
-            />
-          ) : null}
-
-          <CivicPanel className="space-y-4">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Purok Filters</p>
-                <h3 className="mt-1 text-base font-black tracking-tight text-slate-950">Flood profile filters</h3>
-                <p className="mt-1 text-sm text-slate-500">Map pins and priority check-ins update using the official purok flood profile.</p>
-              </div>
-              {hasPurokFilters ? (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setFilterFloodProne('all');
-                    setFilterFloodControlStatus('all');
-                    setCategoryFilter('all');
-                  }}
-                  className="rounded-full border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50"
-                >
-                  Clear
-                </button>
-              ) : null}
-            </div>
-            <div className="grid gap-3 md:grid-cols-2">
-              <label className="space-y-2">
-                <span className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">Flood-prone purok</span>
-                <select
-                  value={filterFloodProne}
-                  onChange={(event) => setFilterFloodProne(event.target.value as PurokFloodProneFilter)}
-                  className="h-11 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm text-slate-700 outline-none focus:border-cyan-900"
-                >
-                  <option value="all">All puroks</option>
-                  <option value="flood_prone">Flood-prone only</option>
-                  <option value="not_flood_prone">Not flood-prone</option>
-                </select>
-              </label>
-              <label className="space-y-2">
-                <span className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">Flood control</span>
-                <select
-                  value={filterFloodControlStatus}
-                  onChange={(event) => setFilterFloodControlStatus(event.target.value as PurokFloodControlStatus | 'all')}
-                  className="h-11 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm text-slate-700 outline-none focus:border-cyan-900"
-                >
-                  <option value="all">All flood control statuses</option>
-                  {PUROK_FLOOD_CONTROL_OPTIONS.map((status) => (
-                    <option key={status} value={status}>{PUROK_FLOOD_CONTROL_STATUS_LABELS[status]}</option>
-                  ))}
-                </select>
-              </label>
-            </div>
-            <div className="space-y-2">
-              <span className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">
-                Vulnerability focus
+    <div className="flex h-full min-h-0 flex-col gap-3 p-3.5 bg-slate-100/70">
+      {/* ── 1. TOP SITUATIONAL TELEMETRY RIBBON ── */}
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200/90 bg-white px-4 py-2.5 shadow-xs shrink-0">
+        {/* Left: Operational Beacon & Responder Profile */}
+        <div className="flex items-center gap-3">
+          <span className="relative flex h-3 w-3">
+            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
+            <span className="relative inline-flex h-3 w-3 rounded-full bg-emerald-500" />
+          </span>
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-black uppercase tracking-wider text-slate-900">
+                Mabini MDRRMO Field Operations
               </span>
-              <div className="flex flex-wrap gap-2">
-                {PRIORITY_CATEGORY_FILTERS.map((key) => {
-                  const count = key === 'all'
-                    ? priorityGroups.length
-                    : priorityGroups.filter((group) => group.categoryCounts[key] > 0).length;
-                  return (
-                    <CivicChipButton
-                      key={key}
-                      active={categoryFilter === key}
-                      onClick={() => setCategoryFilter(key)}
-                    >
-                      {key === 'all' ? 'All' : DISTRIBUTION_CATEGORY_LABELS[key]}
-                      <span
-                        className={`rounded-full px-2 py-0.5 text-[10px] ${
-                          categoryFilter === key ? 'bg-white/12 text-white' : 'bg-slate-100 text-slate-500'
-                        }`}
-                      >
-                        {count}
-                      </span>
-                    </CivicChipButton>
-                  );
-                })}
+              <span className="rounded-full bg-cyan-100 px-2.5 py-0.5 text-[10px] font-bold text-cyan-800">
+                {user.name} ({getResponderCoverageLabel(user)})
+              </span>
+            </div>
+            <p className="text-[11px] text-slate-500">
+              Live GIS Triage Console · GeoRisk PSA Boundary Sync Active
+            </p>
+          </div>
+        </div>
+
+        {/* Center: Situational Vitals */}
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Active Incidents */}
+          <button
+            type="button"
+            onClick={() => { setTacticalTab('incidents'); setIncidentSubTab('active'); }}
+            className={`inline-flex items-center gap-1.5 rounded-xl px-2.5 py-1.5 text-xs font-bold transition ${
+              tacticalTab === 'incidents'
+                ? 'bg-rose-100 text-rose-800 ring-1 ring-rose-300 shadow-xs'
+                : 'bg-slate-50 text-slate-700 hover:bg-slate-100'
+            }`}
+          >
+            <Siren className="h-3.5 w-3.5 text-rose-600" />
+            <span>{activeIncidents.length} Active Incidents</span>
+          </button>
+
+          {/* Priority Queue */}
+          <button
+            type="button"
+            onClick={() => setTacticalTab('priorities')}
+            className={`inline-flex items-center gap-1.5 rounded-xl px-2.5 py-1.5 text-xs font-bold transition ${
+              tacticalTab === 'priorities'
+                ? 'bg-amber-100 text-amber-800 ring-1 ring-amber-300 shadow-xs'
+                : 'bg-slate-50 text-slate-700 hover:bg-slate-100'
+            }`}
+          >
+            <Users className="h-3.5 w-3.5 text-amber-600" />
+            <span>{filteredPriorityGroups.length} Priority Puroks</span>
+          </button>
+
+          {/* Evacuation Centers */}
+          <button
+            type="button"
+            onClick={() => setTacticalTab('logistics')}
+            className={`inline-flex items-center gap-1.5 rounded-xl px-2.5 py-1.5 text-xs font-bold transition ${
+              tacticalTab === 'logistics'
+                ? 'bg-cyan-100 text-cyan-800 ring-1 ring-cyan-300 shadow-xs'
+                : 'bg-slate-50 text-slate-700 hover:bg-slate-100'
+            }`}
+          >
+            <ShieldAlert className="h-3.5 w-3.5 text-cyan-700" />
+            <span>{evacuationCenters.length} Evac Centers</span>
+          </button>
+
+          {/* Weather Telemetry */}
+          <button
+            type="button"
+            onClick={() => setTacticalTab('telemetry')}
+            className={`inline-flex items-center gap-1.5 rounded-xl px-2.5 py-1.5 text-xs font-bold transition ${
+              tacticalTab === 'telemetry'
+                ? 'bg-sky-100 text-sky-800 ring-1 ring-sky-300 shadow-xs'
+                : 'bg-slate-50 text-slate-700 hover:bg-slate-100'
+            }`}
+          >
+            <CloudRain className="h-3.5 w-3.5 text-sky-600" />
+            <span>
+              {liveWeather?.current.rainChance != null
+                ? `${Math.round(liveWeather.current.rainChance ?? 0)}% Rain · ${Math.round(liveWeather.current.windGust ?? 0)} kph`
+                : 'Weather Radar'}
+            </span>
+          </button>
+        </div>
+
+        {/* Right: Refresh action */}
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => void load()}
+            disabled={loading}
+            className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 shadow-xs transition hover:bg-slate-50 disabled:opacity-50"
+          >
+            <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
+            {loading ? 'Refreshing...' : 'Refresh'}
+          </button>
+        </div>
+      </div>
+
+      {/* ── 2. MAIN 2-COLUMN TACTICAL WORKSPACE ── */}
+      <div className="flex min-h-0 flex-1 gap-3.5">
+        {/* ── LEFT TACTICAL COMMAND DOCK ── */}
+        <aside className="w-[440px] shrink-0 flex flex-col rounded-2xl border border-slate-200/90 bg-white shadow-xs overflow-hidden">
+          {/* Tactical Tab Navigation Bar */}
+          <div className="grid grid-cols-4 border-b border-slate-200 bg-slate-50/80 p-1.5 gap-1 shrink-0">
+            <button
+              type="button"
+              onClick={() => setTacticalTab('incidents')}
+              className={`flex flex-col items-center justify-center rounded-xl py-2 px-1 text-center transition ${
+                tacticalTab === 'incidents'
+                  ? 'bg-white font-bold text-rose-700 shadow-xs border border-slate-200/80'
+                  : 'text-slate-500 hover:text-slate-900'
+              }`}
+            >
+              <div className="flex items-center gap-1">
+                <Siren className="h-3.5 w-3.5" />
+                <span className="text-[11px]">Incidents</span>
               </div>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <CivicBadge label={`${filteredMapHouseholds.length} mapped households`} tone="emerald" />
-              <CivicBadge label={`${filteredPriorityGroups.length} priority puroks`} tone="amber" />
-              <CivicBadge label={`${filteredPriorityHouseholdCount} households queued`} tone="slate" />
-              {filterFloodProne !== 'all' ? (
-                <CivicBadge label={filterFloodProne === 'flood_prone' ? 'Flood-prone puroks' : 'Not flood-prone'} tone="rose" />
-              ) : null}
-              {filterFloodControlStatus !== 'all' ? (
-                <CivicBadge label={PUROK_FLOOD_CONTROL_STATUS_LABELS[filterFloodControlStatus]} tone="slate" />
-              ) : null}
-            </div>
-          </CivicPanel>
+              <span className={`mt-0.5 text-[10px] font-semibold ${activeIncidents.length > 0 ? 'text-rose-600' : 'text-slate-400'}`}>
+                {activeIncidents.length} active
+              </span>
+            </button>
 
-          <CivicPanel className="space-y-4">
-            <div className="flex flex-wrap gap-2">
-              {([
-                { key: 'incidents', label: 'Incidents', count: activeIncidents.length },
-                { key: 'suggestions', label: 'Alert Suggestions', count: actionableAlertSuggestionCount },
-                { key: 'priorities', label: 'Priority Queue', count: filteredPriorityGroups.length },
-                { key: 'events', label: 'Events', count: events.length },
-                { key: 'zones', label: 'Flood Zones', count: purokRiskProfiles.length },
-              ] as const).map((tab) => (
-                <CivicChipButton
-                  key={tab.key}
-                  active={activeTab === tab.key}
-                  onClick={() => setActiveTab(tab.key)}
-                >
-                  {tab.label}
-                  <span className={`rounded-full px-2 py-0.5 text-[10px] ${
-                    tab.key === 'zones' && tab.count > 0
-                      ? activeTab === tab.key
-                        ? 'bg-rose-500/20 text-rose-200'
-                        : 'bg-rose-100 text-rose-600'
-                      : activeTab === tab.key
-                        ? 'bg-white/12 text-white'
-                        : 'bg-slate-100 text-slate-500'
-                  }`}>
-                    {loading ? '—' : tab.count}
-                  </span>
-                </CivicChipButton>
-              ))}
-            </div>
+            <button
+              type="button"
+              onClick={() => setTacticalTab('priorities')}
+              className={`flex flex-col items-center justify-center rounded-xl py-2 px-1 text-center transition ${
+                tacticalTab === 'priorities'
+                  ? 'bg-white font-bold text-amber-700 shadow-xs border border-slate-200/80'
+                  : 'text-slate-500 hover:text-slate-900'
+              }`}
+            >
+              <div className="flex items-center gap-1">
+                <Users className="h-3.5 w-3.5" />
+                <span className="text-[11px]">Priorities</span>
+              </div>
+              <span className="mt-0.5 text-[10px] font-semibold text-amber-600">
+                {filteredPriorityGroups.length} queued
+              </span>
+            </button>
 
-            {activeTab === 'incidents' ? (
-              <div className="space-y-3">
-                {loading ? (
-                  [...Array(3)].map((_, index) => (
-                    <div key={index} className="h-28 animate-pulse rounded-[24px] bg-slate-100" />
-                  ))
-                ) : activeIncidents.length === 0 ? (
-                  <div className="rounded-[24px] border border-dashed border-slate-300 bg-slate-50 px-5 py-10 text-center">
-                    <CheckCircle2 className="mx-auto h-8 w-8 text-emerald-500" />
-                    <p className="mt-3 text-sm font-semibold text-slate-900">No active incidents</p>
-                    <p className="mt-1 text-sm text-slate-500">The response area is currently clear.</p>
-                  </div>
-                ) : (
-                  activeIncidents.map((incident) => {
-                    const cfg = SEVERITY_CFG[incident.severity as keyof typeof SEVERITY_CFG] ?? SEVERITY_CFG.low;
-                    const selectIncident = () => {
-                      setSelectedIncident(incident);
-                      setSelectedHousehold(null);
-                      setSelectedEvent(null);
-                      setSelectedZone(null);
-                    };
-                    return (
-                      <div
-                        key={incident.id}
-                        role="button"
-                        tabIndex={0}
-                        onClick={selectIncident}
-                        onKeyDown={(event) => activateOnEnterOrSpace(event, selectIncident)}
-                        className={`w-full cursor-pointer rounded-[24px] border bg-white p-4 text-left transition hover:-translate-y-px hover:border-slate-300 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-cyan-900/20 ${
-                          selectedIncident?.id === incident.id ? 'border-cyan-900/20 shadow-md' : 'border-slate-200/80'
-                        }`}
-                      >
-                        <div className="flex items-start gap-3">
-                          <div className="text-2xl">{INCIDENT_TYPE_ICONS[incident.type] ?? '⚡'}</div>
-                          <div className="min-w-0 flex-1">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-1 text-[10px] font-bold uppercase ${cfg.badge}`}>
-                                <span className={`h-1.5 w-1.5 rounded-full ${cfg.dot}`} />
-                                {cfg.label}
-                              </span>
-                              <span className="text-xs font-bold uppercase tracking-[0.12em] text-slate-500">{incident.type.replaceAll('_', ' ')}</span>
+            <button
+              type="button"
+              onClick={() => setTacticalTab('logistics')}
+              className={`flex flex-col items-center justify-center rounded-xl py-2 px-1 text-center transition ${
+                tacticalTab === 'logistics'
+                  ? 'bg-white font-bold text-cyan-800 shadow-xs border border-slate-200/80'
+                  : 'text-slate-500 hover:text-slate-900'
+              }`}
+            >
+              <div className="flex items-center gap-1">
+                <Package className="h-3.5 w-3.5" />
+                <span className="text-[11px]">Logistics</span>
+              </div>
+              <span className="mt-0.5 text-[10px] font-semibold text-cyan-700">
+                {evacuationCenters.length} centers
+              </span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setTacticalTab('telemetry')}
+              className={`flex flex-col items-center justify-center rounded-xl py-2 px-1 text-center transition ${
+                tacticalTab === 'telemetry'
+                  ? 'bg-white font-bold text-sky-800 shadow-xs border border-slate-200/80'
+                  : 'text-slate-500 hover:text-slate-900'
+              }`}
+            >
+              <div className="flex items-center gap-1">
+                <CloudRain className="h-3.5 w-3.5" />
+                <span className="text-[11px]">Telemetry</span>
+              </div>
+              <span className="mt-0.5 text-[10px] font-semibold text-sky-600">
+                Radar & Ping
+              </span>
+            </button>
+          </div>
+
+          {/* Scrollable Tab Body */}
+          <div className="flex-1 overflow-y-auto p-4 space-y-4">
+            {/* ──────── TAB 1: INCIDENTS & DISPATCH ──────── */}
+            {tacticalTab === 'incidents' && (
+              <div className="space-y-4">
+                {/* Sub-tab pills */}
+                <div className="flex items-center gap-2 rounded-xl bg-slate-100 p-1">
+                  <button
+                    type="button"
+                    onClick={() => setIncidentSubTab('active')}
+                    className={`flex-1 rounded-lg py-1.5 text-center text-xs font-bold transition ${
+                      incidentSubTab === 'active'
+                        ? 'bg-white text-slate-900 shadow-xs'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    Active Incidents ({activeIncidents.length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setIncidentSubTab('suggestions')}
+                    className={`flex-1 rounded-lg py-1.5 text-center text-xs font-bold transition ${
+                      incidentSubTab === 'suggestions'
+                        ? 'bg-white text-slate-900 shadow-xs'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    Alert Suggestions ({actionableAlertSuggestionCount})
+                  </button>
+                </div>
+
+                {incidentSubTab === 'active' ? (
+                  loading ? (
+                    [...Array(3)].map((_, index) => (
+                      <div key={index} className="h-28 animate-pulse rounded-2xl bg-slate-100" />
+                    ))
+                  ) : activeIncidents.length === 0 ? (
+                    <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-5 py-12 text-center">
+                      <CheckCircle2 className="mx-auto h-8 w-8 text-emerald-500" />
+                      <p className="mt-3 text-sm font-bold text-slate-900">No active incidents</p>
+                      <p className="mt-1 text-xs text-slate-500">The response area is currently clear and secure.</p>
+                    </div>
+                  ) : (
+                    activeIncidents.map((incident) => {
+                      const cfg = SEVERITY_CFG[incident.severity as keyof typeof SEVERITY_CFG] ?? SEVERITY_CFG.low;
+                      const isSelected = selectedIncident?.id === incident.id;
+                      const selectIncident = () => {
+                        setSelectedIncident(incident);
+                        setSelectedHousehold(null);
+                        setSelectedEvent(null);
+                        setSelectedZone(null);
+                      };
+                      return (
+                        <div
+                          key={incident.id}
+                          role="button"
+                          tabIndex={0}
+                          onClick={selectIncident}
+                          onKeyDown={(event) => activateOnEnterOrSpace(event, selectIncident)}
+                          className={`w-full cursor-pointer rounded-2xl border bg-white p-4 text-left transition hover:-translate-y-px hover:border-slate-300 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-cyan-900/20 ${
+                            isSelected ? 'border-rose-400 shadow-md ring-2 ring-rose-200' : 'border-slate-200/90'
+                          }`}
+                        >
+                          <div className="flex items-start gap-3">
+                            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-xl">
+                              {INCIDENT_TYPE_ICONS[incident.type] ?? '⚡'}
                             </div>
-                            <p className="mt-2 text-sm font-bold text-slate-950">{incident.location}</p>
-                            <p className="mt-1 text-xs leading-relaxed text-slate-500">{incident.description}</p>
-                            <IncidentImpactSummary analysis={incidentImpactAnalyses.get(incident.id) ?? null} />
-                            {incident.source === 'alert' && incident.context_snapshot ? (
-                              <div className="mt-3 rounded-2xl border border-cyan-100 bg-cyan-50 px-3 py-2.5 text-[11px] leading-5 text-cyan-900">
-                                <p className="font-bold uppercase tracking-[0.18em] text-cyan-700">Alert Context</p>
-                                <p className="mt-1">
-                                  {incident.context_snapshot.alert_title || incident.context_snapshot.trigger_reason || 'Alert-derived incident'}
-                                </p>
-                                {incident.context_snapshot.weather_summary ? (
-                                  <p className="mt-1 text-cyan-800">Weather: {incident.context_snapshot.weather_summary}</p>
-                                ) : null}
-                                {incident.context_snapshot.flood_control_status ? (
-                                  <p className="mt-1 text-cyan-800">
-                                    Flood control: {PUROK_FLOOD_CONTROL_STATUS_LABELS[incident.context_snapshot.flood_control_status]}
-                                  </p>
-                                ) : null}
-                                {incident.context_snapshot.default_evacuation_site ? (
-                                  <p className="mt-1 text-cyan-800">
-                                    Evacuation: {incident.context_snapshot.default_evacuation_site}
-                                  </p>
-                                ) : null}
-                                {incident.context_snapshot.warning_notes ? (
-                                  <p className="mt-1 text-cyan-800">{incident.context_snapshot.warning_notes}</p>
-                                ) : null}
+                            <div className="min-w-0 flex-1">
+                              <div className="flex flex-wrap items-center gap-1.5">
+                                <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase ${cfg.badge}`}>
+                                  <span className={`h-1.5 w-1.5 rounded-full ${cfg.dot}`} />
+                                  {cfg.label}
+                                </span>
+                                <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                                  {incident.type.replaceAll('_', ' ')}
+                                </span>
                               </div>
-                            ) : null}
-                            <p className="mt-2 text-[11px] font-medium text-slate-400">{timeAgo(incident.reported_at)}</p>
+                              <p className="mt-1.5 text-sm font-bold text-slate-950">{incident.location}</p>
+                              <p className="mt-1 text-xs leading-relaxed text-slate-600 line-clamp-2">{incident.description}</p>
+                              <IncidentImpactSummary analysis={incidentImpactAnalyses.get(incident.id) ?? null} />
+                              
+                              {incident.source === 'alert' && incident.context_snapshot ? (
+                                <div className="mt-2.5 rounded-xl border border-cyan-100 bg-cyan-50/70 p-2.5 text-[11px] leading-relaxed text-cyan-950">
+                                  <p className="font-bold uppercase tracking-wider text-cyan-800 text-[10px]">Alert Context</p>
+                                  <p className="mt-0.5 font-medium">
+                                    {incident.context_snapshot.alert_title || incident.context_snapshot.trigger_reason || 'Alert-derived incident'}
+                                  </p>
+                                </div>
+                              ) : null}
+                              <p className="mt-2 text-[10px] font-medium text-slate-400">{timeAgo(incident.reported_at)}</p>
+                            </div>
                           </div>
-                        </div>
 
-                        <div className="mt-3 grid grid-cols-4 gap-1">
-                          {STATUS_FLOW.map((status) => (
-                            <button
-                              key={status.value}
-                              type="button"
-                              disabled={updatingId === incident.id}
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                void handleStatusUpdate(incident.id, status.value);
-                              }}
-                              className={`rounded-xl py-2 text-[10px] font-bold transition ${
-                                incident.status === status.value
-                                  ? `${status.color} ring-1 ring-inset ring-current`
-                                  : 'bg-slate-50 text-slate-400 hover:bg-slate-100'
-                              }`}
-                            >
-                              {updatingId === incident.id ? '…' : status.label}
-                            </button>
-                          ))}
-                        </div>
-
-                        {isTriggerAnalyzableIncident(incident) ? (
-                          <div className="mt-2">
-                            <TriggerAnalysis
-                              incident={incident}
-                              groups={filteredPriorityGroups}
-                              incidents={incidents}
-                              alerts={alerts}
-                            />
+                          {/* Status transition row */}
+                          <div className="mt-3 grid grid-cols-4 gap-1">
+                            {STATUS_FLOW.map((status) => (
+                              <button
+                                key={status.value}
+                                type="button"
+                                disabled={updatingId === incident.id}
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  void handleStatusUpdate(incident.id, status.value);
+                                }}
+                                className={`rounded-xl py-1.5 text-[10px] font-bold transition ${
+                                  incident.status === status.value
+                                    ? `${status.color} ring-1 ring-inset ring-current`
+                                    : 'bg-slate-50 text-slate-500 hover:bg-slate-100'
+                                }`}
+                              >
+                                {updatingId === incident.id ? '…' : status.label}
+                              </button>
+                            ))}
                           </div>
-                        ) : null}
-                      </div>
-                    );
-                  })
-                )}
-              </div>
-            ) : null}
 
-            {activeTab === 'suggestions' ? (
-              <div className="space-y-3">
-                {loading ? (
-                  [...Array(3)].map((_, index) => (
-                    <div key={index} className="h-32 animate-pulse rounded-[24px] bg-slate-100" />
-                  ))
-                ) : alertSuggestions.length > 0 ? (
-                  alertSuggestions.map((suggestion) => {
-                    const alreadyLinked = Boolean(suggestion.linkedIncident);
-                    return (
-                      <div
-                        key={suggestion.id}
-                        className={`rounded-[24px] border p-4 ${
-                          alreadyLinked
-                            ? 'border-slate-200 bg-slate-50/80'
-                            : 'border-cyan-200/80 bg-white shadow-sm shadow-cyan-100/40'
-                        }`}
-                      >
-                        <div className="flex items-start gap-3">
-                          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-cyan-50 text-lg">
-                            {INCIDENT_TYPE_ICONS[suggestion.payload.hazard] ?? '⚡'}
-                          </div>
-                          <div className="min-w-0 flex-1">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <CivicBadge
-                                label={`${HAZARD_LABELS[suggestion.payload.hazard]} ${suggestion.payload.severity}`}
-                                tone={suggestion.payload.severity === 'warning' ? 'rose' : 'amber'}
-                              />
-                              <CivicBadge
-                                label={alreadyLinked ? 'Linked to active incident' : 'Ready for confirmation'}
-                                tone={alreadyLinked ? 'slate' : 'emerald'}
+                          {isTriggerAnalyzableIncident(incident) ? (
+                            <div className="mt-2.5">
+                              <TriggerAnalysis
+                                incident={incident}
+                                groups={filteredPriorityGroups}
+                                incidents={incidents}
+                                alerts={alerts}
                               />
                             </div>
-                            <p className="mt-2 text-sm font-bold text-slate-950">{suggestion.locationLabel}</p>
-                            <p className="mt-1 text-xs leading-relaxed text-slate-600">{suggestion.payload.trigger_reason}</p>
-                            {suggestion.payload.weather_summary ? (
-                              <p className="mt-1 text-xs text-slate-500">Weather: {suggestion.payload.weather_summary}</p>
-                            ) : null}
-                            <div className="mt-2 flex flex-wrap gap-1.5">
-                              {suggestion.payload.flood_control_status ? (
-                                <CivicBadge
-                                  label={PUROK_FLOOD_CONTROL_STATUS_LABELS[suggestion.payload.flood_control_status]}
-                                  tone="slate"
-                                  className="text-[10px]"
-                                />
-                              ) : null}
-                              {suggestion.payload.default_evacuation_site ? (
-                                <CivicBadge
-                                  label={`Evacuation: ${suggestion.payload.default_evacuation_site}`}
-                                  tone="emerald"
-                                  className="text-[10px]"
-                                />
-                              ) : null}
-                            </div>
-                            <p className="mt-2 text-[11px] font-medium text-slate-400">{timeAgo(new Date(suggestion.payload.issued_at))}</p>
-                          </div>
-                        </div>
-                        <div className="mt-4 flex flex-wrap gap-2">
-                          <button
-                            type="button"
-                            disabled={alreadyLinked || creatingFromAlertId === suggestion.id}
-                            onClick={() => setSuggestionModal(suggestion)}
-                            className={`rounded-full px-3 py-2 text-xs font-semibold transition ${
-                              alreadyLinked
-                                ? 'cursor-not-allowed border border-slate-200 bg-slate-100 text-slate-400'
-                                : 'bg-cyan-900 text-white hover:bg-cyan-800'
-                            }`}
-                          >
-                            {creatingFromAlertId === suggestion.id ? 'Creating incident...' : 'Create incident from alert'}
-                          </button>
-                          {alreadyLinked ? (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setSelectedIncident(suggestion.linkedIncident ?? null);
-                                setSelectedHousehold(null);
-                                setSelectedEvent(null);
-                                setActiveTab('incidents');
-                              }}
-                              className="rounded-full border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50"
-                            >
-                              View linked incident
-                            </button>
                           ) : null}
                         </div>
+                      );
+                    })
+                  )
+                ) : (
+                  /* Alert Suggestions Feed */
+                  alertSuggestions.length > 0 ? (
+                    alertSuggestions.map((suggestion) => {
+                      const alreadyLinked = Boolean(suggestion.linkedIncident);
+                      return (
+                        <div
+                          key={suggestion.id}
+                          className={`rounded-2xl border p-4 transition ${
+                            alreadyLinked ? 'border-slate-200 bg-slate-50/70' : 'border-cyan-200 bg-cyan-50/40 shadow-xs'
+                          }`}
+                        >
+                          <div className="flex items-start gap-3">
+                            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-cyan-100 text-xl">
+                              <Siren className="h-5 w-5 text-cyan-800" />
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <div className="flex flex-wrap items-center gap-1.5">
+                                <CivicBadge label={HAZARD_LABELS[suggestion.payload.hazard]} tone="teal" className="text-[10px]" />
+                                <CivicBadge
+                                  label={suggestion.payload.severity === 'warning' ? 'Warning' : 'Advisory'}
+                                  tone={suggestion.payload.severity === 'warning' ? 'rose' : 'amber'}
+                                  className="text-[10px]"
+                                />
+                                {alreadyLinked ? (
+                                  <CivicBadge label="Incident linked" tone="slate" className="text-[10px]" />
+                                ) : null}
+                              </div>
+                              <p className="mt-1.5 text-sm font-bold text-slate-950">{suggestion.locationLabel}</p>
+                              <p className="mt-1 text-xs text-slate-600">{suggestion.payload.trigger_reason}</p>
+                              <p className="mt-2 text-[10px] font-medium text-slate-400">{timeAgo(new Date(suggestion.payload.issued_at))}</p>
+                            </div>
+                          </div>
+                          <div className="mt-3 flex flex-wrap gap-2">
+                            <button
+                              type="button"
+                              disabled={alreadyLinked || creatingFromAlertId === suggestion.id}
+                              onClick={() => setSuggestionModal(suggestion)}
+                              className={`rounded-full px-3 py-1.5 text-xs font-semibold transition ${
+                                alreadyLinked
+                                  ? 'cursor-not-allowed border border-slate-200 bg-slate-100 text-slate-400'
+                                  : 'bg-cyan-900 text-white hover:bg-cyan-800'
+                              }`}
+                            >
+                              {creatingFromAlertId === suggestion.id ? 'Creating incident...' : 'Create incident from alert'}
+                            </button>
+                            {alreadyLinked ? (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setSelectedIncident(suggestion.linkedIncident ?? null);
+                                  setSelectedHousehold(null);
+                                  setSelectedEvent(null);
+                                  setIncidentSubTab('active');
+                                }}
+                                className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 transition hover:bg-slate-50"
+                              >
+                                View linked incident
+                              </button>
+                            ) : null}
+                          </div>
+                        </div>
+                      );
+                    })
+                  ) : alertRules.filter((r) => r.enabled).length > 0 ? (
+                    <>
+                      <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-center">
+                        <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Monitoring — standby</p>
+                        <p className="mt-1 text-xs text-slate-500">Weather is within normal thresholds. Rules below are actively watching.</p>
                       </div>
-                    );
-                  })
-                ) : alertRules.filter((r) => r.enabled).length > 0 ? (
-                  /* Option D: show standby monitoring cards for each enabled rule */
-                  <>
-                    <div className="rounded-[20px] border border-slate-200 bg-slate-50 px-4 py-3 text-center">
-                      <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">Monitoring — no alert yet</p>
-                      <p className="mt-1 text-xs text-slate-500">Weather hasn&apos;t crossed any threshold. Rules below are actively watching.</p>
-                    </div>
-                    {alertRules
-                      .filter((r) => r.enabled)
-                      .map((rule) => {
+                      {alertRules.filter((r) => r.enabled).map((rule) => {
                         const barangayLabel = BARANGAY_OPTIONS.find((b) => b.id === rule.barangay_id)?.label ?? rule.barangay_id;
                         const locationLabel = rule.purok_sitio ? `${barangayLabel} · ${rule.purok_sitio}` : barangayLabel;
-                        const lastTriggeredAgo = rule.last_triggered_at
-                          ? timeAgo(new Date(rule.last_triggered_at))
-                          : null;
                         return (
-                          <div
-                            key={rule.id}
-                            className="rounded-[24px] border border-slate-200 bg-white p-4"
-                          >
+                          <div key={rule.id} className="rounded-2xl border border-slate-200 bg-white p-3.5">
                             <div className="flex items-start gap-3">
-                              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-slate-100 text-lg">
+                              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-base">
                                 {INCIDENT_TYPE_ICONS[rule.hazard] ?? '⚡'}
                               </div>
                               <div className="min-w-0 flex-1">
-                                <div className="flex flex-wrap items-center gap-2">
-                                  <CivicBadge label={HAZARD_LABELS[rule.hazard]} tone="teal" />
-                                  <CivicBadge label="Standby — no alert" tone="slate" />
+                                <div className="flex flex-wrap items-center gap-1.5">
+                                  <CivicBadge label={HAZARD_LABELS[rule.hazard]} tone="teal" className="text-[10px]" />
+                                  <CivicBadge label="Standby" tone="slate" className="text-[10px]" />
                                 </div>
-                                <p className="mt-2 text-sm font-bold text-slate-950">{locationLabel}</p>
-                                <p className="mt-1 text-xs text-slate-400">
-                                  Cooldown {rule.cooldown_minutes} min
-                                  {lastTriggeredAgo ? ` · Last triggered ${lastTriggeredAgo}` : ' · Never triggered'}
-                                </p>
-                                <p className="mt-1 text-[11px] text-slate-400">
-                                  Trigger point {rule.trigger_lat.toFixed(4)}, {rule.trigger_lng.toFixed(4)}
-                                </p>
+                                <p className="mt-1 text-sm font-bold text-slate-950">{locationLabel}</p>
+                                <p className="mt-0.5 text-[11px] text-slate-400">Cooldown {rule.cooldown_minutes}m · ({rule.trigger_lat.toFixed(4)}, {rule.trigger_lng.toFixed(4)})</p>
                               </div>
                             </div>
                           </div>
                         );
                       })}
-                  </>
-                ) : (
-                  <div className="rounded-[24px] border border-dashed border-slate-300 bg-slate-50 px-5 py-10 text-center">
-                    <Siren className="mx-auto h-8 w-8 text-slate-400" />
-                    <p className="mt-3 text-sm font-semibold text-slate-900">No alert rules configured</p>
-                    <p className="mt-1 text-sm text-slate-500">Ask an admin to create automatic alert rules in the Alerts page.</p>
-                  </div>
+                    </>
+                  ) : (
+                    <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-5 py-10 text-center">
+                      <Siren className="mx-auto h-7 w-7 text-slate-400" />
+                      <p className="mt-2 text-sm font-semibold text-slate-800">No alert rules configured</p>
+                    </div>
+                  )
                 )}
               </div>
-            ) : null}
+            )}
 
-            {activeTab === 'priorities' ? (
-              <div className="space-y-3">
-                {loading ? (
-                  [...Array(4)].map((_, index) => (
-                    <div key={index} className="h-24 animate-pulse rounded-[24px] bg-slate-100" />
-                  ))
-                ) : filteredPriorityGroups.length === 0 ? (
-                  <div className="rounded-[24px] border border-dashed border-slate-300 bg-slate-50 px-5 py-10 text-center">
-                    <Users className="mx-auto h-8 w-8 text-slate-400" />
-                    <p className="mt-3 text-sm font-semibold text-slate-900">No priority puroks</p>
-                    <p className="mt-1 text-xs text-slate-500">Flood risk, vulnerability, and live alerts did not surface a queue right now.</p>
+            {/* ──────── TAB 2: PRIORITY QUEUE & TRIAGE ──────── */}
+            {tacticalTab === 'priorities' && (
+              <div className="space-y-4">
+                {/* Recommended First Response Banner */}
+                {topPriorityGroup && topPriorityHousehold ? (() => {
+                  const levelTone = topPriorityGroup.level === 'critical' ? 'rose' : topPriorityGroup.level === 'high' ? 'amber' : topPriorityGroup.level === 'medium' ? 'navy' : 'slate';
+                  return (
+                    <div className="rounded-2xl border border-cyan-200 bg-cyan-50/70 p-4 shadow-xs">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="text-[10px] font-bold uppercase tracking-wider text-cyan-700">Recommended First Response</p>
+                          <h4 className="mt-1 text-base font-black text-slate-950">{topPriorityGroup.purokSitio}</h4>
+                          <p className="mt-1 text-xs text-slate-600">
+                            Unahon si <span className="font-bold text-slate-950">{topPriorityHousehold.household.head_name}</span>
+                          </p>
+                        </div>
+                        <CivicBadge label={topPriorityGroup.level.toUpperCase()} tone={levelTone} className="text-[10px]" />
+                      </div>
+                      <div className="mt-2.5 flex flex-wrap gap-1">
+                        <CivicBadge label={`Score ${topPriorityGroup.score}`} tone="amber" className="text-[10px]" />
+                        <CivicBadge label={`${topPriorityGroup.vulnerableResidentCount} vulnerable`} tone="rose" className="text-[10px]" />
+                        <CivicBadge label={`${topPriorityGroup.householdCount} households`} tone="slate" className="text-[10px]" />
+                        {topPriorityGroup.reasons.slice(0, 3).map((reason) => (
+                          <CivicBadge key={reason} label={reason} tone="navy" className="text-[10px]" />
+                        ))}
+                      </div>
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSelectedHousehold(topPriorityHousehold.household);
+                            setSelectedIncident(null);
+                            setSelectedEvent(null);
+                          }}
+                          className="rounded-full bg-cyan-950 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-cyan-900"
+                        >
+                          Inspect Household
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => navigateToHousehold(topPriorityHousehold.household)}
+                          className="rounded-full border border-cyan-200 bg-white px-3 py-1.5 text-xs font-semibold text-cyan-900 transition hover:bg-cyan-50"
+                        >
+                          Navigate
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })() : null}
+
+                {/* Purok Targeting Filters */}
+                <div className="rounded-2xl border border-slate-200/90 bg-slate-50/60 p-3.5 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Triage Filters</span>
+                    {hasPurokFilters ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setFilterFloodProne('all');
+                          setFilterFloodControlStatus('all');
+                          setCategoryFilter('all');
+                        }}
+                        className="text-[11px] font-semibold text-cyan-900 hover:underline"
+                      >
+                        Reset filters
+                      </button>
+                    ) : null}
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <select
+                      value={filterFloodProne}
+                      onChange={(e) => setFilterFloodProne(e.target.value as PurokFloodProneFilter)}
+                      className="h-9 rounded-xl border border-slate-200 bg-white px-2.5 text-xs font-medium text-slate-700 outline-none focus:border-cyan-900"
+                    >
+                      <option value="all">All flood exposure</option>
+                      <option value="flood_prone">Flood-prone only</option>
+                      <option value="not_flood_prone">Not flood-prone</option>
+                    </select>
+
+                    <select
+                      value={filterFloodControlStatus}
+                      onChange={(e) => setFilterFloodControlStatus(e.target.value as PurokFloodControlStatus | 'all')}
+                      className="h-9 rounded-xl border border-slate-200 bg-white px-2.5 text-xs font-medium text-slate-700 outline-none focus:border-cyan-900"
+                    >
+                      <option value="all">All flood control</option>
+                      {PUROK_FLOOD_CONTROL_OPTIONS.map((status) => (
+                        <option key={status} value={status}>{PUROK_FLOOD_CONTROL_STATUS_LABELS[status]}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Demographic Pills */}
+                  <div className="flex flex-wrap gap-1.5 pt-1">
+                    {PRIORITY_CATEGORY_FILTERS.map((key) => {
+                      const count = key === 'all'
+                        ? priorityGroups.length
+                        : priorityGroups.filter((group) => group.categoryCounts[key] > 0).length;
+                      return (
+                        <CivicChipButton
+                          key={key}
+                          active={categoryFilter === key}
+                          onClick={() => setCategoryFilter(key)}
+                          className="text-[11px] py-1 px-2.5"
+                        >
+                          {key === 'all' ? 'All' : DISTRIBUTION_CATEGORY_LABELS[key]}
+                          <span className={`ml-1 rounded-full px-1.5 py-0.2 text-[9px] ${
+                            categoryFilter === key ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-500'
+                          }`}>
+                            {count}
+                          </span>
+                        </CivicChipButton>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Priority Puroks Queue */}
+                <PriorityAnalytics
+                  groups={filteredPriorityGroups}
+                  incidents={incidents}
+                  alerts={alerts}
+                />
+
+                {filteredPriorityGroups.length === 0 ? (
+                  <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-5 py-10 text-center">
+                    <Users className="mx-auto h-7 w-7 text-slate-400" />
+                    <p className="mt-2 text-sm font-semibold text-slate-800">No priority puroks matching filters</p>
                   </div>
                 ) : (
-                  <>
-                  {topPriorityGroup && topPriorityHousehold ? (() => {
-                    const levelTone = topPriorityGroup.level === 'critical' ? 'rose' : topPriorityGroup.level === 'high' ? 'amber' : topPriorityGroup.level === 'medium' ? 'navy' : 'slate';
-                    return (
-                      <div className="rounded-[24px] border border-cyan-200 bg-cyan-50/60 px-4 py-4 shadow-sm shadow-cyan-100/50">
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="min-w-0">
-                            <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-cyan-700">Recommended first response</p>
-                            <h4 className="mt-1 text-base font-black text-slate-950">{topPriorityGroup.purokSitio}</h4>
-                            <p className="mt-1 text-sm text-slate-600">
-                              Start with <span className="font-bold text-slate-950">{topPriorityHousehold.household.head_name}</span>
-                            </p>
-                          </div>
-                          <CivicBadge label={topPriorityGroup.level.toUpperCase()} tone={levelTone} className="text-[10px]" />
-                        </div>
-                        <div className="mt-3 flex flex-wrap gap-1.5">
-                          <CivicBadge label={`Score ${topPriorityGroup.score}`} tone="amber" className="text-[10px]" />
-                          <CivicBadge label={`${topPriorityGroup.vulnerableResidentCount} vulnerable`} tone="rose" className="text-[10px]" />
-                          <CivicBadge label={`${topPriorityGroup.householdCount} households`} tone="slate" className="text-[10px]" />
-                          {topPriorityGroup.reasons.slice(0, 4).map((reason) => (
-                            <CivicBadge key={reason} label={reason} tone="navy" className="text-[10px]" />
-                          ))}
-                          {topPriorityTags.slice(0, 4).map((tag) => (
-                            <CivicBadge key={tag} label={tag} tone="rose" className="text-[10px]" />
-                          ))}
-                        </div>
-                        <div className="mt-3 flex flex-wrap gap-2">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setSelectedHousehold(topPriorityHousehold.household);
-                              setSelectedIncident(null);
-                              setSelectedEvent(null);
-                            }}
-                            className="rounded-full bg-cyan-950 px-3 py-2 text-xs font-semibold text-white transition hover:bg-cyan-900"
-                          >
-                            Inspect first household
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => navigateToHousehold(topPriorityHousehold.household)}
-                            className="rounded-full border border-cyan-200 bg-white px-3 py-2 text-xs font-semibold text-cyan-900 transition hover:bg-cyan-50"
-                          >
-                            Navigate
-                          </button>
-                        </div>
-                      </div>
-                    );
-                  })() : null}
-
-                  <PriorityAnalytics
-                    groups={filteredPriorityGroups}
-                    incidents={incidents}
-                    alerts={alerts}
-                  />
-
-                  {filteredPriorityGroups.map((group, index) => {
+                  filteredPriorityGroups.map((group, index) => {
                     const levelTone = group.level === 'critical' ? 'rose' : group.level === 'high' ? 'amber' : group.level === 'medium' ? 'navy' : 'slate';
                     const firstHousehold = group.households.find((priority) => !visitedIds.has(priority.household.id)) ?? group.households[0];
                     if (!firstHousehold) return null;
@@ -1672,33 +1494,31 @@ export default function ResponderDesktop() {
                         tabIndex={0}
                         onClick={selectPurok}
                         onKeyDown={(event) => activateOnEnterOrSpace(event, selectPurok)}
-                        className="w-full cursor-pointer rounded-[24px] border border-slate-200/80 bg-white px-4 py-4 text-left transition hover:-translate-y-px hover:border-slate-300 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-cyan-900/20"
+                        className="w-full cursor-pointer rounded-2xl border border-slate-200/90 bg-white p-4 text-left transition hover:-translate-y-px hover:border-slate-300 hover:shadow-md focus:outline-none"
                       >
                         <div className="flex items-start gap-3">
-                          <div className="flex h-8 w-8 items-center justify-center rounded-2xl bg-slate-100 text-xs font-black text-slate-600">
+                          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-xs font-black text-slate-700">
                             {index + 1}
                           </div>
                           <div className="min-w-0 flex-1">
                             <div className="flex flex-wrap items-start justify-between gap-2">
                               <div className="min-w-0">
                                 <p className="truncate text-sm font-bold text-slate-950">{group.purokSitio}</p>
-                                <p className="mt-1 truncate text-xs text-slate-500">{group.barangayLabel}</p>
-                                <p className="mt-1 truncate text-xs font-semibold text-cyan-900">Unahon: {firstHousehold.household.head_name}</p>
+                                <p className="truncate text-xs text-slate-500">{group.barangayLabel}</p>
+                                <p className="mt-0.5 truncate text-xs font-semibold text-cyan-900">Unahon: {firstHousehold.household.head_name}</p>
                               </div>
                               <CivicBadge label={group.level.toUpperCase()} tone={levelTone} className="text-[10px]" />
                             </div>
                             <div className="mt-2 flex flex-wrap gap-1">
-                              <CivicBadge label={group.floodProne ? 'Flood-prone purok' : 'Not flood-prone'} tone={group.floodProne ? 'rose' : 'emerald'} className="text-[10px]" />
+                              <CivicBadge label={group.floodProne ? 'Flood-prone' : 'Not flood-prone'} tone={group.floodProne ? 'rose' : 'emerald'} className="text-[10px]" />
                               <CivicBadge label={group.floodControlLabel} tone="slate" className="text-[10px]" />
-                              <CivicBadge label={`${group.householdCount} households`} tone="slate" className="text-[10px]" />
-                              <CivicBadge label={`${group.vulnerableResidentCount} vulnerable`} tone="rose" className="text-[10px]" />
+                              <CivicBadge label={`${group.householdCount} hh`} tone="slate" className="text-[10px]" />
+                              <CivicBadge label={`${group.vulnerableResidentCount} vuln`} tone="rose" className="text-[10px]" />
                               <CivicBadge label={`Score ${group.score}`} tone="amber" className="text-[10px]" />
-                              {group.reasons.slice(0, 4).map((reason) => (
-                                <CivicBadge key={reason} label={reason} tone="navy" className="text-[10px]" />
-                              ))}
                             </div>
                           </div>
                         </div>
+
                         <div className="mt-3 flex items-center gap-2">
                           <button
                             type="button"
@@ -1706,7 +1526,7 @@ export default function ResponderDesktop() {
                               event.stopPropagation();
                               navigateToHousehold(priority.household);
                             }}
-                            className="rounded-full border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50"
+                            className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
                           >
                             Navigate
                           </button>
@@ -1724,17 +1544,18 @@ export default function ResponderDesktop() {
                                 return next;
                               });
                             }}
-                            className={`rounded-full px-3 py-2 text-xs font-semibold transition ${
-                              isVisited ? 'bg-emerald-600 text-white' : 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                            className={`rounded-full px-3 py-1.5 text-xs font-semibold transition ${
+                              isVisited ? 'bg-emerald-600 text-white' : 'border border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
                             }`}
                           >
-                            {isVisited ? 'Checked in' : 'Mark check-in'}
+                            {isVisited ? 'Checked in ✓' : 'Mark check-in'}
                           </button>
                         </div>
+
                         {group.households.length > 0 ? (
-                          <div className="mt-3 space-y-2 rounded-[18px] border border-slate-100 bg-slate-50/70 p-3">
-                            <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-slate-400">Households to visit first</p>
-                            {group.households.map((queuedHousehold, householdIndex) => {
+                          <div className="mt-3 space-y-2 rounded-xl border border-slate-100 bg-slate-50/70 p-2.5">
+                            <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Households in priority order</p>
+                            {group.households.slice(0, 3).map((queuedHousehold, householdIndex) => {
                               const queuedTags = getVulnerabilityPriorityLabels(queuedHousehold.flags);
                               const queuedVisited = visitedIds.has(queuedHousehold.household.id);
                               return (
@@ -1747,31 +1568,28 @@ export default function ResponderDesktop() {
                                     setSelectedIncident(null);
                                     setSelectedEvent(null);
                                   }}
-                                  className={`w-full rounded-2xl border px-3 py-3 text-left transition hover:border-slate-300 ${
+                                  className={`w-full rounded-xl border px-2.5 py-2 text-left transition hover:border-slate-300 ${
                                     queuedVisited ? 'border-emerald-200 bg-emerald-50' : 'border-white bg-white'
                                   }`}
                                 >
-                                  <div className="flex items-start gap-3">
-                                    <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-[11px] font-black text-slate-500">
-                                      {householdIndex + 1}
+                                  <div className="flex items-center justify-between gap-2">
+                                    <span className="truncate text-xs font-bold text-slate-900">
+                                      {householdIndex + 1}. {queuedHousehold.household.head_name}
                                     </span>
-                                    <span className="min-w-0 flex-1">
-                                      <span className="block truncate text-sm font-bold text-slate-950">{queuedHousehold.household.head_name}</span>
-                                      <span className="mt-1 block truncate text-xs text-slate-500">{queuedHousehold.household.street_address}</span>
-                                      <span className="mt-2 flex flex-wrap gap-1">
-                                        {queuedTags.map((tag) => (
-                                          <CivicBadge key={tag} label={tag} tone="rose" className="text-[10px]" />
-                                        ))}
-                                        <CivicBadge label={`Score ${queuedHousehold.score}`} tone="amber" className="text-[10px]" />
-                                        {queuedVisited ? <CivicBadge label="Visited" tone="emerald" className="text-[10px]" /> : null}
-                                      </span>
-                                    </span>
+                                    {queuedVisited ? <CivicBadge label="Visited" tone="emerald" className="text-[9px]" /> : null}
+                                  </div>
+                                  <div className="mt-1 flex flex-wrap gap-1">
+                                    {queuedTags.slice(0, 2).map((tag) => (
+                                      <CivicBadge key={tag} label={tag} tone="rose" className="text-[9px]" />
+                                    ))}
+                                    <CivicBadge label={`Score ${queuedHousehold.score}`} tone="amber" className="text-[9px]" />
                                   </div>
                                 </button>
                               );
                             })}
                           </div>
                         ) : null}
+
                         <PurokCategoryRoster
                           group={group}
                           residents={allResidents}
@@ -1779,143 +1597,209 @@ export default function ResponderDesktop() {
                         />
                       </div>
                     );
-                  })}
-                  </>
-                )}
-              </div>
-            ) : null}
-
-            {activeTab === 'events' ? (
-              <div className="space-y-3">
-                {loading ? (
-                  [...Array(2)].map((_, index) => (
-                    <div key={index} className="h-24 animate-pulse rounded-[24px] bg-slate-100" />
-                  ))
-                ) : events.length === 0 ? (
-                  <div className="rounded-[24px] border border-dashed border-slate-300 bg-slate-50 px-5 py-10 text-center">
-                    <Package className="mx-auto h-8 w-8 text-slate-400" />
-                    <p className="mt-3 text-sm font-semibold text-slate-900">No active distribution events</p>
-                  </div>
-                ) : (
-                  events.map((event) => {
-                    const selectEvent = () => {
-                      setSelectedEvent(event);
-                      setSelectedHousehold(null);
-                      setSelectedIncident(null);
-                    };
-                    return (
-                    <div
-                      key={event.id}
-                      role="button"
-                      tabIndex={0}
-                      onClick={selectEvent}
-                      onKeyDown={(keyboardEvent) => activateOnEnterOrSpace(keyboardEvent, selectEvent)}
-                      className={`cursor-pointer rounded-[24px] border bg-white px-4 py-4 transition hover:-translate-y-px hover:border-slate-300 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-cyan-900/20 ${
-                        selectedEvent?.id === event.id ? 'border-violet-300 shadow-md' : 'border-slate-200/80'
-                      }`}
-                    >
-                      <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <p className="text-sm font-bold text-slate-950">{event.event_name}</p>
-                          <p className="mt-1 text-xs text-slate-500">{event.location}</p>
-                          <p className="mt-2 text-[11px] font-medium text-slate-400">
-                            {new Date(event.scheduled_date).toLocaleDateString('en-PH', { month: 'long', day: 'numeric', year: 'numeric' })}
-                          </p>
-                        </div>
-                        <CivicBadge label="Active" tone="emerald" />
-                      </div>
-                      <button
-                        type="button"
-                        onClick={(clickEvent) => {
-                          clickEvent.stopPropagation();
-                          navigateToEvent(event);
-                        }}
-                        className="mt-3 rounded-full border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50"
-                      >
-                        Navigate
-                      </button>
-                    </div>
-                    );
                   })
                 )}
               </div>
-            ) : null}
+            )}
 
-            {activeTab === 'zones' ? (
-              <div className="space-y-3">
-                {loading ? (
-                  [...Array(3)].map((_, index) => (
-                    <div key={index} className="h-28 animate-pulse rounded-[24px] bg-slate-100" />
-                  ))
-                ) : purokRiskProfiles.length === 0 ? (
-                  <div className="rounded-[24px] border border-dashed border-slate-300 bg-slate-50 px-5 py-10 text-center">
-                    <ShieldAlert className="mx-auto h-8 w-8 text-slate-400" />
-                    <p className="mt-3 text-sm font-semibold text-slate-900">No puroks configured</p>
-                    <p className="mt-1 text-xs text-slate-500">Wait for puroks to be seeded or load households first.</p>
+            {/* ──────── TAB 3: EVACUATION & LOGISTICS ──────── */}
+            {tacticalTab === 'logistics' && (
+              <div className="space-y-4">
+                {/* Evacuation Centers Panel */}
+                <EvacuationCenterPanel
+                  centers={evacuationCenters}
+                  canManageRegistry={user?.role === 'admin'}
+                  savingCenterId={savingCenterId}
+                  onSetStatus={(centerId, status) => {
+                    void handleSetEvacuationCenterStatus(centerId, status);
+                  }}
+                  onSaveCenters={handleSaveEvacuationCenters}
+                  onDeleteCenter={(centerId) => {
+                    void handleDeleteEvacuationCenter(centerId);
+                  }}
+                />
+
+                {/* Distribution Events section */}
+                <div className="rounded-2xl border border-slate-200/90 bg-white p-4 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Field Logistics</p>
+                      <h4 className="text-sm font-bold text-slate-950">Active Distribution Events</h4>
+                    </div>
+                    <CivicBadge label={`${events.length} active`} tone="emerald" className="text-[10px]" />
                   </div>
-                ) : (
-                  purokRiskProfiles
-                    .sort((a, b) => {
-                      if (a.flood_prone !== b.flood_prone) return a.flood_prone ? -1 : 1;
-                      return a.purok_sitio.localeCompare(b.purok_sitio, undefined, { numeric: true });
-                    })
-                    .map((profile) => {
+
+                  {events.length === 0 ? (
+                    <p className="text-xs text-slate-500 py-3 text-center">No ongoing distribution drives currently active.</p>
+                  ) : (
+                    events.map((event) => (
+                      <div key={event.id} className="rounded-xl border border-slate-100 bg-slate-50/70 p-3">
+                        <div className="flex items-start justify-between gap-2">
+                          <div>
+                            <p className="text-sm font-bold text-slate-900">{event.event_name}</p>
+                            <p className="text-xs text-slate-500">{event.location}</p>
+                            <p className="mt-1 text-[11px] text-slate-400">
+                              {new Date(event.scheduled_date).toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' })}
+                            </p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => navigateToEvent(event)}
+                            className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                          >
+                            Navigate
+                          </button>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* ──────── TAB 4: TELEMETRY & EARLY WARNING ──────── */}
+            {tacticalTab === 'telemetry' && (
+              <div className="space-y-4">
+                {/* Weather Widget */}
+                <WeatherWidget
+                  mode="compact"
+                  className="civic-card-shadow"
+                  lat={activeRule?.trigger_lat}
+                  lng={activeRule?.trigger_lng}
+                />
+
+                {/* Auto-Alert Trigger Status Monitor */}
+                {activeRule && (
+                  <div className="rounded-2xl border border-slate-200/90 bg-white p-4 space-y-3">
+                    <div>
+                      <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Threshold Monitor</p>
+                      <h4 className="mt-0.5 text-sm font-bold text-slate-950">Live Weather Triggers</h4>
+                      <p className="mt-0.5 text-xs text-slate-500">
+                        Rule: <span className="font-semibold">{activeRule.hazard.replaceAll('_', ' ')}</span> at{' '}
+                        {activeRule.trigger_lat.toFixed(3)}, {activeRule.trigger_lng.toFixed(3)}
+                      </p>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2">
+                      {[
+                        {
+                          icon: CloudRain,
+                          label: 'Rain Chance',
+                          current: liveWeather?.current.rainChance ?? null,
+                          threshold: activeRule.min_rain_chance ?? null,
+                          format: (v: number) => `${Math.round(v)}%`,
+                        },
+                        {
+                          icon: CloudRain,
+                          label: 'Rain Intensity',
+                          current: liveWeather?.current.rainIntensity ?? null,
+                          threshold: activeRule.min_rain_intensity_mm_per_hr ?? null,
+                          format: (v: number) => `${v.toFixed(1)} mm/h`,
+                        },
+                        {
+                          icon: CloudRain,
+                          label: 'Next-Hour Rain',
+                          current: liveWeather?.current.nextHourPrecipitationPeak ?? null,
+                          threshold: activeRule.min_next_hour_precip_mm ?? null,
+                          format: (v: number) => `${v.toFixed(1)} mm`,
+                        },
+                        {
+                          icon: Wind,
+                          label: 'Wind Gust',
+                          current: liveWeather?.current.windGust ?? null,
+                          threshold: activeRule.min_wind_gust_kph ?? null,
+                          format: (v: number) => `${Math.round(v)} kph`,
+                        },
+                      ].map((metric) => {
+                        const willTrigger = metric.threshold !== null && metric.current !== null && metric.current >= metric.threshold;
+                        const hasData = metric.current !== null;
+                        const tone = willTrigger
+                          ? 'border-rose-200 bg-rose-50 text-rose-800'
+                          : hasData
+                            ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
+                            : 'border-slate-200 bg-slate-50 text-slate-500';
+                        return (
+                          <div key={metric.label} className={`rounded-xl border p-2.5 ${tone}`}>
+                            <div className="flex items-center gap-1 text-[10px] font-bold uppercase opacity-75">
+                              <metric.icon className="h-3 w-3" />
+                              {metric.label}
+                            </div>
+                            <p className="mt-1 text-sm font-black">
+                              {hasData ? metric.format(metric.current!) : 'No data'}
+                            </p>
+                            {metric.threshold !== null && (
+                              <p className="text-[9px] opacity-70">
+                                Trigger: ≥ {metric.format(metric.threshold)}
+                              </p>
+                            )}
+                            {willTrigger && (
+                              <p className="mt-0.5 flex items-center gap-1 text-[9px] font-bold text-rose-700">
+                                <AlertCircle className="h-2.5 w-2.5" /> Met
+                              </p>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    {liveWeather && liveWeather.alerts.length > 0 && (() => {
+                      const lead = liveWeather.alerts[0];
+                      const isWarning = lead.severity === 'warning';
+                      return (
+                        <div className={`rounded-xl border p-2.5 ${
+                          isWarning ? 'border-rose-200 bg-rose-50' : 'border-amber-200 bg-amber-50'
+                        }`}>
+                          <div className="flex items-start gap-2">
+                            <ShieldAlert className={`mt-0.5 h-4 w-4 shrink-0 ${isWarning ? 'text-rose-600' : 'text-amber-600'}`} />
+                            <div>
+                              <p className={`text-xs font-semibold ${isWarning ? 'text-rose-800' : 'text-amber-800'}`}>{lead.title}</p>
+                              <p className="mt-0.5 text-[10px] leading-relaxed text-slate-600">{lead.detail}</p>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })()}
+                  </div>
+                )}
+
+                {/* Purok Flood Risk Profiles & Emergency Ping */}
+                <div className="rounded-2xl border border-slate-200/90 bg-white p-4 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Zones & Pings</p>
+                      <h4 className="text-sm font-bold text-slate-950">Purok Risk Profiles</h4>
+                    </div>
+                    <CivicBadge label={`${purokRiskProfiles.length} zones`} tone="navy" className="text-[10px]" />
+                  </div>
+
+                  <div className="space-y-3">
+                    {purokRiskProfiles.map((profile) => {
                       const houseCount = mapHouseholds.filter(
-                        (h) => h.purok_sitio === profile.purok_sitio && h.status === 'active'
+                        (h) => h.purok_sitio === profile.purok_sitio && h.barangay_id === profile.barangay_id
                       ).length;
                       const hasPinged = pingZones.has(profile.purok_sitio);
-                      const isAtRisk = profile.flood_prone && liveWeather && (
-                        (activeRule?.min_rain_chance !== undefined && (liveWeather.current.rainChance ?? 0) >= activeRule.min_rain_chance) ||
-                        (activeRule?.min_wind_gust_kph !== undefined && (liveWeather.current.windGust ?? 0) >= activeRule.min_wind_gust_kph)
-                      );
-                      // Weather-based flood control suggestion
-                      const rainIntensity = liveWeather?.current.rainIntensity ?? 0;
-                      const rainChance = liveWeather?.current.rainChance ?? 0;
-                      const weatherSuggestsRisk = profile.flood_prone && (rainIntensity >= 4 || rainChance >= 60);
+                      const isAtRisk = profile.flood_prone;
 
                       return (
                         <div
                           key={profile.purok_sitio}
-                          className={`rounded-[24px] border p-4 transition ${
-                            isAtRisk
-                              ? 'border-rose-300 bg-rose-50/80 shadow-sm shadow-rose-100'
-                              : profile.flood_prone
-                                ? 'border-amber-200/60 bg-amber-50/30'
-                                : 'border-slate-200/80 bg-white'
+                          className={`rounded-xl border p-3 transition ${
+                            isAtRisk ? 'border-rose-200 bg-rose-50/40' : 'border-slate-200 bg-white'
                           }`}
                         >
-                          {/* Header row */}
                           <div className="flex items-start justify-between gap-2">
-                            <div className="min-w-0 flex-1">
-                              <div className="flex flex-wrap items-center gap-1.5">
-                                <p className="text-sm font-black text-slate-950">{profile.purok_sitio}</p>
-                                {isAtRisk && (
-                                  <span className="inline-flex items-center gap-1 rounded-full border border-rose-300 bg-rose-100 px-2 py-0.5 text-[10px] font-bold text-rose-700">
-                                    <AlertCircle className="h-2.5 w-2.5" /> At risk
-                                  </span>
-                                )}
-                                {weatherSuggestsRisk && !isAtRisk && (
-                                  <span className="inline-flex items-center gap-1 rounded-full border border-amber-300 bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-700">
-                                    <CloudRain className="h-2.5 w-2.5" /> Rain detected
-                                  </span>
-                                )}
-                                {hasPinged && (
-                                  <span className="inline-flex items-center gap-1 rounded-full border border-emerald-300 bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-700">
-                                    <BellRing className="h-2.5 w-2.5" /> Pinged
-                                  </span>
-                                )}
-                              </div>
-                              <p className="mt-0.5 text-xs text-slate-500">
-                                {PUROK_FLOOD_CONTROL_STATUS_LABELS[profile.flood_control_status]} · <span className="font-semibold text-slate-700">{houseCount} households</span>
+                            <div>
+                              <p className="text-sm font-bold text-slate-950">{profile.purok_sitio}</p>
+                              <p className="text-xs text-slate-500">
+                                {PUROK_FLOOD_CONTROL_STATUS_LABELS[profile.flood_control_status]} · {houseCount} households
                               </p>
                             </div>
 
-                            {/* Flood control select — compact */}
                             <select
                               value={profile.flood_control_status}
                               disabled={updatingPurokStatus === profile.purok_sitio}
                               onChange={(e) => handlePurokStatusUpdate(profile, e.target.value as PurokFloodControlStatus)}
-                              className="h-8 rounded-xl border border-slate-200 bg-white px-2 text-[11px] font-semibold text-slate-700 outline-none focus:border-cyan-900 disabled:opacity-60"
+                              className="h-7 rounded-lg border border-slate-200 bg-white px-2 text-[10px] font-semibold text-slate-700 outline-none focus:border-cyan-900"
                             >
                               {PUROK_FLOOD_CONTROL_OPTIONS.map((s) => (
                                 <option key={s} value={s}>{PUROK_FLOOD_CONTROL_STATUS_LABELS[s]}</option>
@@ -1923,413 +1807,153 @@ export default function ResponderDesktop() {
                             </select>
                           </div>
 
-                          {/* Warning notes */}
-                          {profile.warning_notes && (
-                            <p className="mt-2 rounded-xl border border-amber-200 bg-amber-50 px-2.5 py-2 text-[11px] leading-5 text-amber-800">
-                              {profile.warning_notes}
-                            </p>
-                          )}
-
-                          {/* Action row */}
-                          <div className="mt-3 flex flex-wrap items-center gap-2">
+                          <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
                             <button
                               type="button"
                               disabled={houseCount === 0 || !profile.flood_prone}
                               onClick={() => setPingModal({ purok: profile, householdCount: houseCount })}
-                              title={!profile.flood_prone ? 'Mark purok as flood-prone to enable ping' : undefined}
-                              className={`inline-flex h-8 items-center gap-1.5 rounded-full px-3 text-[11px] font-bold transition ${
+                              className={`inline-flex h-7 items-center gap-1 rounded-full px-2.5 text-[10px] font-bold transition ${
                                 hasPinged
-                                  ? 'border border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
+                                  ? 'border border-emerald-200 bg-emerald-50 text-emerald-700'
                                   : isAtRisk
                                     ? 'bg-rose-600 text-white hover:bg-rose-700'
                                     : 'bg-cyan-950 text-white hover:bg-cyan-900'
                               } disabled:cursor-not-allowed disabled:opacity-40`}
                             >
                               <BellRing className="h-3 w-3" />
-                              {hasPinged ? 'Ping again' : 'Send Ping'}
+                              {hasPinged ? 'Pinged' : 'Send Ping'}
                             </button>
 
                             <button
                               type="button"
                               disabled={updatingPurokStatus === profile.purok_sitio + '-toggle'}
                               onClick={() => handlePurokFloodProneToggle(profile)}
-                              className={`inline-flex h-8 items-center gap-1.5 rounded-full border px-3 text-[11px] font-bold transition ${
+                              className={`inline-flex h-7 items-center gap-1 rounded-full border px-2.5 text-[10px] font-bold transition ${
                                 profile.flood_prone
-                                  ? 'border-amber-200 bg-amber-100 text-amber-800 hover:bg-amber-200'
+                                  ? 'border-amber-200 bg-amber-100 text-amber-800'
                                   : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
-                              } disabled:opacity-60`}
+                              }`}
                             >
-                              <ShieldAlert className="h-3 w-3" />
-                              {updatingPurokStatus === profile.purok_sitio + '-toggle'
-                                ? '...'
-                                : profile.flood_prone ? 'Flood-prone ✓' : 'Mark Prone'}
+                              {profile.flood_prone ? 'Prone ✓' : 'Mark Prone'}
                             </button>
 
                             <button
                               type="button"
                               onClick={() => startEditingPurok(profile)}
-                              className="inline-flex h-8 items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 text-[11px] font-bold text-slate-600 transition hover:bg-slate-50"
+                              className="inline-flex h-7 items-center gap-1 rounded-full border border-slate-200 bg-white px-2.5 text-[10px] font-bold text-slate-600 hover:bg-slate-50"
                             >
-                              <Edit2 className="h-3 w-3" />
+                              <Edit2 className="h-2.5 w-2.5" />
                               Notes
                             </button>
-
-                            {profile.default_evacuation_site && (
-                              <span className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-[10px] font-medium text-slate-500">
-                                <MapPin className="h-3 w-3" />
-                                {profile.default_evacuation_site}
-                              </span>
-                            )}
                           </div>
 
-                          {/* Edit notes panel */}
-                          {editingPurokId === profile.purok_sitio && purokEditForm ? (
-                            <div className="mt-4 rounded-2xl bg-slate-50 p-4 border border-slate-100">
-                              <div className="space-y-3">
-                                <div>
-                                  <label className="mb-1 block text-[11px] font-bold text-slate-700">Default Evacuation Site</label>
-                                  <input
-                                    type="text"
-                                    value={purokEditForm.default_evacuation_site}
-                                    onChange={(e) => setPurokEditForm({ ...purokEditForm, default_evacuation_site: e.target.value })}
-                                    className="w-full rounded-xl border-slate-200 px-3 py-2 text-sm focus:border-cyan-900 focus:ring-cyan-900"
-                                    placeholder="e.g. Barangay Hall"
-                                  />
-                                </div>
-                                <div>
-                                  <label className="mb-1 block text-[11px] font-bold text-slate-700">Warning Notes</label>
-                                  <textarea
-                                    value={purokEditForm.warning_notes}
-                                    onChange={(e) => setPurokEditForm({ ...purokEditForm, warning_notes: e.target.value })}
-                                    className="w-full rounded-xl border-slate-200 px-3 py-2 text-sm focus:border-cyan-900 focus:ring-cyan-900"
-                                    rows={2}
-                                    placeholder="e.g. Bridge overflow, avoid low crossing"
-                                  />
-                                </div>
-                                <div>
-                                  <label className="mb-1 block text-[11px] font-bold text-slate-700">Flood Control Notes</label>
-                                  <textarea
-                                    value={purokEditForm.flood_control_notes}
-                                    onChange={(e) => setPurokEditForm({ ...purokEditForm, flood_control_notes: e.target.value })}
-                                    className="w-full rounded-xl border-slate-200 px-3 py-2 text-sm focus:border-cyan-900 focus:ring-cyan-900"
-                                    rows={2}
-                                    placeholder="e.g. Drainage cleared on May 1st"
-                                  />
-                                </div>
-                                <div className="flex gap-2 pt-1">
-                                  <button
-                                    type="button"
-                                    onClick={() => handleSavePurokEdits(profile)}
-                                    disabled={updatingPurokStatus === profile.purok_sitio + '-edit'}
-                                    className="rounded-lg bg-cyan-950 px-4 py-2 text-[11px] font-bold text-white hover:bg-cyan-900 disabled:opacity-50"
-                                  >
-                                    {updatingPurokStatus === profile.purok_sitio + '-edit' ? 'Saving...' : 'Save Notes'}
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      setEditingPurokId(null);
-                                      setPurokEditForm(null);
-                                    }}
-                                    className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-[11px] font-bold text-slate-600 hover:bg-slate-50"
-                                  >
-                                    Cancel
-                                  </button>
-                                </div>
+                          {/* Inline edit form */}
+                          {editingPurokId === profile.purok_sitio && purokEditForm && (
+                            <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 p-3 space-y-2">
+                              <label className="block text-[10px] font-bold text-slate-700">Evacuation Site</label>
+                              <input
+                                type="text"
+                                value={purokEditForm.default_evacuation_site}
+                                onChange={(e) => setPurokEditForm({ ...purokEditForm, default_evacuation_site: e.target.value })}
+                                className="w-full rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs"
+                                placeholder="e.g. Barangay Gym"
+                              />
+                              <label className="block text-[10px] font-bold text-slate-700">Warning Notes</label>
+                              <input
+                                type="text"
+                                value={purokEditForm.warning_notes}
+                                onChange={(e) => setPurokEditForm({ ...purokEditForm, warning_notes: e.target.value })}
+                                className="w-full rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs"
+                                placeholder="e.g. Bridge overflow risk"
+                              />
+                              <div className="flex gap-2 pt-1">
+                                <button
+                                  type="button"
+                                  onClick={() => handleSavePurokEdits(profile)}
+                                  className="rounded-lg bg-cyan-950 px-3 py-1 text-[10px] font-bold text-white hover:bg-cyan-900"
+                                >
+                                  Save
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => { setEditingPurokId(null); setPurokEditForm(null); }}
+                                  className="rounded-lg border border-slate-200 bg-white px-3 py-1 text-[10px] font-bold text-slate-600"
+                                >
+                                  Cancel
+                                </button>
                               </div>
                             </div>
-                          ) : null}
+                          )}
                         </div>
                       );
-                    })
-                )}
-              </div>
-            ) : null}
-          </CivicPanel>
-        </div>
-      </aside>
-
-      {suggestionModal && (
-        <div
-          className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 backdrop-blur-sm sm:items-center"
-          onClick={() => {
-            if (!creatingFromAlertId) {
-              setSuggestionModal(null);
-            }
-          }}
-        >
-          <div
-            className="w-full max-w-lg rounded-t-[32px] bg-white p-6 shadow-2xl sm:rounded-[32px]"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <div className="flex items-start gap-3">
-              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-[18px] bg-cyan-100">
-                <Siren className="h-6 w-6 text-cyan-700" />
-              </div>
-              <div>
-                <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-cyan-700">Alert to Incident</p>
-                <h3 className="mt-0.5 text-xl font-black text-slate-950">Create responder case</h3>
-                <p className="mt-1 text-sm text-slate-500">
-                  Confirm this alert should become an operational incident. The record will stay linked to the original alert.
-                </p>
-              </div>
-            </div>
-
-            <div className="mt-5 space-y-3 rounded-[24px] border border-slate-200 bg-slate-50 p-4">
-              <div className="flex flex-wrap gap-2">
-                <CivicBadge
-                  label={HAZARD_LABELS[suggestionModal.payload.hazard]}
-                  tone={suggestionModal.payload.severity === 'warning' ? 'rose' : 'amber'}
-                />
-                <CivicBadge
-                  label={suggestionModal.payload.severity === 'warning' ? 'Suggested high severity' : 'Suggested medium severity'}
-                  tone="slate"
-                />
-              </div>
-              <div>
-                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Location</p>
-                <p className="mt-1 text-sm font-bold text-slate-950">{suggestionModal.locationLabel}</p>
-              </div>
-              <div>
-                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Trigger reason</p>
-                <p className="mt-1 text-sm leading-6 text-slate-700">{suggestionModal.payload.trigger_reason}</p>
-              </div>
-              {suggestionModal.payload.weather_summary ? (
-                <div>
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Weather summary</p>
-                  <p className="mt-1 text-sm leading-6 text-slate-700">{suggestionModal.payload.weather_summary}</p>
+                    })}
+                  </div>
                 </div>
-              ) : null}
-              <div className="grid gap-3 sm:grid-cols-2">
-                <div>
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Flood control</p>
-                  <p className="mt-1 text-sm text-slate-700">
-                    {suggestionModal.payload.flood_control_status
-                      ? PUROK_FLOOD_CONTROL_STATUS_LABELS[suggestionModal.payload.flood_control_status]
-                      : 'No flood-control snapshot'}
-                  </p>
-                  {suggestionModal.payload.flood_control_notes ? (
-                    <p className="mt-1 text-xs leading-5 text-slate-500">{suggestionModal.payload.flood_control_notes}</p>
-                  ) : null}
-                </div>
-                <div>
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Evacuation / note</p>
-                  <p className="mt-1 text-sm text-slate-700">
-                    {suggestionModal.payload.default_evacuation_site
-                      ?? suggestionModal.payload.evacuation_site
-                      ?? 'No evacuation site snapshot'}
-                  </p>
-                  {suggestionModal.payload.warning_notes ? (
-                    <p className="mt-1 text-xs leading-5 text-slate-500">{suggestionModal.payload.warning_notes}</p>
-                  ) : null}
-                </div>
-              </div>
-            </div>
-
-            <div className="mt-6 flex gap-3">
-              <button
-                type="button"
-                disabled={Boolean(creatingFromAlertId)}
-                onClick={() => setSuggestionModal(null)}
-                className="flex-1 rounded-2xl border border-slate-200 bg-white py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                disabled={Boolean(creatingFromAlertId)}
-                onClick={() => void handleCreateIncidentFromAlert(suggestionModal)}
-                className="flex-1 inline-flex items-center justify-center gap-2 rounded-2xl bg-cyan-900 py-3 text-sm font-bold text-white shadow-sm shadow-cyan-200 transition hover:bg-cyan-800 disabled:opacity-60"
-              >
-                {creatingFromAlertId === suggestionModal.id ? (
-                  <>
-                    <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" />
-                    Creating incident...
-                  </>
-                ) : (
-                  <>
-                    <Siren className="h-4 w-4" />
-                    Confirm and create incident
-                  </>
-                )}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ── Ping Confirmation Modal ─────────────────────────────── */}
-      {pingModal && (
-        <div
-          className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 backdrop-blur-sm sm:items-center"
-          onClick={() => setPingModal(null)}
-        >
-          <div
-            className="w-full max-w-sm rounded-t-[32px] bg-white p-6 shadow-2xl sm:rounded-[32px]"
-            onClick={(e) => e.stopPropagation()}
-          >
-            {/* Header */}
-            <div className="flex items-start gap-3">
-              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-[18px] bg-rose-100">
-                <BellRing className="h-6 w-6 text-rose-600" />
-              </div>
-              <div>
-                <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-rose-600">Emergency Ping</p>
-                <h3 className="mt-0.5 text-xl font-black text-slate-950">{pingModal.purok.purok_sitio}</h3>
-                <p className="mt-1 text-xs text-slate-500">
-                  Sending location ping to{' '}
-                  <span className="font-bold text-slate-900">{pingModal.householdCount} households</span> in this zone.
-                </p>
-              </div>
-            </div>
-
-            {/* Message preview */}
-            <div className="mt-5 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-              <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-400">Alert preview</p>
-              <p className="mt-2 text-sm leading-6 text-slate-800">
-                <span className="font-bold">[MSWDO FIELD PING]</span> Responders are monitoring{' '}
-                <span className="font-semibold">{pingModal.purok.purok_sitio}</span> due to flood risk.
-                {pingModal.purok.warning_notes
-                  ? ` ${pingModal.purok.warning_notes}`
-                  : ' Please stay alert and avoid low-lying areas.'}
-                {pingModal.purok.default_evacuation_site
-                  ? ` Evacuation: ${pingModal.purok.default_evacuation_site}.`
-                  : ''}
-              </p>
-            </div>
-
-            {/* Live weather context if available */}
-            {liveWeather && (
-              <div className="mt-3 flex flex-wrap gap-2">
-                <span className="inline-flex items-center gap-1 rounded-full border border-sky-200 bg-sky-50 px-2.5 py-1 text-[11px] font-semibold text-sky-700">
-                  <CloudRain className="h-3 w-3" />
-                  Rain {Math.round(liveWeather.current.rainChance ?? 0)}%
-                </span>
-                <span className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold text-slate-700">
-                  <Wind className="h-3 w-3" />
-                  Gusts {Math.round(liveWeather.current.windGust ?? 0)} kph
-                </span>
               </div>
             )}
-
-            {/* Actions */}
-            <div className="mt-6 flex gap-3">
-              <button
-                type="button"
-                onClick={() => setPingModal(null)}
-                className="flex-1 rounded-2xl border border-slate-200 bg-white py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                disabled={isSendingPing}
-                onClick={async () => {
-                  setIsSendingPing(true);
-                  // Simulate send delay (replace with real SMS/push API call)
-                  await new Promise((resolve) => setTimeout(resolve, 1400));
-                  setPingZones((current) => new Set([...current, pingModal.purok.purok_sitio]));
-                  setPingModal(null);
-                  setIsSendingPing(false);
-                }}
-                className="flex-1 inline-flex items-center justify-center gap-2 rounded-2xl bg-rose-600 py-3 text-sm font-bold text-white shadow-sm shadow-rose-200 hover:bg-rose-700 disabled:opacity-60 transition"
-              >
-                {isSendingPing ? (
-                  <>
-                    <span className="h-4 w-4 rounded-full border-2 border-white/30 border-t-white animate-spin" />
-                    Sending…
-                  </>
-                ) : (
-                  <>
-                    <BellRing className="h-4 w-4" />
-                    Send Ping Now
-                  </>
-                )}
-              </button>
-            </div>
           </div>
-        </div>
-      )}
+        </aside>
 
-      <section className="min-w-0 flex-1">
-        <div className="flex h-full min-h-[720px] flex-col gap-4">
-          <CivicPanel className="space-y-3">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Map workspace</p>
-                <h2 className="mt-1 text-xl font-black tracking-tight text-slate-950">Field response map</h2>
-                <p className="mt-1 text-sm text-slate-500">
-                  Official barangay boundaries from the GeoRisk / PSA GIS service.
-                </p>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                <CivicBadge
-                  label={hasBarangayBoundaries ? `${barangayBoundaries.length} barangay zones` : 'Boundary service offline'}
-                  tone={hasBarangayBoundaries ? 'teal' : 'rose'}
+        {/* ── RIGHT MAP WORKSPACE ── */}
+        <section className="min-w-0 flex-1 flex flex-col rounded-2xl border border-slate-200/90 bg-white shadow-xs overflow-hidden relative">
+          {/* Top Map Filter & Command Bar */}
+          <div className="border-b border-slate-200/90 bg-slate-50/70 p-3 shrink-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="relative min-w-[200px] flex-1">
+                <CivicSearchInput
+                  value={searchQuery}
+                  onChange={(event) => setSearchQuery(event.target.value)}
+                  placeholder="Search household, purok, or incident…"
+                  className="w-full"
                 />
-                <CivicBadge label={`${filteredMapHouseholdsByZone.length} household pins`} tone="emerald" />
-                <CivicBadge label={`${mappedEventCount} event pins`} tone="navy" />
-                <CivicBadge label={`${visibleFloodZoneCount} response zones`} tone="amber" />
-                <CivicBadge
-                  label={mapControls.weatherOverlayVisible ? mapControls.activeLayerSummary : 'Weather hidden'}
-                  tone={mapControls.weatherOverlayVisible ? 'teal' : 'slate'}
-                />
+
+                {mapSearchResults.length > 0 && (
+                  <div className="absolute top-11 left-0 z-40 w-full max-w-sm overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl">
+                    {mapSearchResults.map((result) => (
+                      <button
+                        key={`${result.kind}-${result.id}`}
+                        type="button"
+                        onClick={() => {
+                          setSearchQuery('');
+                          if (result.kind === 'barangay') {
+                            setSelectedBarangayId(result.barangayId ?? '');
+                            setSelectedHousehold(null);
+                            setSelectedIncident(null);
+                            setSelectedEvent(null);
+                          } else if (result.kind === 'household') {
+                            const household = mapHouseholds.find((item) => item.id === result.id) ?? null;
+                            setSelectedHousehold(household);
+                            setSelectedIncident(null);
+                            setSelectedEvent(null);
+                          } else if (result.kind === 'incident') {
+                            const incident = incidents.find((item) => item.id === result.id) ?? null;
+                            setSelectedIncident(incident);
+                            setSelectedHousehold(null);
+                            setSelectedEvent(null);
+                          }
+                        }}
+                        className="flex w-full items-center justify-between gap-2 border-b border-slate-100 px-3.5 py-2 text-left hover:bg-slate-50 last:border-b-0"
+                      >
+                        <div className="min-w-0">
+                          <p className="truncate text-xs font-bold text-slate-900">{result.label}</p>
+                          <p className="truncate text-[10px] text-slate-500">{result.sublabel}</p>
+                        </div>
+                        <CivicBadge
+                          label={result.kind}
+                          tone={result.kind === 'incident' ? 'rose' : result.kind === 'household' ? 'emerald' : 'navy'}
+                          className="text-[9px]"
+                        />
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
-            </div>
 
-            <div className="relative flex flex-wrap items-center gap-2">
-              <CivicSearchInput
-                value={searchQuery}
-                onChange={(event) => setSearchQuery(event.target.value)}
-                placeholder="Search barangay / household / incident…"
-                className="min-w-[220px] flex-1"
-              />
-
-              {mapSearchResults.length > 0 ? (
-                <div className="absolute top-[52px] left-0 z-30 w-full max-w-[420px] overflow-hidden rounded-xl border border-slate-200 bg-white shadow-[0_28px_60px_-30px_rgba(15,23,42,0.4)]">
-                  {mapSearchResults.map((result) => (
-                    <button
-                      key={`${result.kind}-${result.id}`}
-                      type="button"
-                      onClick={() => {
-                        setSearchQuery('');
-                        if (result.kind === 'barangay') {
-                          setSelectedBarangayId(result.barangayId ?? '');
-                          setSelectedHousehold(null);
-                          setSelectedIncident(null);
-                          setSelectedEvent(null);
-                        } else if (result.kind === 'household') {
-                          const household = mapHouseholds.find((item) => item.id === result.id) ?? null;
-                          setSelectedHousehold(household);
-                          setSelectedIncident(null);
-                          setSelectedEvent(null);
-                        } else if (result.kind === 'incident') {
-                          const incident = incidents.find((item) => item.id === result.id) ?? null;
-                          setSelectedIncident(incident);
-                          setSelectedHousehold(null);
-                          setSelectedEvent(null);
-                        }
-                      }}
-                      className="flex w-full items-center justify-between gap-3 border-b border-slate-100 px-4 py-2.5 text-left transition last:border-b-0 hover:bg-slate-50"
-                    >
-                      <div className="min-w-0">
-                        <p className="truncate text-sm font-bold text-slate-900">{result.label}</p>
-                        <p className="truncate text-xs text-slate-500">{result.sublabel}</p>
-                      </div>
-                      <CivicBadge
-                        label={result.kind === 'barangay' ? 'Zone' : result.kind === 'household' ? 'Household' : 'Incident'}
-                        tone={result.kind === 'incident' ? 'rose' : result.kind === 'household' ? 'emerald' : 'navy'}
-                      />
-                    </button>
-                  ))}
-                </div>
-              ) : null}
-
+              {/* Barangay Filter */}
               <select
                 value={selectedBarangayId}
                 onChange={(event) => setSelectedBarangayId(event.target.value as BarangayId | '')}
-                className="h-11 rounded-lg border border-slate-300 bg-slate-50 px-3 text-sm font-semibold text-slate-700 outline-none transition focus:border-cyan-800 focus:bg-white focus:ring-2 focus:ring-cyan-900/20"
-                aria-label="Filter by barangay"
+                className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-xs font-bold text-slate-700 outline-none focus:border-cyan-800"
               >
                 <option value="">All Barangays</option>
                 {BARANGAY_OPTIONS.map((option) => (
@@ -2337,11 +1961,11 @@ export default function ResponderDesktop() {
                 ))}
               </select>
 
+              {/* Risk Level Filter */}
               <select
                 value={riskLevelFilter}
                 onChange={(event) => setRiskLevelFilter(event.target.value as 'all' | 'low' | 'medium' | 'high')}
-                className="h-11 rounded-lg border border-slate-300 bg-slate-50 px-3 text-sm font-semibold text-slate-700 outline-none transition focus:border-cyan-800 focus:bg-white focus:ring-2 focus:ring-cyan-900/20"
-                aria-label="Filter by household risk level"
+                className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-xs font-bold text-slate-700 outline-none focus:border-cyan-800"
               >
                 <option value="all">All Risk Levels</option>
                 <option value="high">High Risk</option>
@@ -2349,11 +1973,11 @@ export default function ResponderDesktop() {
                 <option value="low">Low Risk</option>
               </select>
 
+              {/* Incident Type Filter */}
               <select
                 value={incidentTypeFilter}
                 onChange={(event) => setIncidentTypeFilter(event.target.value as 'all' | IncidentType)}
-                className="h-11 rounded-lg border border-slate-300 bg-slate-50 px-3 text-sm font-semibold text-slate-700 outline-none transition focus:border-cyan-800 focus:bg-white focus:ring-2 focus:ring-cyan-900/20"
-                aria-label="Filter by incident type"
+                className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-xs font-bold text-slate-700 outline-none focus:border-cyan-800"
               >
                 <option value="all">All Incident Types</option>
                 <option value="flood">Flood</option>
@@ -2364,26 +1988,68 @@ export default function ResponderDesktop() {
                 <option value="other">Other</option>
               </select>
 
+              {/* Barangay Boundaries Toggle */}
               <CivicChipButton
                 active={showBarangayBoundaries}
-                onClick={() => setShowBarangayBoundaries((value) => !value)}
-                className="h-11"
-                aria-pressed={showBarangayBoundaries}
+                onClick={() => setShowBarangayBoundaries((v) => !v)}
+                className="h-10 text-xs"
               >
-                <span
-                  className="h-3 w-3 flex-shrink-0 rounded-[3px] border"
-                  style={
-                    showBarangayBoundaries
-                      ? { backgroundColor: '#0d94883d', borderColor: '#115e59' }
-                      : undefined
-                  }
-                />
-                Barangay Boundaries
+                Boundaries
               </CivicChipButton>
-            </div>
-          </CivicPanel>
 
-          <div className="min-h-0 flex-1">
+              {/* Floating Layers & Radar Button */}
+              <button
+                type="button"
+                onClick={() => setLayersMenuOpen((open) => !open)}
+                className={`inline-flex items-center gap-1.5 h-10 px-3.5 rounded-xl border text-xs font-bold transition ${
+                  layersMenuOpen
+                    ? 'border-cyan-800 bg-cyan-950 text-white shadow-xs'
+                    : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                }`}
+              >
+                <Layers3 className="h-4 w-4" />
+                Layers & Radar
+              </button>
+            </div>
+          </div>
+
+          {/* Floating Layers & Radar Popover */}
+          {layersMenuOpen && (
+            <div className="absolute top-16 right-4 z-40 w-80 max-h-[75vh] overflow-y-auto rounded-2xl border border-slate-200/90 bg-white/95 backdrop-blur-md shadow-2xl p-4">
+              <div className="flex items-center justify-between pb-2 mb-2 border-b border-slate-100">
+                <span className="text-xs font-bold uppercase tracking-wider text-slate-900">Map Layers & Radar</span>
+                <button
+                  type="button"
+                  onClick={() => setLayersMenuOpen(false)}
+                  className="rounded-lg p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+              <ResponderMapControlPanel
+                compact
+                activeBaseLayerId={mapControls.activeBaseLayerId}
+                activeLayerIds={mapControls.activeLayerIds}
+                activeLayerSummary={mapControls.activeLayerSummary}
+                allLayersSelected={mapControls.allLayersSelected}
+                overlayOpacity={mapControls.overlayOpacity}
+                showAdvancedLayers={mapControls.showAdvancedLayers}
+                showWeather={mapControls.showWeather}
+                weatherOverlayVisible={mapControls.weatherOverlayVisible}
+                windLayerSelected={mapControls.windLayerSelected}
+                onActiveBaseLayerChange={mapControls.handleActiveBaseLayerChange}
+                onOverlayOpacityChange={mapControls.handleOverlayOpacityChange}
+                onShowAdvancedLayersChange={mapControls.handleShowAdvancedLayersChange}
+                onToggleLayer={mapControls.handleLayerToggle}
+                onToggleWeatherVisibility={mapControls.handleWeatherVisibilityToggle}
+                onOpenAllLayers={mapControls.handleOpenAllLayers}
+                onClearAllLayers={mapControls.handleClearAllLayers}
+              />
+            </div>
+          )}
+
+          {/* Interactive Leaflet Map */}
+          <div className="min-h-0 flex-1 relative">
             <ResponderLeafletMap
               households={filteredMapHouseholdsByZone}
               incidents={filteredMapIncidents}
@@ -2451,9 +2117,223 @@ export default function ResponderDesktop() {
               refreshVersion={mapControls.mapRefreshVersion}
               containerClassName="h-full"
             />
+
+            {/* Floating Selection Inspector Dock */}
+            {(selectedHousehold || selectedIncident || selectedEvent || selectedZone || selectedBarangaySummary) && (
+              <div className="absolute bottom-4 left-4 right-4 z-30 max-w-xl mx-auto rounded-2xl border border-slate-200/90 bg-white/95 backdrop-blur-md shadow-2xl p-4 transition-all">
+                {selectedBarangaySummary ? (
+                  <BarangayResponsePanel
+                    summary={selectedBarangaySummary}
+                    onClose={() => setSelectedBarangayId('')}
+                  />
+                ) : (
+                  <ResponderSelectionSummary
+                    household={selectedHousehold}
+                    incident={selectedIncident}
+                    event={selectedEvent}
+                    onClear={() => {
+                      setSelectedHousehold(null);
+                      setSelectedIncident(null);
+                      setSelectedEvent(null);
+                      setSelectedZone(null);
+                    }}
+                    onNavigateHousehold={navigateToHousehold}
+                    onNavigateIncident={navigateToIncident}
+                    onNavigateEvent={navigateToEvent}
+                  />
+                )}
+
+                {selectedIncident && (
+                  <div className="mt-3 pt-3 border-t border-slate-100">
+                    <IncidentImpactPanel
+                      analysis={incidentImpactAnalyses.get(selectedIncident.id) ?? null}
+                      visitedHouseholdIds={visitedIds}
+                      onNavigateHousehold={navigateToHousehold}
+                      onCheckIn={(householdId) => {
+                        setVisitedIds((current) => {
+                          const next = new Set(current);
+                          if (next.has(householdId)) next.delete(householdId);
+                          else next.add(householdId);
+                          return next;
+                        });
+                      }}
+                    />
+                  </div>
+                )}
+
+                {selectedZone && (
+                  <div className="mt-2 flex items-center justify-between">
+                    <p className="text-xs text-slate-600">
+                      Selected zone: <span className="font-bold">{zoneTrigger?.location}</span>
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => setTriggerDialogOpen(true)}
+                      className="inline-flex items-center gap-1.5 rounded-full bg-cyan-950 px-3 py-1.5 text-xs font-semibold text-white hover:bg-cyan-900"
+                    >
+                      <Zap className="h-3 w-3" />
+                      Open Trigger Analysis
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </section>
+      </div>
+
+      {/* ── Trigger Analysis Dialog ── */}
+      {activeTriggerDialog && (
+        <TriggerAnalysisDialog
+          open={triggerDialogOpen}
+          onOpenChange={setTriggerDialogOpen}
+          title={activeTriggerDialog.title}
+          trigger={activeTriggerDialog.trigger}
+          scopedGroups={activeTriggerDialog.scopedGroups}
+          incidents={incidents}
+          alerts={alerts}
+          onNavigateHousehold={navigateToHousehold}
+        />
+      )}
+
+      {/* ── Alert-to-Incident Modal ── */}
+      {suggestionModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 backdrop-blur-sm sm:items-center"
+          onClick={() => {
+            if (!creatingFromAlertId) {
+              setSuggestionModal(null);
+            }
+          }}
+        >
+          <div
+            className="w-full max-w-lg rounded-t-[32px] bg-white p-6 shadow-2xl sm:rounded-[32px]"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-start gap-3">
+              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-[18px] bg-cyan-100">
+                <Siren className="h-6 w-6 text-cyan-700" />
+              </div>
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-cyan-700">Alert to Incident</p>
+                <h3 className="mt-0.5 text-xl font-black text-slate-950">Create responder case</h3>
+                <p className="mt-1 text-sm text-slate-500">
+                  Confirm this alert should become an operational incident.
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-5 space-y-3 rounded-[24px] border border-slate-200 bg-slate-50 p-4">
+              <div className="flex flex-wrap gap-2">
+                <CivicBadge
+                  label={HAZARD_LABELS[suggestionModal.payload.hazard]}
+                  tone={suggestionModal.payload.severity === 'warning' ? 'rose' : 'amber'}
+                />
+                <CivicBadge
+                  label={suggestionModal.payload.severity === 'warning' ? 'High severity' : 'Medium severity'}
+                  tone="slate"
+                />
+              </div>
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Location</p>
+                <p className="mt-1 text-sm font-bold text-slate-950">{suggestionModal.locationLabel}</p>
+              </div>
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Trigger reason</p>
+                <p className="mt-1 text-sm leading-6 text-slate-700">{suggestionModal.payload.trigger_reason}</p>
+              </div>
+            </div>
+
+            <div className="mt-6 flex gap-3">
+              <button
+                type="button"
+                disabled={Boolean(creatingFromAlertId)}
+                onClick={() => setSuggestionModal(null)}
+                className="flex-1 rounded-2xl border border-slate-200 bg-white py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={Boolean(creatingFromAlertId)}
+                onClick={() => void handleCreateIncidentFromAlert(suggestionModal)}
+                className="flex-1 inline-flex items-center justify-center gap-2 rounded-2xl bg-cyan-900 py-3 text-sm font-bold text-white shadow-sm shadow-cyan-200 transition hover:bg-cyan-800 disabled:opacity-60"
+              >
+                {creatingFromAlertId === suggestionModal.id ? (
+                  <>
+                    <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" />
+                    Creating incident...
+                  </>
+                ) : (
+                  <>
+                    <Siren className="h-4 w-4" />
+                    Confirm and create
+                  </>
+                )}
+              </button>
+            </div>
           </div>
         </div>
-      </section>
+      )}
+
+      {/* ── Emergency Ping Modal ── */}
+      {pingModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 backdrop-blur-sm sm:items-center"
+          onClick={() => setPingModal(null)}
+        >
+          <div
+            className="w-full max-w-sm rounded-t-[32px] bg-white p-6 shadow-2xl sm:rounded-[32px]"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start gap-3">
+              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-[18px] bg-rose-100">
+                <BellRing className="h-6 w-6 text-rose-600" />
+              </div>
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-rose-600">Emergency Ping</p>
+                <h3 className="mt-0.5 text-xl font-black text-slate-950">{pingModal.purok.purok_sitio}</h3>
+                <p className="mt-1 text-xs text-slate-500">
+                  Sending location ping to <span className="font-bold text-slate-900">{pingModal.householdCount} households</span>.
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-5 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+              <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-400">Alert preview</p>
+              <p className="mt-2 text-sm leading-6 text-slate-800">
+                <span className="font-bold">[MSWDO FIELD PING]</span> Responders are monitoring{' '}
+                <span className="font-semibold">{pingModal.purok.purok_sitio}</span> due to flood risk.
+                {pingModal.purok.warning_notes ? ` ${pingModal.purok.warning_notes}` : ' Please stay alert and avoid low-lying areas.'}
+              </p>
+            </div>
+
+            <div className="mt-6 flex gap-3">
+              <button
+                type="button"
+                onClick={() => setPingModal(null)}
+                className="flex-1 rounded-2xl border border-slate-200 bg-white py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={isSendingPing}
+                onClick={async () => {
+                  setIsSendingPing(true);
+                  await new Promise((resolve) => setTimeout(resolve, 1400));
+                  setPingZones((current) => new Set([...current, pingModal.purok.purok_sitio]));
+                  setPingModal(null);
+                  setIsSendingPing(false);
+                }}
+                className="flex-1 inline-flex items-center justify-center gap-2 rounded-2xl bg-rose-600 py-3 text-sm font-bold text-white shadow-sm shadow-rose-200 hover:bg-rose-700 disabled:opacity-60 transition"
+              >
+                {isSendingPing ? 'Sending…' : 'Send Ping Now'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

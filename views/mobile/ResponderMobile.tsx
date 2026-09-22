@@ -1,4 +1,4 @@
-﻿'use client';
+'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
@@ -218,6 +218,8 @@ export default function ResponderMobile() {
   const [selectionOpen, setSelectionOpen] = useState(false);
   const [queueOpen, setQueueOpen] = useState(false);
   const [priorityOpen, setPriorityOpen] = useState(false);
+  const [evacWeatherOpen, setEvacWeatherOpen] = useState(false);
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [selectedBarangayId, setSelectedBarangayId] = useState<BarangayId | ''>('');
   const [showBarangayBoundaries, setShowBarangayBoundaries] = useState(true);
   const barangayBoundaryState = useBarangayBoundaries();
@@ -744,183 +746,254 @@ export default function ResponderMobile() {
         </DrawerContent>
       </Drawer>
 
-      <CivicPage className="space-y-4 px-4 py-4 pb-40">
-        <MobilePageHeader
-          title="Field response"
-          subtitle={loading ? 'Loading field operations...' : `${activeIncidents.length} active incidents · ${filteredMapHouseholds.length} verified household pins · ${getResponderCoverageLabel(user)}`}
-          primaryAction={(
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => { void loadData(); }}
-              className="h-11 rounded-[18px] border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700"
-            >
-              <RefreshCw className="h-4 w-4" />
-              Refresh
-            </Button>
-          )}
-        />
+      {/* ── Evacuation & Logistics Drawer ── */}
+      <Drawer open={evacWeatherOpen} onOpenChange={setEvacWeatherOpen}>
+        <DrawerContent className="max-h-[88vh] rounded-t-[30px] border-slate-200 bg-white">
+          <DrawerHeader className="pb-0 text-left">
+            <DrawerTitle>Evacuation & Field Logistics</DrawerTitle>
+            <DrawerDescription>Active shelters, weather radar, and ongoing distribution drives.</DrawerDescription>
+          </DrawerHeader>
+          <div className="space-y-4 overflow-y-auto px-4 pb-[calc(env(safe-area-inset-bottom)+1.25rem)] pt-3">
+            <WeatherWidget mode="compact" />
 
-        <div className="grid grid-cols-3 gap-2">
-          {[
-            { label: 'Active', value: activeIncidents.length },
-            { label: 'Priority', value: filteredPriorityGroups.length },
-            { label: 'Resolved', value: resolvedCount },
-          ].map((metric) => (
-            <CivicPanel key={metric.label} className="rounded-[22px] p-3 text-center">
-              <p className="text-lg font-black tracking-tight text-slate-950">{loading ? '--' : metric.value}</p>
-              <p className="mt-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">{metric.label}</p>
-            </CivicPanel>
-          ))}
-        </div>
+            <EvacuationCenterPanel
+              centers={evacuationCenters}
+              savingCenterId={savingCenterId}
+              onSetStatus={(centerId, status) => {
+                void handleSetEvacuationCenterStatus(centerId, status);
+              }}
+            />
 
-        {topPriorityGroup && topPriorityHousehold ? (() => {
-          const levelTone = topPriorityGroup.level === 'critical' ? 'rose' : topPriorityGroup.level === 'high' ? 'amber' : topPriorityGroup.level === 'medium' ? 'navy' : 'slate';
-          return (
-            <CivicPanel className="space-y-3 rounded-[24px] border-cyan-200 bg-cyan-50/80 p-4">
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-cyan-700">Recommended first response</p>
-                  <h2 className="mt-1 text-base font-black text-slate-950">{topPriorityGroup.purokSitio}</h2>
-                  <p className="mt-1 text-sm text-slate-600">
-                    Unahon si <span className="font-bold text-slate-950">{topPriorityHousehold.household.head_name}</span>
-                  </p>
+            {events.length > 0 && (
+              <div className="space-y-3 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-sm font-bold text-slate-900">Relief Distribution Drives</h4>
+                  <CivicBadge label={`${events.length} active`} tone="emerald" className="text-[10px]" />
                 </div>
-                <CivicBadge label={topPriorityGroup.level.toUpperCase()} tone={levelTone} className="text-[10px]" />
+                <div className="space-y-2">
+                  {events.map((event) => (
+                    <div key={event.id} className="rounded-xl border border-slate-200/80 bg-white p-3">
+                      <p className="text-sm font-bold text-slate-950">{event.event_name}</p>
+                      <p className="mt-0.5 text-xs text-slate-500">{event.location}</p>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => openResponderMapLocation(event.gps_lat, event.gps_lng, event.location)}
+                        className="mt-2.5 h-8 rounded-full border-slate-200 px-3 text-xs font-semibold text-slate-700"
+                      >
+                        Navigate
+                      </Button>
+                    </div>
+                  ))}
+                </div>
               </div>
-              <div className="flex flex-wrap gap-1.5">
-                <CivicBadge label={`Score ${topPriorityGroup.score}`} tone="amber" className="text-[10px]" />
-                <CivicBadge label={`${topPriorityGroup.vulnerableResidentCount} vulnerable`} tone="rose" className="text-[10px]" />
-                {topPriorityGroup.reasons.slice(0, 3).map((reason) => (
-                  <CivicBadge key={reason} label={reason} tone="navy" className="text-[10px]" />
-                ))}
-              </div>
-              <div className="flex flex-wrap gap-2">
-                <Button
-                  type="button"
-                  onClick={() => {
-                    setSelectedHousehold(topPriorityHousehold.household);
-                    setSelectedIncident(null);
-                    setSelectedEvent(null);
-                    setSelectionOpen(true);
-                  }}
-                  className="h-9 rounded-full px-3 text-xs font-semibold"
-                >
-                  View priority
-                </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => openResponderMapLocation(
-                    topPriorityHousehold.household.gps_lat,
-                    topPriorityHousehold.household.gps_long,
-                    `${topPriorityHousehold.household.street_address}, ${topPriorityHousehold.household.purok_sitio}`,
-                  )}
-                  className="h-9 rounded-full border-cyan-200 bg-white px-3 text-xs font-semibold text-cyan-900"
-                >
-                  Navigate
-                </Button>
-              </div>
-            </CivicPanel>
-          );
-        })() : null}
+            )}
+          </div>
+        </DrawerContent>
+      </Drawer>
 
-        <CivicPanel className="space-y-3 rounded-[24px] p-4">
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Purok filters</p>
-              <h2 className="mt-1 text-base font-bold text-slate-950">Flood profile targeting</h2>
-              <p className="mt-1 text-sm text-slate-500">Trim the household map and check-in queue using official purok flood profile data.</p>
+      {/* ── Purok Targeting Filters Drawer ── */}
+      <Drawer open={filtersOpen} onOpenChange={setFiltersOpen}>
+        <DrawerContent className="max-h-[80vh] rounded-t-[30px] border-slate-200 bg-white">
+          <DrawerHeader className="pb-0 text-left">
+            <DrawerTitle>Purok Flood Targeting Filters</DrawerTitle>
+            <DrawerDescription>Trim the map markers and queue by flood profile data.</DrawerDescription>
+          </DrawerHeader>
+          <div className="space-y-4 overflow-y-auto px-4 pb-[calc(env(safe-area-inset-bottom)+1.25rem)] pt-3">
+            <div className="space-y-3">
+              <label className="block space-y-1.5">
+                <span className="text-xs font-bold uppercase tracking-wider text-slate-500">Flood Exposure</span>
+                <select
+                  value={filterFloodProne}
+                  onChange={(e) => setFilterFloodProne(e.target.value as PurokFloodProneFilter)}
+                  className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-700"
+                >
+                  <option value="all">All puroks</option>
+                  <option value="flood_prone">Flood-prone only</option>
+                  <option value="not_flood_prone">Not flood-prone</option>
+                </select>
+              </label>
+
+              <label className="block space-y-1.5">
+                <span className="text-xs font-bold uppercase tracking-wider text-slate-500">Flood Control Status</span>
+                <select
+                  value={filterFloodControlStatus}
+                  onChange={(e) => setFilterFloodControlStatus(e.target.value as PurokFloodControlStatus | 'all')}
+                  className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-700"
+                >
+                  <option value="all">All flood control statuses</option>
+                  {PUROK_FLOOD_CONTROL_OPTIONS.map((status) => (
+                    <option key={status} value={status}>{PUROK_FLOOD_CONTROL_STATUS_LABELS[status]}</option>
+                  ))}
+                </select>
+              </label>
             </div>
-            {hasPurokFilters ? (
+
+            <div className="flex gap-2 pt-2">
               <Button
                 type="button"
                 variant="outline"
                 onClick={() => {
                   setFilterFloodProne('all');
                   setFilterFloodControlStatus('all');
+                  setFiltersOpen(false);
                 }}
-                className="h-10 rounded-full border-slate-200 px-4 text-xs font-semibold text-slate-700"
+                className="flex-1 rounded-xl"
               >
-                Clear
+                Reset Filters
               </Button>
-            ) : null}
-          </div>
-
-          <div className="grid gap-3 sm:grid-cols-2">
-            <label className="space-y-2">
-              <span className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">Flood-prone purok</span>
-              <select
-                value={filterFloodProne}
-                onChange={(event) => setFilterFloodProne(event.target.value as PurokFloodProneFilter)}
-                className="h-11 w-full rounded-[18px] border border-slate-200 bg-white px-4 text-sm text-slate-700 outline-none focus:border-cyan-900"
+              <Button
+                type="button"
+                onClick={() => setFiltersOpen(false)}
+                className="flex-1 rounded-xl"
               >
-                <option value="all">All puroks</option>
-                <option value="flood_prone">Flood-prone only</option>
-                <option value="not_flood_prone">Not flood-prone</option>
-              </select>
-            </label>
-
-            <label className="space-y-2">
-              <span className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">Flood control</span>
-              <select
-                value={filterFloodControlStatus}
-                onChange={(event) => setFilterFloodControlStatus(event.target.value as PurokFloodControlStatus | 'all')}
-                className="h-11 w-full rounded-[18px] border border-slate-200 bg-white px-4 text-sm text-slate-700 outline-none focus:border-cyan-900"
-              >
-                <option value="all">All flood control statuses</option>
-                {PUROK_FLOOD_CONTROL_OPTIONS.map((status) => (
-                  <option key={status} value={status}>{PUROK_FLOOD_CONTROL_STATUS_LABELS[status]}</option>
-                ))}
-              </select>
-            </label>
+                Apply
+              </Button>
+            </div>
           </div>
+        </DrawerContent>
+      </Drawer>
 
-          <div className="flex flex-wrap gap-2">
-            <CivicBadge label={`${filteredMapHouseholds.length} mapped households`} tone="emerald" className="text-[10px]" />
-            <CivicBadge label={`${filteredPriorityGroups.length} priority puroks`} tone="amber" className="text-[10px]" />
-            <CivicBadge label={`${filteredPriorityHouseholdCount} households queued`} tone="slate" className="text-[10px]" />
-            {filterFloodProne !== 'all' ? (
-              <CivicBadge
-                label={filterFloodProne === 'flood_prone' ? 'Flood-prone puroks' : 'Not flood-prone'}
-                tone="rose"
-                className="text-[10px]"
-              />
-            ) : null}
-            {filterFloodControlStatus !== 'all' ? (
-              <CivicBadge
-                label={PUROK_FLOOD_CONTROL_STATUS_LABELS[filterFloodControlStatus]}
-                tone="slate"
-                className="text-[10px]"
-              />
-            ) : null}
-          </div>
-        </CivicPanel>
-
-        <CivicPanel className="space-y-4 rounded-[26px] p-4">
-          <div className="flex items-start justify-between gap-3">
+      <CivicPage className="space-y-3 px-3.5 py-3 pb-28">
+        {/* ── Situational Header Ribbon ── */}
+        <div className="flex items-center justify-between gap-2 rounded-2xl border border-slate-200/90 bg-white p-3 shadow-xs">
+          <div className="flex items-center gap-2.5">
+            <span className="relative flex h-2.5 w-2.5">
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
+              <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-emerald-500" />
+            </span>
             <div>
-              <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Map workspace</p>
-              <h2 className="mt-1 text-lg font-black tracking-tight text-slate-950">Field map</h2>
-              <p className="mt-1 text-sm text-slate-500">Official barangay boundaries from the GeoRisk / PSA GIS service. Tap a zone for its response picture.</p>
-            </div>
-            <div className="flex flex-col items-end gap-1">
-              <CivicBadge
-                label={hasBarangayBoundaries ? `${barangayBoundaries.length} zones` : 'Boundary offline'}
-                tone={hasBarangayBoundaries ? 'teal' : 'rose'}
-                className="text-[10px]"
-              />
-              <CivicBadge label={`${zoneFilteredHouseholds.length} verified pins`} tone="emerald" className="text-[10px]" />
-              <CivicBadge label={`${mappedEventCount} event pins`} tone="navy" className="text-[10px]" />
-              <CivicBadge label={`${visibleFloodZoneCount} risk zones`} tone="amber" className="text-[10px]" />
+              <p className="text-xs font-black uppercase tracking-wider text-slate-900">Mabini MDRRMO</p>
+              <p className="text-[10px] text-slate-500">{user.name} · {getResponderCoverageLabel(user)}</p>
             </div>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => { void loadData(); }}
+            disabled={loading}
+            className="h-8 rounded-xl border-slate-200 px-2.5 text-xs font-semibold"
+          >
+            <RefreshCw className={`h-3 w-3 mr-1 ${loading ? 'animate-spin' : ''}`} />
+            Refresh
+          </Button>
+        </div>
+
+        {/* ── Situational Quick Vitals Strip ── */}
+        <div className="grid grid-cols-3 gap-2">
+          <button
+            type="button"
+            onClick={() => setQueueOpen(true)}
+            className="rounded-2xl border border-rose-200 bg-rose-50/60 p-2.5 text-center transition active:scale-95"
+          >
+            <p className="text-base font-black text-rose-800">{loading ? '--' : activeIncidents.length}</p>
+            <p className="text-[10px] font-bold uppercase tracking-wider text-rose-600">Active Incidents</p>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setPriorityOpen(true)}
+            className="rounded-2xl border border-amber-200 bg-amber-50/60 p-2.5 text-center transition active:scale-95"
+          >
+            <p className="text-base font-black text-amber-800">{loading ? '--' : filteredPriorityGroups.length}</p>
+            <p className="text-[10px] font-bold uppercase tracking-wider text-amber-600">Priorities</p>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setEvacWeatherOpen(true)}
+            className="rounded-2xl border border-cyan-200 bg-cyan-50/60 p-2.5 text-center transition active:scale-95"
+          >
+            <p className="text-base font-black text-cyan-800">{loading ? '--' : evacuationCenters.length}</p>
+            <p className="text-[10px] font-bold uppercase tracking-wider text-cyan-700">Evac Centers</p>
+          </button>
+        </div>
+
+        {/* ── Recommended First Response Banner ── */}
+        {topPriorityGroup && topPriorityHousehold ? (() => {
+          const levelTone = topPriorityGroup.level === 'critical' ? 'rose' : topPriorityGroup.level === 'high' ? 'amber' : topPriorityGroup.level === 'medium' ? 'navy' : 'slate';
+          return (
+            <div className="rounded-2xl border border-cyan-200 bg-cyan-50/80 p-3.5 shadow-xs">
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-cyan-700">Recommended First Response</p>
+                  <h3 className="mt-0.5 text-sm font-black text-slate-950">{topPriorityGroup.purokSitio}</h3>
+                  <p className="mt-0.5 text-xs text-slate-600">
+                    Unahon si <span className="font-bold text-slate-950">{topPriorityHousehold.household.head_name}</span>
+                  </p>
+                </div>
+                <CivicBadge label={topPriorityGroup.level.toUpperCase()} tone={levelTone} className="text-[10px]" />
+              </div>
+              <div className="mt-2.5 flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={() => {
+                    setSelectedHousehold(topPriorityHousehold.household);
+                    setSelectedIncident(null);
+                    setSelectedEvent(null);
+                    setSelectionOpen(true);
+                  }}
+                  className="h-8 rounded-full px-3 text-xs font-semibold"
+                >
+                  Inspect
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => openResponderMapLocation(
+                    topPriorityHousehold.household.gps_lat,
+                    topPriorityHousehold.household.gps_long,
+                    `${topPriorityHousehold.household.street_address}, ${topPriorityHousehold.household.purok_sitio}`,
+                  )}
+                  className="h-8 rounded-full border-cyan-200 bg-white px-3 text-xs font-semibold text-cyan-900"
+                >
+                  Navigate
+                </Button>
+              </div>
+            </div>
+          );
+        })() : null}
+
+        {/* ── Tactical Map Section ── */}
+        <div className="rounded-2xl border border-slate-200/90 bg-white p-3 shadow-xs space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-1.5">
+              <p className="text-xs font-bold uppercase tracking-wider text-slate-900">Field Map</p>
+              <CivicBadge label={`${zoneFilteredHouseholds.length} pins`} tone="emerald" className="text-[10px]" />
+            </div>
+            <div className="flex items-center gap-1.5">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setFiltersOpen(true)}
+                className="h-7 rounded-lg border-slate-200 px-2 text-[11px] font-semibold"
+              >
+                Filters {hasPurokFilters ? '•' : ''}
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setMapControlsOpen(true)}
+                className="h-7 rounded-lg border-slate-200 px-2 text-[11px] font-semibold"
+              >
+                <Layers3 className="h-3 w-3 mr-1" />
+                Layers
+              </Button>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
             <select
               value={selectedBarangayId}
               onChange={(event) => setSelectedBarangayId(event.target.value as BarangayId | '')}
-              className="h-10 min-w-[140px] flex-1 rounded-[14px] border border-slate-300 bg-slate-50 px-3 text-sm font-semibold text-slate-700 outline-none transition focus:border-cyan-800 focus:bg-white"
+              className="h-9 min-w-[130px] flex-1 rounded-xl border border-slate-200 bg-white px-2.5 text-xs font-semibold text-slate-700 outline-none"
               aria-label="Filter by barangay"
             >
               <option value="">All Barangays</option>
@@ -930,11 +1003,10 @@ export default function ResponderMobile() {
             </select>
             <CivicChipButton
               active={showBarangayBoundaries}
-              onClick={() => setShowBarangayBoundaries((value) => !value)}
-              className="h-10"
-              aria-pressed={showBarangayBoundaries}
+              onClick={() => setShowBarangayBoundaries((v) => !v)}
+              className="h-9 text-xs"
             >
-              Barangay Boundaries
+              Boundaries
             </CivicChipButton>
           </div>
 
@@ -990,31 +1062,20 @@ export default function ResponderMobile() {
             showWeather={mapControls.showWeather}
             overlayOpacity={mapControls.overlayOpacity}
             refreshVersion={mapControls.mapRefreshVersion}
-            containerClassName="h-[380px]"
+            containerClassName="h-[460px] rounded-xl overflow-hidden"
             compactWeather
           />
 
-          <div className="grid grid-cols-2 gap-2">
+          {hasSelection && (
             <Button
               type="button"
-              variant="outline"
-              onClick={() => setMapControlsOpen(true)}
-              className="h-11 rounded-[18px] border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700"
-            >
-              <Layers3 className="h-4 w-4" />
-              Layers
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
               onClick={() => setSelectionOpen(true)}
-              disabled={!hasSelection}
-              className="h-11 rounded-[18px] border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700"
+              className="w-full h-10 rounded-xl text-xs font-semibold"
             >
-              <Navigation className="h-4 w-4" />
-              {hasSelection ? 'Selection' : 'No selection'}
+              <Navigation className="h-3.5 w-3.5 mr-1.5" />
+              View Selected Item Details
             </Button>
-          </div>
+          )}
 
           {selectedBarangaySummary ? (
             <BarangayResponsePanel
@@ -1023,70 +1084,53 @@ export default function ResponderMobile() {
               onClose={() => setSelectedBarangayId('')}
             />
           ) : null}
-        </CivicPanel>
-
-        <EvacuationCenterPanel
-          centers={evacuationCenters}
-          savingCenterId={savingCenterId}
-          onSetStatus={(centerId, status) => {
-            void handleSetEvacuationCenterStatus(centerId, status);
-          }}
-        />
-
-        <WeatherWidget mode="compact" />
-
-        {events.length > 0 ? (
-          <CivicPanel className="space-y-3 rounded-[24px] p-4">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Assignments</p>
-                <h2 className="mt-1 text-base font-bold text-slate-950">Ongoing distribution support</h2>
-              </div>
-              <CivicBadge label={`${events.length} live`} tone="emerald" className="text-[10px]" />
-            </div>
-            <div className="space-y-2">
-              {events.slice(0, 2).map((event) => (
-                <div key={event.id} className="rounded-[20px] border border-slate-200 bg-slate-50 px-4 py-3">
-                  <p className="text-sm font-bold text-slate-950">{event.event_name}</p>
-                  <p className="mt-1 text-xs text-slate-500">{event.location}</p>
-                  <div className="mt-3">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={() => openResponderMapLocation(event.gps_lat, event.gps_lng, event.location)}
-                      className="h-10 rounded-full border-slate-200 px-4 text-xs font-semibold text-slate-700"
-                    >
-                      Navigate
-                    </Button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </CivicPanel>
-        ) : null}
+        </div>
       </CivicPage>
 
-      <MobileActionBar
-        primaryAction={(
-          <Button type="button" onClick={() => setQueueOpen(true)} className="h-12 w-full rounded-[20px] px-4 text-sm font-semibold">
-            <Zap className="h-4 w-4" />
-            Incident queue
-            <span className="ml-1 text-xs text-primary-foreground/80">{loading ? '--' : activeIncidents.length}</span>
-          </Button>
-        )}
-        secondaryAction={(
-          <Button
+      {/* ── Fixed Bottom Tactical Navigation Dock ── */}
+      <div className="fixed bottom-0 left-0 right-0 z-40 border-t border-slate-200/90 bg-white/95 backdrop-blur-md px-3 py-2 pb-[calc(env(safe-area-inset-bottom)+0.5rem)] shadow-lg">
+        <div className="grid grid-cols-4 gap-1 max-w-lg mx-auto">
+          <button
             type="button"
-            variant="outline"
-            onClick={() => setPriorityOpen(true)}
-            className="h-12 rounded-[20px] border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700"
+            onClick={() => setQueueOpen(true)}
+            className="flex flex-col items-center justify-center rounded-xl py-1.5 px-1 text-slate-700 hover:bg-slate-100 transition active:scale-95"
           >
-            <ShieldAlert className="h-4 w-4" />
-            {loading ? '--' : filteredPriorityGroups.length}
-          </Button>
-        )}
-      />
+            <Zap className="h-4 w-4 text-rose-600" />
+            <span className="mt-0.5 text-[10px] font-bold">Incidents</span>
+            <span className="text-[9px] font-semibold text-rose-600">{loading ? '…' : activeIncidents.length}</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setPriorityOpen(true)}
+            className="flex flex-col items-center justify-center rounded-xl py-1.5 px-1 text-slate-700 hover:bg-slate-100 transition active:scale-95"
+          >
+            <ShieldAlert className="h-4 w-4 text-amber-600" />
+            <span className="mt-0.5 text-[10px] font-bold">Priorities</span>
+            <span className="text-[9px] font-semibold text-amber-600">{loading ? '…' : filteredPriorityGroups.length}</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setEvacWeatherOpen(true)}
+            className="flex flex-col items-center justify-center rounded-xl py-1.5 px-1 text-slate-700 hover:bg-slate-100 transition active:scale-95"
+          >
+            <Package className="h-4 w-4 text-cyan-700" />
+            <span className="mt-0.5 text-[10px] font-bold">Logistics</span>
+            <span className="text-[9px] font-semibold text-cyan-700">{loading ? '…' : evacuationCenters.length}</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setMapControlsOpen(true)}
+            className="flex flex-col items-center justify-center rounded-xl py-1.5 px-1 text-slate-700 hover:bg-slate-100 transition active:scale-95"
+          >
+            <Layers3 className="h-4 w-4 text-slate-600" />
+            <span className="mt-0.5 text-[10px] font-bold">Layers</span>
+            <span className="text-[9px] font-semibold text-slate-400">Map</span>
+          </button>
+        </div>
+      </div>
     </>
   );
 }
-

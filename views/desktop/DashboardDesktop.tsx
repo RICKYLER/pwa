@@ -3,23 +3,44 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { AlertTriangle, Activity, Baby, FileText, Home, Package, Radio, ShieldAlert, Users, CheckCircle2 } from 'lucide-react';
+import {
+  AlertTriangle,
+  Activity,
+  Baby,
+  FileText,
+  Home,
+  Package,
+  Radio,
+  ShieldAlert,
+  Users,
+  CheckCircle2,
+  TrendingUp,
+  Plus,
+  ArrowRight,
+  ArrowUpRight,
+  Sparkles,
+  MapPin,
+  Clock,
+  HeartPulse,
+  UserCheck,
+  ShieldCheck,
+  ChevronRight,
+  Database,
+} from 'lucide-react';
 import { getAnalyticsBarangayScope, getAnalyticsScopeLabel } from '@/lib/analytics-scope';
 import { db } from '@/lib/db/indexeddb';
-import { getDashboardStats, getDataQualitySummary, getTopPuroksByPopulation, getTopPuroksByVulnerability } from '@/lib/db/queries';
+import {
+  getDashboardStats,
+  getDataQualitySummary,
+  getTopPuroksByPopulation,
+  getTopPuroksByVulnerability,
+} from '@/lib/db/queries';
 import { getDistributionEvents } from '@/lib/db/distribution';
 import { getIncidents } from '@/lib/db/incidents';
 import { getReportsVulnerableTotal } from '@/lib/reports-preview-data';
 import { getDefaultRouteForUser, hasPermission, restoreSession } from '@/lib/auth';
 import type { DistributionEvent, Incident } from '@/lib/db/schema';
-import {
-  CivicBadge,
-  CivicHero,
-  CivicKpiCard,
-  CivicPage,
-  CivicPanel,
-  CivicSectionHeading,
-} from '@/components/ui/civic-primitives';
+import { CivicBadge } from '@/components/ui/civic-primitives';
 
 interface Stats {
   total_households: number;
@@ -87,7 +108,7 @@ export default function DashboardDesktop() {
       setActiveIncidents(incidents);
       setError('');
     } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : 'Failed to load');
+      setError(loadError instanceof Error ? loadError.message : 'Failed to load dashboard.');
     } finally {
       if (!background) {
         setIsLoading(false);
@@ -104,7 +125,6 @@ export default function DashboardDesktop() {
       if (!['households', 'residents', 'vulnerability_flags', 'distribution_events', 'inventory_items', 'package_templates', 'incidents'].includes(event.detail.table)) {
         return;
       }
-
       void loadDashboard(true);
     }
 
@@ -116,292 +136,465 @@ export default function DashboardDesktop() {
 
   const totalVulnerable = getReportsVulnerableTotal(stats);
   const scopeLabel = getAnalyticsScopeLabel(user);
-  const residentsDescription = user.role === 'admin'
-    ? `${(stats?.total_population ?? 0).toLocaleString()} residents currently tracked across all barangays.`
-    : `${(stats?.total_population ?? 0).toLocaleString()} residents currently tracked in ${scopeLabel}.`;
 
-  const quickLinks = [
-    { href: '/households/new', label: 'Add household', description: 'Create a new record', icon: Home, tone: 'navy' as const, perm: 'create_household' },
-    { href: '/vulnerability', label: 'Risk profiles', description: 'Review priority residents', icon: ShieldAlert, tone: 'rose' as const, perm: 'view_vulnerability' },
-    { href: '/distribution', label: 'Distribution', description: 'Manage relief events', icon: Package, tone: 'emerald' as const, perm: 'view_reports' },
-    { href: '/reports', label: 'Reports center', description: 'Open exports and summaries', icon: FileText, tone: 'amber' as const, perm: 'view_reports' },
-  ].filter((link) => hasPermission(link.perm as never));
-  const adminReviewShortcuts = user.role === 'admin' ? [
-    {
-      href: '/admin/location-review?tab=pending',
-      label: 'Pending review',
-      description: 'Open the approval queue and start from the oldest submission.',
-    },
-    {
-      href: '/admin/location-review?tab=approved&issue=missing_coordinates',
-      label: 'Missing coordinates',
-      description: 'Fix approved households that still do not have a usable map pin.',
-    },
-    {
-      href: '/admin/location-review?tab=needs_correction',
-      label: 'Needs correction',
-      description: 'Recheck returned registrations that are waiting for an update.',
-    },
-  ] : [];
+  const vulnerabilityRows = [
+    { label: 'Seniors', value: stats?.seniors_count ?? 0, icon: '👴', tone: 'bg-amber-500 text-amber-900 border-amber-200' },
+    { label: 'PWDs', value: stats?.pwd_count ?? 0, icon: '♿', tone: 'bg-rose-500 text-rose-900 border-rose-200' },
+    { label: 'Children (0-17)', value: stats?.children_count ?? 0, icon: '👶', tone: 'bg-cyan-600 text-cyan-900 border-cyan-200' },
+    { label: 'Pregnant Mothers', value: stats?.pregnant_count ?? 0, icon: '🤰', tone: 'bg-teal-600 text-teal-900 border-teal-200' },
+    { label: 'Chronic Illness', value: stats?.chronic_count ?? 0, icon: '🩺', tone: 'bg-indigo-600 text-indigo-900 border-indigo-200' },
+    { label: 'Low-Income', value: stats?.low_income_count ?? 0, icon: '🏷️', tone: 'bg-emerald-600 text-emerald-900 border-emerald-200' },
+  ];
+
+  const totalIssuesCount = dataQuality ? dataQuality.issues.reduce((acc, curr) => acc + curr.count, 0) : 0;
 
   return (
-    <CivicPage className="space-y-6">
-      <CivicHero
-        eyebrow="Municipal Operations Hub"
-        title={`${greeting()}, ${user.name?.split(' ')[0] ?? 'Official'}`}
-        description={isLoading ? 'Loading executive briefing...' : residentsDescription}
-        aside={<CivicBadge label={new Date().toLocaleDateString('en-PH', { month: 'long', day: 'numeric', year: 'numeric' })} tone="navy" />}
-      >
-        <div className="mt-4 flex flex-wrap gap-2">
-          <CivicBadge label={`${stats?.total_households ?? 0} total households`} tone="teal" />
-          <CivicBadge label={`${totalVulnerable} vulnerable`} tone="amber" />
-          {activeIncidents.length > 0 && <CivicBadge label={`${activeIncidents.length} active incidents`} tone="rose" />}
-          {activeEvents.length > 0 && <CivicBadge label={`${activeEvents.length} ongoing distributions`} tone="navy" />}
-        </div>
-      </CivicHero>
-
-      {error ? (
-        <CivicPanel className="border-red-200 bg-red-50/90">
-          <div className="flex items-center gap-3 text-sm text-red-700">
-            <AlertTriangle className="h-4 w-4" />
-            {error}
-          </div>
-        </CivicPanel>
-      ) : null}
-
-      {/* EXECUTIVE QUICK ACTIONS */}
-      {quickLinks.length > 0 ? (
-        <div className="grid grid-cols-4 gap-3">
-          {quickLinks.map((link) => {
-            const Icon = link.icon;
-            return (
-              <Link
-                key={link.href}
-                href={link.href}
-                className={`rounded-[24px] border border-slate-200 bg-white px-5 py-4 transition hover:-translate-y-px hover:border-slate-300 hover:shadow-md ${
-                  link.tone === 'rose' ? 'hover:border-rose-200 hover:bg-rose-50' :
-                  link.tone === 'emerald' ? 'hover:border-emerald-200 hover:bg-emerald-50' :
-                  link.tone === 'amber' ? 'hover:border-amber-200 hover:bg-amber-50' :
-                  'hover:border-cyan-200 hover:bg-cyan-50'
-                }`}
-              >
-                <div className={`flex h-12 w-12 items-center justify-center rounded-[20px] ${
-                  link.tone === 'rose' ? 'bg-rose-100 text-rose-700' :
-                  link.tone === 'emerald' ? 'bg-emerald-100 text-emerald-700' :
-                  link.tone === 'amber' ? 'bg-amber-100 text-amber-700' :
-                  'bg-cyan-950 text-white'
-                }`}>
-                  <Icon className="h-6 w-6" />
-                </div>
-                <p className="mt-4 text-base font-bold text-slate-950">{link.label}</p>
-                <p className="mt-1 text-xs text-slate-500">{link.description}</p>
-              </Link>
-            );
-          })}
-        </div>
-      ) : null}
-
-      <div className="grid grid-cols-[minmax(0,1fr)_340px] gap-5">
-        <div className="space-y-5">
-          <div className="grid grid-cols-2 gap-4">
-            <CivicKpiCard
-              icon={Home}
-              label="Total households"
-              value={isLoading ? '—' : stats?.total_households.toLocaleString() ?? '0'}
-              hint={user.role === 'admin' ? 'Approved active households across all barangays.' : `Approved active households in ${scopeLabel}.`}
-              tone="navy"
-            />
-            <CivicKpiCard
-              icon={Users}
-              label="Population"
-              value={isLoading ? '—' : stats?.total_population.toLocaleString() ?? '0'}
-              hint="Residents currently represented in the census."
-              tone="teal"
-            />
-            <CivicKpiCard
-              icon={Baby}
-              label="Children"
-              value={isLoading ? '—' : stats?.children_count.toLocaleString() ?? '0'}
-              hint="Residents aged 0 to 17."
-              tone="amber"
-            />
-            <CivicKpiCard
-              icon={ShieldAlert}
-              label="Vulnerable total"
-              value={isLoading ? '—' : totalVulnerable.toLocaleString()}
-              hint="Residents requiring closer monitoring or support."
-              tone="rose"
-            />
-          </div>
-
-          <CivicPanel>
-            <CivicSectionHeading
-              icon={ShieldAlert}
-              title="Vulnerability breakdown"
-              description="Distribution of high-priority residents by category."
-            />
-            <div className="mt-6 space-y-4">
-              {[
-                { label: 'Children', value: stats?.children_count ?? 0, color: 'bg-cyan-900' },
-                { label: 'Seniors', value: stats?.seniors_count ?? 0, color: 'bg-amber-500' },
-                { label: 'PWD', value: stats?.pwd_count ?? 0, color: 'bg-rose-500' },
-                { label: 'Pregnant', value: stats?.pregnant_count ?? 0, color: 'bg-teal-600' },
-                { label: 'Chronic', value: stats?.chronic_count ?? 0, color: 'bg-slate-700' },
-                { label: 'Low-income', value: stats?.low_income_count ?? 0, color: 'bg-emerald-600' },
-              ].map((row) => (
-                <div key={row.label} className="grid grid-cols-[120px_minmax(0,1fr)_56px_56px] items-center gap-3">
-                  <span className="text-sm font-medium text-slate-700">{row.label}</span>
-                  <div className="h-2.5 overflow-hidden rounded-full bg-slate-100">
-                    <div
-                      className={`h-full rounded-full ${row.color}`}
-                      style={{ width: totalVulnerable > 0 ? `${Math.max((row.value / totalVulnerable) * 100, 6)}%` : '0%' }}
-                    />
-                  </div>
-                  <span className="text-right text-sm font-bold text-slate-900">{row.value}</span>
-                  <span className="text-right text-xs text-slate-500">
-                    {totalVulnerable > 0 ? `${Math.round((row.value / totalVulnerable) * 100)}%` : '0%'}
-                  </span>
-                </div>
-              ))}
-            </div>
-          </CivicPanel>
-        </div>
-
-        <div className="space-y-5">
-          {/* LIVE OPERATIONS FEED */}
-          <CivicPanel className="bg-slate-50/50">
-            <CivicSectionHeading
-              icon={Activity}
-              title="Live Operations"
-              description="Current activities on the ground."
-            />
-            <div className="mt-5 space-y-3">
-              {isLoading ? (
-                <p className="text-sm text-slate-500">Loading operations...</p>
-              ) : activeIncidents.length === 0 && activeEvents.length === 0 ? (
-                <div className="rounded-[20px] border border-dashed border-slate-300 bg-white px-4 py-8 text-center text-slate-500">
-                  <CheckCircle2 className="mx-auto h-6 w-6 text-emerald-400" />
-                  <p className="mt-2 text-sm font-medium text-slate-900">All clear</p>
-                  <p className="text-xs">No active incidents or distributions.</p>
-                </div>
+    <div className="mx-auto max-w-[1500px] space-y-6 p-8">
+      {/* ========================================================================= */}
+      {/* TIER 1: MUNICIPAL STATUS & EXECUTIVE COMMAND BAR                         */}
+      {/* ========================================================================= */}
+      <div className="rounded-2xl border border-slate-200/90 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between border-b border-slate-100 pb-5 dark:border-slate-800">
+          <div>
+            <div className="flex flex-wrap items-center gap-2.5">
+              <span className="rounded-lg bg-cyan-950 px-2.5 py-1 font-mono text-xs font-bold uppercase tracking-wider text-cyan-300 shadow-xs ring-1 ring-cyan-800">
+                E-MABINI
+              </span>
+              <span className="text-xl font-light text-slate-300">|</span>
+              <h1 className="text-xl font-bold tracking-tight text-slate-900 sm:text-2xl dark:text-slate-100">
+                {greeting()}, {user.name?.split(' ')[0] ?? 'Official'}
+              </h1>
+              {/* Dynamic Municipal Pulse Indicator */}
+              {activeIncidents.length > 0 ? (
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-rose-50 px-3 py-1 text-xs font-bold text-rose-700 border border-rose-200 dark:bg-rose-950/60 dark:text-rose-300">
+                  <span className="h-2 w-2 rounded-full bg-rose-600 animate-ping" />
+                  {activeIncidents.length} Emergency Incidents Active
+                </span>
+              ) : activeEvents.length > 0 ? (
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-sky-50 px-3 py-1 text-xs font-bold text-sky-700 border border-sky-200 dark:bg-sky-950/60 dark:text-sky-300">
+                  <span className="h-2 w-2 rounded-full bg-sky-600 animate-pulse" />
+                  {activeEvents.length} Relief Drives Ongoing
+                </span>
               ) : (
-                <>
-                  {activeIncidents.slice(0, 3).map((incident) => (
-                    <div key={incident.id} className="rounded-[20px] border border-rose-100 bg-white p-3 shadow-sm">
-                      <div className="flex items-start gap-3">
-                        <div className="rounded-full bg-rose-100 p-2 text-rose-600">
-                          <Radio className="h-4 w-4" />
-                        </div>
-                        <div>
-                          <p className="text-xs font-bold uppercase tracking-wider text-rose-700">{incident.type.replace('_', ' ')}</p>
-                          <p className="mt-0.5 text-sm font-semibold text-slate-900">{incident.location}</p>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                  {activeEvents.slice(0, 3).map((event) => (
-                    <div key={event.id} className="rounded-[20px] border border-sky-100 bg-white p-3 shadow-sm">
-                      <div className="flex items-start gap-3">
-                        <div className="rounded-full bg-sky-100 p-2 text-sky-600">
-                          <Package className="h-4 w-4" />
-                        </div>
-                        <div>
-                          <p className="text-xs font-bold uppercase tracking-wider text-sky-700">Relief Ongoing</p>
-                          <p className="mt-0.5 text-sm font-semibold text-slate-900">{event.event_name}</p>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </>
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-3 py-1 text-xs font-bold text-emerald-700 border border-emerald-200 dark:bg-emerald-950/60 dark:text-emerald-300">
+                  <span className="h-2 w-2 rounded-full bg-emerald-500" />
+                  All Systems Normal · {scopeLabel}
+                </span>
               )}
             </div>
-          </CivicPanel>
 
-          <CivicPanel>
-            <CivicSectionHeading
-              icon={ShieldAlert}
-              title="Hotspot puroks"
-              description="Highest concentration of vulnerable residents."
-            />
-            <div className="mt-6 space-y-3">
-              {topVulnerable.length > 0 ? topVulnerable.slice(0, 6).map((purok, index) => (
-                <div key={purok.purok} className="rounded-[22px] border border-slate-200 bg-slate-50 px-4 py-3">
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="flex items-center gap-3">
-                      <div className="flex h-8 w-8 items-center justify-center rounded-2xl bg-cyan-950 text-xs font-black text-white">
-                        {index + 1}
-                      </div>
-                      <div>
-                        <p className="text-sm font-bold text-slate-950">{purok.purok}</p>
-                        <p className="text-xs text-slate-500">High-risk concentration</p>
-                      </div>
-                    </div>
-                    <CivicBadge label={`${purok.vulnerable_count}`} tone="rose" />
-                  </div>
-                </div>
-              )) : (
-                <p className="text-sm text-slate-500">No hotspot data yet.</p>
-              )}
-            </div>
-          </CivicPanel>
+            <p className="mt-1 text-xs text-slate-500">
+              MSWDO Municipal Census & Disaster Command Center · Mabini, Davao de Oro · Today is{' '}
+              <span className="font-semibold text-slate-700 dark:text-slate-300">
+                {new Date().toLocaleDateString('en-PH', { month: 'long', day: 'numeric', year: 'numeric' })}
+              </span>
+            </p>
+          </div>
+
+          {/* Sleek Top Quick Action Cluster (No bulky boxes!) */}
+          <div className="flex flex-wrap items-center gap-2">
+            {hasPermission('create_household' as never) && (
+              <Link
+                href="/households/new"
+                className="inline-flex items-center gap-1.5 rounded-xl bg-cyan-950 px-3.5 py-2 text-xs font-semibold text-white shadow-xs hover:bg-cyan-900 transition-all active:scale-95"
+              >
+                <Plus className="h-3.5 w-3.5 text-cyan-300" />
+                <span>Add Household</span>
+              </Link>
+            )}
+
+            {hasPermission('view_vulnerability' as never) && (
+              <Link
+                href="/vulnerability"
+                className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 shadow-xs hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300"
+              >
+                <ShieldAlert className="h-3.5 w-3.5 text-rose-600" />
+                <span>Risk Profiles</span>
+              </Link>
+            )}
+
+            <Link
+              href="/forecast"
+              className="inline-flex items-center gap-1.5 rounded-xl border border-cyan-200 bg-cyan-50/70 px-3 py-2 text-xs font-semibold text-cyan-950 shadow-xs hover:bg-cyan-100 dark:bg-cyan-950 dark:text-cyan-200 dark:border-cyan-800"
+            >
+              <TrendingUp className="h-3.5 w-3.5 text-cyan-700 dark:text-cyan-300" />
+              <span>Relief Forecast</span>
+            </Link>
+
+            {hasPermission('view_reports' as never) && (
+              <Link
+                href="/reports"
+                className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 shadow-xs hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300"
+              >
+                <FileText className="h-3.5 w-3.5 text-slate-500" />
+                <span>Reports</span>
+              </Link>
+            )}
+          </div>
+        </div>
+
+        {/* 4 BORDERLESS CORE VITALS STRIP */}
+        <div className="mt-5 grid grid-cols-2 divide-y divide-slate-100 sm:grid-cols-4 sm:divide-x sm:divide-y-0 dark:divide-slate-800">
+          <div className="px-4 py-2 sm:first:pl-0">
+            <span className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-slate-400">
+              <Users className="h-3.5 w-3.5 text-cyan-700" />
+              <span>Total Population</span>
+            </span>
+            <p className="mt-1 text-2xl font-black text-slate-900 dark:text-slate-100">
+              {isLoading ? '—' : stats?.total_population.toLocaleString() ?? '0'}
+            </p>
+            <span className="text-[10px] text-slate-400">Residents in census database</span>
+          </div>
+
+          <div className="px-4 py-2">
+            <span className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-slate-400">
+              <Home className="h-3.5 w-3.5 text-indigo-600" />
+              <span>Registered Homes</span>
+            </span>
+            <p className="mt-1 text-2xl font-black text-slate-900 dark:text-slate-100">
+              {isLoading ? '—' : stats?.total_households.toLocaleString() ?? '0'}
+            </p>
+            <span className="text-[10px] text-slate-400">Approved active households</span>
+          </div>
+
+          <div className="px-4 py-2">
+            <span className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-slate-400">
+              <ShieldAlert className="h-3.5 w-3.5 text-rose-600" />
+              <span>Priority Vulnerable</span>
+            </span>
+            <p className="mt-1 text-2xl font-black text-rose-600 dark:text-rose-400">
+              {isLoading ? '—' : totalVulnerable.toLocaleString()}
+            </p>
+            <span className="text-[10px] text-slate-400">
+              {stats?.total_population ? Math.round((totalVulnerable / stats.total_population) * 100) : 0}% of municipal census
+            </span>
+          </div>
+
+          <div className="px-4 py-2 sm:last:pr-0">
+            <span className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-slate-400">
+              <Activity className="h-3.5 w-3.5 text-amber-600" />
+              <span>Ground Operations</span>
+            </span>
+            <p className="mt-1 text-2xl font-black text-slate-900 dark:text-slate-100">
+              {activeIncidents.length + activeEvents.length} Active
+            </p>
+            <span className="text-[10px] text-slate-400">
+              {activeIncidents.length} incidents · {activeEvents.length} relief drives
+            </span>
+          </div>
         </div>
       </div>
 
+      {error && (
+        <div className="flex items-center gap-2 rounded-xl border border-red-200 bg-red-50 p-4 text-xs font-semibold text-red-700">
+          <AlertTriangle className="h-4 w-4 shrink-0" />
+          <span>{error}</span>
+        </div>
+      )}
 
-
-      {user.role === 'admin' && dataQuality ? (
-        <CivicPanel>
-          <CivicSectionHeading
-            icon={AlertTriangle}
-            title="Action Center"
-            description="Pending tasks and records requiring executive attention."
-          />
-          <div className="mt-5 grid grid-cols-3 gap-3">
-            {adminReviewShortcuts.map((shortcut) => (
+      {/* ========================================================================= */}
+      {/* TIER 2: DUAL INTELLIGENCE GRID (DEMOGRAPHICS & LIVE OPERATIONS)          */}
+      {/* ========================================================================= */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+        {/* ========================================================================= */}
+        {/* LEFT COLUMN: DEMOGRAPHICS & VULNERABILITY RADAR (7 COLS)                 */}
+        {/* ========================================================================= */}
+        <div className="lg:col-span-7 space-y-6">
+          {/* Vulnerability Distribution Matrix */}
+          <div className="rounded-2xl border border-slate-200/90 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3 dark:border-slate-800">
+              <div className="flex items-center gap-2">
+                <HeartPulse className="h-4 w-4 text-rose-600" />
+                <h3 className="text-sm font-bold uppercase tracking-wider text-slate-800 dark:text-slate-200">
+                  Vulnerability Distribution Radar
+                </h3>
+              </div>
               <Link
-                key={shortcut.href}
-                href={shortcut.href}
-                className="rounded-[22px] border border-slate-200 bg-slate-50 px-4 py-4 transition hover:-translate-y-px hover:border-cyan-200 hover:bg-cyan-50 hover:shadow-md"
+                href="/vulnerability"
+                className="inline-flex items-center gap-1 text-xs font-semibold text-indigo-600 hover:text-indigo-800 dark:text-indigo-400"
               >
-                <p className="text-sm font-bold text-slate-950">{shortcut.label}</p>
-                <p className="mt-1 text-xs leading-5 text-slate-500">{shortcut.description}</p>
+                <span>Full Risk Map</span>
+                <ArrowRight className="h-3 w-3" />
               </Link>
-            ))}
+            </div>
+
+            {/* 6 Category Visual Bars */}
+            <div className="mt-4 space-y-3">
+              {vulnerabilityRows.map((row) => {
+                const pct = totalVulnerable > 0 ? Math.round((row.value / totalVulnerable) * 100) : 0;
+                return (
+                  <div key={row.label} className="group rounded-xl border border-slate-100 bg-slate-50/50 p-2.5 transition hover:bg-slate-100/60 dark:border-slate-800 dark:bg-slate-800/40">
+                    <div className="flex items-center justify-between text-xs mb-1.5">
+                      <span className="flex items-center gap-2 font-semibold text-slate-700 dark:text-slate-300">
+                        <span>{row.icon}</span>
+                        <span>{row.label}</span>
+                      </span>
+                      <div className="flex items-center gap-2 font-mono font-bold">
+                        <span className="text-slate-900 dark:text-slate-100">{row.value.toLocaleString()}</span>
+                        <span className="rounded-md bg-slate-200/70 px-1.5 py-0.2 text-[10px] text-slate-600 dark:bg-slate-700 dark:text-slate-300">
+                          {pct}%
+                        </span>
+                      </div>
+                    </div>
+                    {/* Visual Progress Bar */}
+                    <div className="h-1.5 w-full overflow-hidden rounded-full bg-slate-200/70 dark:bg-slate-700">
+                      <div
+                        style={{ width: `${Math.max(pct, 3)}%` }}
+                        className={`h-full rounded-full transition-all duration-500 ${row.tone.split(' ')[0]}`}
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           </div>
-          <div className="mt-5 grid grid-cols-5 gap-3">
+
+          {/* Priority Hotspot Puroks Leaderboard */}
+          <div className="rounded-2xl border border-slate-200/90 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3 dark:border-slate-800">
+              <div className="flex items-center gap-2">
+                <MapPin className="h-4 w-4 text-cyan-700" />
+                <h3 className="text-sm font-bold uppercase tracking-wider text-slate-800 dark:text-slate-200">
+                  Priority Hotspot Puroks Leaderboard
+                </h3>
+              </div>
+              <span className="text-[11px] text-slate-400">Ranked by Vulnerability Density</span>
+            </div>
+
+            <div className="mt-4 space-y-2">
+              {topVulnerable.length === 0 ? (
+                <p className="py-6 text-center text-xs text-slate-400">No hotspot data available.</p>
+              ) : (
+                topVulnerable.slice(0, 5).map((purok, index) => {
+                  const rankColors = [
+                    'bg-rose-600 text-white',
+                    'bg-amber-600 text-white',
+                    'bg-orange-600 text-white',
+                    'bg-cyan-900 text-white',
+                    'bg-slate-700 text-white',
+                  ];
+
+                  return (
+                    <div
+                      key={purok.purok}
+                      className="flex items-center justify-between rounded-xl border border-slate-100 bg-slate-50/60 p-3 hover:bg-slate-100/70 transition-all dark:border-slate-800 dark:bg-slate-800/40"
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className={`flex h-7 w-7 items-center justify-center rounded-lg text-xs font-black shadow-xs ${rankColors[index] || 'bg-slate-600 text-white'}`}>
+                          #{index + 1}
+                        </div>
+                        <div>
+                          <p className="text-xs font-bold text-slate-900 dark:text-slate-100">{purok.purok}</p>
+                          <p className="text-[10px] text-slate-400">Mabini Municipal Sector</p>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-black text-rose-600 dark:text-rose-400 font-mono">
+                          {purok.vulnerable_count} Vulnerable
+                        </span>
+                        <ChevronRight className="h-3.5 w-3.5 text-slate-400" />
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* ========================================================================= */}
+        {/* RIGHT COLUMN: LIVE FIELD OPERATIONS & LOGISTICS COCKPIT (5 COLS)         */}
+        {/* ========================================================================= */}
+        <div className="lg:col-span-5 space-y-6">
+          {/* Live Incident & Emergency Radar */}
+          <div className="rounded-2xl border border-slate-200/90 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3 dark:border-slate-800">
+              <div className="flex items-center gap-2">
+                <Radio className="h-4 w-4 text-rose-600" />
+                <h3 className="text-sm font-bold uppercase tracking-wider text-slate-800 dark:text-slate-200">
+                  Field Response Incidents
+                </h3>
+              </div>
+              <Link
+                href="/responder"
+                className="inline-flex items-center gap-1 text-xs font-semibold text-rose-600 hover:text-rose-800 dark:text-rose-400"
+              >
+                <span>Open Map</span>
+                <ArrowRight className="h-3 w-3" />
+              </Link>
+            </div>
+
+            <div className="mt-4 space-y-2.5">
+              {activeIncidents.length === 0 ? (
+                <div className="rounded-xl border border-emerald-100 bg-emerald-50/50 p-4 text-center dark:border-emerald-950 dark:bg-emerald-950/30">
+                  <CheckCircle2 className="mx-auto h-6 w-6 text-emerald-600" />
+                  <p className="mt-1.5 text-xs font-bold text-emerald-900 dark:text-emerald-200">
+                    All Clear in Field Operations
+                  </p>
+                  <p className="text-[11px] text-emerald-700 dark:text-emerald-300">
+                    No active emergency incidents reported.
+                  </p>
+                </div>
+              ) : (
+                activeIncidents.slice(0, 3).map((incident) => (
+                  <div
+                    key={incident.id}
+                    className="rounded-xl border border-rose-100 bg-rose-50/40 p-3 dark:border-rose-900 dark:bg-rose-950/30"
+                  >
+                    <div className="flex items-start gap-2.5">
+                      <div className="rounded-lg bg-rose-100 p-1.5 text-rose-700">
+                        <Radio className="h-3.5 w-3.5" />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center justify-between">
+                          <p className="text-xs font-bold uppercase text-rose-700">{incident.type.replace('_', ' ')}</p>
+                          <span className="rounded-full bg-rose-200/70 px-1.5 text-[9px] font-bold text-rose-900">Active</span>
+                        </div>
+                        <p className="mt-0.5 text-xs font-semibold text-slate-900 dark:text-slate-100">{incident.location}</p>
+                      </div>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+
+          {/* Ongoing Relief Distributions */}
+          <div className="rounded-2xl border border-slate-200/90 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3 dark:border-slate-800">
+              <div className="flex items-center gap-2">
+                <Package className="h-4 w-4 text-cyan-700" />
+                <h3 className="text-sm font-bold uppercase tracking-wider text-slate-800 dark:text-slate-200">
+                  Relief Distribution Drives
+                </h3>
+              </div>
+              <Link
+                href="/distribution"
+                className="inline-flex items-center gap-1 text-xs font-semibold text-cyan-700 hover:text-cyan-900 dark:text-cyan-400"
+              >
+                <span>View Relief</span>
+                <ArrowRight className="h-3 w-3" />
+              </Link>
+            </div>
+
+            <div className="mt-4 space-y-2.5">
+              {activeEvents.length === 0 ? (
+                <div className="rounded-xl border border-slate-100 bg-slate-50/50 p-4 text-center dark:border-slate-800 dark:bg-slate-800/30">
+                  <Package className="mx-auto h-6 w-6 text-slate-400" />
+                  <p className="mt-1.5 text-xs font-bold text-slate-700 dark:text-slate-300">
+                    No Active Relief Distribution
+                  </p>
+                  <p className="text-[11px] text-slate-400">
+                    Relief goods are secured in MDRRMO Bodega.
+                  </p>
+                </div>
+              ) : (
+                activeEvents.slice(0, 3).map((event) => (
+                  <div
+                    key={event.id}
+                    className="rounded-xl border border-sky-100 bg-sky-50/40 p-3 dark:border-sky-900 dark:bg-sky-950/30"
+                  >
+                    <div className="flex items-start gap-2.5">
+                      <div className="rounded-lg bg-sky-100 p-1.5 text-sky-700">
+                        <Package className="h-3.5 w-3.5" />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-xs font-bold uppercase text-sky-700">Relief Ongoing</p>
+                        <p className="mt-0.5 text-xs font-semibold text-slate-900 dark:text-slate-100">{event.event_name}</p>
+                      </div>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+
+          {/* Quick Bodega Stockpile & Forecasting Card */}
+          <div className="rounded-2xl border border-cyan-100 bg-gradient-to-br from-cyan-50/70 via-white to-indigo-50/40 p-5 shadow-sm dark:border-cyan-950 dark:bg-slate-900">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-cyan-950 text-cyan-300">
+                  <TrendingUp className="h-4 w-4" />
+                </div>
+                <div>
+                  <h4 className="text-xs font-bold uppercase tracking-wider text-slate-900 dark:text-slate-100">
+                    Relief Demand Simulator
+                  </h4>
+                  <p className="text-[10px] text-slate-500">2,000 MDRRMO Buffer Stockpile</p>
+                </div>
+              </div>
+              <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-800">
+                99.55% Model
+              </span>
+            </div>
+
+            <p className="mt-2.5 text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
+              Simulate calamitous impact on Mabini barangays, test contingency allocations, and inspect live Excel historical records.
+            </p>
+
+            <Link
+              href="/forecast"
+              className="mt-3.5 flex items-center justify-between rounded-xl bg-cyan-950 px-3.5 py-2.5 text-xs font-semibold text-white shadow-xs hover:bg-cyan-900 transition-all"
+            >
+              <span>Open Forecasting Command Center</span>
+              <ArrowUpRight className="h-4 w-4 text-cyan-300" />
+            </Link>
+          </div>
+        </div>
+      </div>
+
+      {/* ========================================================================= */}
+      {/* TIER 3: EXECUTIVE VERIFICATION & ACTION QUEUE (ADMIN CLEANUP)            */}
+      {/* ========================================================================= */}
+      {user.role === 'admin' && dataQuality && (
+        <div className="rounded-2xl border border-slate-200/90 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+          <div className="flex items-center justify-between border-b border-slate-100 pb-3 dark:border-slate-800">
+            <div className="flex items-center gap-2">
+              <AlertTriangle className="h-4 w-4 text-amber-600" />
+              <h3 className="text-sm font-bold uppercase tracking-wider text-slate-800 dark:text-slate-200">
+                Executive Action Center & Verification Queue
+              </h3>
+            </div>
+            <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-bold text-slate-700 dark:bg-slate-800 dark:text-slate-300">
+              {totalIssuesCount} Total Actionable Items
+            </span>
+          </div>
+
+          <div className="mt-4 grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-4">
             {dataQuality.issues.map((issue) => (
               <Link
                 key={issue.key}
                 href={issue.href}
-                className={`rounded-[22px] border px-4 py-4 transition hover:-translate-y-px hover:shadow-md ${
+                className={`flex flex-col justify-between rounded-xl border p-3.5 transition hover:-translate-y-0.5 hover:shadow-xs ${
                   issue.count > 0
-                    ? 'border-amber-200 bg-amber-50/80'
-                    : 'border-slate-200 bg-slate-50'
+                    ? 'border-amber-200 bg-amber-50/50 hover:bg-amber-50 dark:border-amber-900 dark:bg-amber-950/20'
+                    : 'border-slate-100 bg-slate-50/50 hover:bg-slate-100/60 dark:border-slate-800 dark:bg-slate-800/40'
                 }`}
               >
-                <div className="flex items-center justify-between gap-3">
-                  <p className="text-2xl font-black tracking-tight text-slate-950">{issue.count}</p>
-                  <CivicBadge
-                    label={issue.count > 0 ? 'Needs review' : 'Clear'}
-                    tone={issue.count > 0 ? 'amber' : 'emerald'}
-                    className="text-[10px]"
-                  />
-                </div>
-                <p className="mt-3 text-sm font-bold text-slate-950">{issue.label}</p>
-                <p className="mt-1 text-xs leading-5 text-slate-500">{issue.description}</p>
-                {issue.sample_labels.length > 0 ? (
-                  <p className="mt-3 text-[11px] text-slate-600">
-                    Sample: {issue.sample_labels.join(', ')}
+                <div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-slate-900 dark:text-slate-100">{issue.label}</span>
+                    <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
+                      issue.count > 0 ? 'bg-amber-200 text-amber-900' : 'bg-emerald-100 text-emerald-800'
+                    }`}>
+                      {issue.count}
+                    </span>
+                  </div>
+                  <p className="mt-1 text-[11px] text-slate-500 leading-normal line-clamp-2">
+                    {issue.description}
                   </p>
-                ) : (
-                  <p className="mt-3 text-[11px] text-slate-400">No issues detected right now.</p>
-                )}
+                </div>
+
+                <div className="mt-3 flex items-center justify-end text-[11px] font-semibold text-indigo-600 hover:text-indigo-800 dark:text-indigo-400">
+                  <span>Review Queue</span>
+                  <ChevronRight className="h-3 w-3 ml-0.5" />
+                </div>
               </Link>
             ))}
           </div>
-        </CivicPanel>
-      ) : null}
-
-    </CivicPage>
+        </div>
+      )}
+    </div>
   );
 }

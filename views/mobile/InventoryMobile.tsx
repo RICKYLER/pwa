@@ -2,9 +2,9 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { AlertTriangle, Boxes, Calendar, CheckCircle2, FileSpreadsheet, Filter, Package, Plus, Search, X } from 'lucide-react';
+import Link from 'next/link';
+import { AlertTriangle, ArrowUpRight, Boxes, Calendar, CheckCircle2, FileSpreadsheet, Filter, Package, Plus, Search, TrendingUp, X } from 'lucide-react';
 import { computeBodegaStats, getBodegaAuditCycle, exportBodegaAuditCsv } from '@/lib/inventory-audit';
-import { ForecastingInsightsCard } from '@/components/forecasting/ForecastingInsightsCard';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Drawer, DrawerContent, DrawerDescription, DrawerHeader, DrawerTitle } from '@/components/ui/drawer';
@@ -308,8 +308,27 @@ export default function InventoryMobile() {
           ) : null}
         </div>
 
-        {/* MSWDO Relief Demand Forecasting Card */}
-        <ForecastingInsightsCard currentStockpile={bodegaStats.ffpStock || 2000} className="mt-1" />
+        {/* MSWDO Relief Demand Forecasting Quick Access Banner */}
+        <div className="rounded-2xl border border-cyan-200/80 bg-gradient-to-r from-cyan-50/70 via-white to-blue-50/60 p-3.5 shadow-sm">
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-cyan-950 text-cyan-200 shadow-sm">
+                <TrendingUp className="h-4 w-4" />
+              </div>
+              <div className="min-w-0">
+                <p className="truncate text-xs font-bold text-slate-900">Relief Demand Forecast</p>
+                <p className="text-[10px] text-slate-500">99.55% Model Accuracy · Calamity Sim</p>
+              </div>
+            </div>
+            <Link
+              href="/forecast"
+              className="inline-flex shrink-0 items-center gap-1 rounded-xl bg-cyan-950 px-3 py-1.5 text-[11px] font-semibold text-white shadow-sm hover:bg-cyan-900"
+            >
+              <span>Open</span>
+              <ArrowUpRight className="h-3 w-3 text-cyan-300" />
+            </Link>
+          </div>
+        </div>
 
         {lowStock.length > 0 && !isLoading ? (
           <Alert className="rounded-[22px] border-amber-200 bg-amber-50 text-amber-700">

@@ -2,12 +2,14 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
+import Link from 'next/link';
 import {
   AlertTriangle,
   Archive,
   ArrowDown,
   ArrowRight,
   ArrowUp,
+  ArrowUpRight,
   Boxes,
   Calendar,
   CalendarClock,
@@ -25,6 +27,7 @@ import {
   Search,
   Table,
   Trash2,
+  TrendingUp,
   X,
 } from 'lucide-react';
 import {
@@ -32,7 +35,6 @@ import {
   exportBodegaAuditCsv,
   getBodegaAuditCycle,
 } from '@/lib/inventory-audit';
-import { ForecastingInsightsCard } from '@/components/forecasting/ForecastingInsightsCard';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -1082,11 +1084,39 @@ export default function InventoryDesktop() {
             </div>
           </div>
 
-          {/* MSWDO RELIEF DEMAND FORECASTING & ACCURACY MODULE */}
-          <ForecastingInsightsCard
-            currentStockpile={bodegaStats.ffpStock || 2000}
-            className="mt-6"
-          />
+          {/* MSWDO RELIEF DEMAND FORECASTING QUICK ACCESS BANNER */}
+          <div className="mt-6 rounded-2xl border border-cyan-100 bg-gradient-to-r from-cyan-50/70 via-white to-blue-50/60 p-5 shadow-sm">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+              <div className="flex items-start gap-3.5">
+                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-cyan-950 text-white shadow-sm">
+                  <TrendingUp className="h-5 w-5 text-cyan-300" />
+                </div>
+                <div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h3 className="text-sm font-bold text-slate-900">
+                      MSWDO Relief Demand Forecasting & Simulator
+                    </h3>
+                    <span className="inline-flex items-center rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-semibold text-emerald-800">
+                      99.55% Model Accuracy
+                    </span>
+                    <span className="inline-flex items-center rounded-full bg-cyan-100 px-2 py-0.5 text-[11px] font-semibold text-cyan-900">
+                      Standby: {(bodegaStats.ffpStock || 2000).toLocaleString()} FFPs
+                    </span>
+                  </div>
+                  <p className="mt-1 text-xs text-slate-500">
+                    Run calamity simulations, test baseline vs proposed models, upload Excel/CSV datasets, and plan MDRRMO bodega augmentation buffers.
+                  </p>
+                </div>
+              </div>
+              <Link
+                href="/forecast"
+                className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl bg-cyan-950 px-4 py-2.5 text-xs font-semibold text-white shadow-sm transition hover:bg-cyan-900 hover:shadow"
+              >
+                <span>Open Demand Simulator</span>
+                <ArrowUpRight className="h-3.5 w-3.5 text-cyan-300" />
+              </Link>
+            </div>
+          </div>
         </div>
       ) : (
         <div className="rounded-2xl border border-slate-200/60 bg-white p-5 shadow-sm">

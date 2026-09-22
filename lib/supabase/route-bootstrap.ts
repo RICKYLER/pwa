@@ -52,6 +52,10 @@ const ROUTE_TABLES: Array<{
     tables: ['inventory_items', 'inventory_movements', 'package_templates'],
   },
   {
+    prefix: '/forecast',
+    tables: ['inventory_items'],
+  },
+  {
     prefix: '/distribution',
     tables: ['households', 'residents', 'vulnerability_flags', 'distribution_events', 'distribution_records', 'inventory_items', 'location_master_lists'],
   },

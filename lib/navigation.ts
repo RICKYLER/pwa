@@ -1,4 +1,4 @@
-﻿import type { LucideIcon } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 import {
   Activity,
   Bell,
@@ -8,6 +8,7 @@ import {
   Package,
   Radio,
   ShieldAlert,
+  TrendingUp,
   Truck,
   UserCheck,
   UserCog,
@@ -124,6 +125,17 @@ export const STAFF_NAV_ITEMS: AppNavItem[] = [
     pageTitle: 'Inventory',
     pageEyebrow: 'Resource Readiness',
     icon: Package,
+    perm: 'view_reports',
+    group: 'Operations',
+  },
+  {
+    href: '/forecast',
+    label: 'Forecasting',
+    mobileLabel: 'Forecast',
+    description: 'Relief demand predictions & disaster simulation',
+    pageTitle: 'Relief Demand Forecasting',
+    pageEyebrow: 'MSWDO Predictive Analytics',
+    icon: TrendingUp,
     perm: 'view_reports',
     group: 'Operations',
   },
