@@ -5,9 +5,11 @@ import {
   formatBytes,
   compressJsonPayload,
   decompressJsonPayload,
+  compressDisasterDataset,
   calculateDatasetSummary,
   MAX_FORECASTING_FILE_SIZE_MB,
 } from '../lib/forecasting/compression-helper';
+import { restoreRecordDataset, ForecastingUploadRecord } from '../lib/forecasting/forecasting-upload-store';
 import { HistoricalDisasterEvent } from '../lib/forecasting/mabini-relief-dataset';
 
 test('1. Validates dataset file size limits and extensions', () => {
@@ -148,4 +150,69 @@ test('4. Calculates dataset summary metadata accurately', () => {
   assert.ok(summary.barangaysCovered.includes('Golden Valley'));
   assert.equal(summary.dateRange.earliest, '2023-01-15');
   assert.equal(summary.dateRange.latest, '2024-03-12');
+});
+
+test('5. compressDisasterDataset heavily compresses 500 records by over 75%', async () => {
+  // Generate 500 records representing a large disaster assessment file
+  const largeEvents: HistoricalDisasterEvent[] = [];
+  const rawRows: (string | number)[][] = [];
+  const rawHeaders = ['Barangay', 'Households', 'Families', 'Food Packs', 'Damage Notes'];
+
+  for (let i = 0; i < 500; i++) {
+    const brgy = i % 2 === 0 ? 'Cadunan' : 'Cuambog';
+    largeEvents.push({
+      id: `ev-${i}`,
+      eventName: `October 2025 Earthquake Assessment Series - Phase ${i % 10}`,
+      date: '2025-10-15',
+      barangayId: brgy.toLowerCase(),
+      barangayName: brgy,
+      hazardType: 'earthquake',
+      severityLevel: 'severe',
+      affectedHouseholds: 50 + (i % 20),
+      affectedFamilies: (50 + (i % 20)) * 3,
+      displacementDays: 3,
+      vulnerability: { seniorsCount: 15, pwdsCount: 5, infantsCount: 8, lactatingMothersCount: 6 },
+      actualDistributed: { familyFoodPacks: 160, kitchenSets: 50, hygieneKits: 50, infantCarePacks: 8, seniorCarePacks: 15 },
+      notes: `Detailed structural field inspection notes for Sitio ${i % 5} in Barangay ${brgy}`,
+    });
+    rawRows.push([brgy, 50 + (i % 20), (50 + (i % 20)) * 3, 160, `Sitio ${i % 5} inspection`]);
+  }
+
+  // Simulate an 8MB original file size
+  const report = await compressDisasterDataset({
+    events: largeEvents,
+    rawHeaders,
+    rawRows,
+    originalFileSizeBytes: 8 * 1024 * 1024,
+  });
+
+  assert.ok(report.compressedSizeBytes < report.originalSizeBytes, 'Compressed size must be smaller than original');
+  assert.ok(report.savedPercentage >= 75, `Expected >= 75% savings, got ${report.savedPercentage}%`);
+  assert.ok(report.compressedPayload.length > 0);
+  assert.ok(report.ratioString.includes('x smaller'));
+
+  // Test transparent restoration from compressed payload
+  const mockRecord: ForecastingUploadRecord = {
+    id: 'fdu-test',
+    file_name: 'LargeDisasterAssessment.xlsx',
+    file_size_bytes: 8 * 1024 * 1024,
+    compressed_size_bytes: report.compressedSizeBytes,
+    file_type: 'xlsx',
+    records_count: 500,
+    accuracy_rate: 99.5,
+    mape_percent: 0.5,
+    mae_error: 1,
+    uploaded_by: 'MSWDO Staff',
+    uploaded_at: new Date().toISOString(),
+    is_active: false,
+    metadata: {},
+    dataset_events: [], // Inactive record stripped of events to save localStorage
+    raw_headers: rawHeaders,
+    compressed_payload: report.compressedPayload,
+  };
+
+  const restored = await restoreRecordDataset(mockRecord);
+  assert.equal(restored.events.length, 500);
+  assert.equal(restored.rawRows?.length, 500);
+  assert.equal(restored.events[0].eventName, 'October 2025 Earthquake Assessment Series - Phase 0');
 });

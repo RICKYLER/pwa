@@ -39,13 +39,29 @@ export interface HistoricalDisasterEvent {
     seniorCarePacks: number;
   };
   notes: string;
+  /** Detailed housing damage breakdown from field SitReps */
+  damagedHousesDetail?: {
+    totally: number;
+    partially: number;
+    puroks?: string[];
+  };
+  /** Count of inspected damaged public and private infrastructure */
+  damagedInfrastructureCount?: number;
+  /** Raw columns/fields preserved directly from uploaded Excel/CSV file */
+  rawRowData?: Record<string, any>;
 }
 
 /**
- * Realistic disaster records across the 11 Mabini barangays simulating past events
- * (e.g. 2023 Davao de Oro earthquake series, shear line floods, typhoon storm surges).
+ * Active default dataset starts completely empty (0 records).
+ * No seed or synthetic data is loaded by default.
+ * Ready to ingest official MDRRMO SitRep Excel or CSV files.
  */
-export const MABINI_SYNTHETIC_DISASTER_HISTORY: HistoricalDisasterEvent[] = [
+export const MABINI_SYNTHETIC_DISASTER_HISTORY: HistoricalDisasterEvent[] = [];
+
+/**
+ * Historical benchmark test fixture used strictly for offline unit tests & algorithm validation.
+ */
+export const MABINI_BENCHMARK_FIXTURE_EVENTS: HistoricalDisasterEvent[] = [
   {
     id: 'mab-2023-eq-cadunan',
     eventName: '2023 Magnitude 5.9 Davao de Oro Earthquake Series',
@@ -435,5 +451,240 @@ export const MABINI_SYNTHETIC_DISASTER_HISTORY: HistoricalDisasterEvent[] = [
       seniorCarePacks: 24,
     },
     notes: 'Coastal evacuation at Pindasan National High School.',
+  },
+  // =========================================================================
+  // OFFICIAL OCTOBER 2025 MABINI DAVAO DE ORO EARTHQUAKE SEQUENCE (MDRRMO / MSWDO)
+  // Multi-date progressive reports: Oct 10, Oct 11, Oct 13, and Oct 15, 2025
+  // =========================================================================
+  {
+    id: 'mab-2025-10-10-cuambog',
+    eventName: 'October 2025 Mabini Earthquake Series',
+    date: '2025-10-10',
+    hazardType: 'earthquake',
+    severityLevel: 'moderate',
+    barangayId: 'cuambog',
+    barangayName: 'Cuambog (Poblacion)',
+    affectedHouseholds: 0,
+    affectedFamilies: 0,
+    displacementDays: 1,
+    vulnerability: { seniorsCount: 0, pwdsCount: 0, infantsCount: 0, lactatingMothersCount: 0 },
+    actualDistributed: { familyFoodPacks: 0, kitchenSets: 0, hygieneKits: 0, infantCarePacks: 0, seniorCarePacks: 0 },
+    notes: 'Initial damage inspection: Mabini NHS (classroom wall & ceiling cracks, tiles detached), Regional Evac Center gym post, Cor Jesu Institute, Mosque.',
+    damagedInfrastructureCount: 4,
+  },
+  {
+    id: 'mab-2025-10-10-anitapan',
+    eventName: 'October 2025 Mabini Earthquake Series',
+    date: '2025-10-10',
+    hazardType: 'earthquake',
+    severityLevel: 'severe',
+    barangayId: 'anitapan',
+    barangayName: 'Anitapan',
+    affectedHouseholds: 0,
+    affectedFamilies: 0,
+    displacementDays: 2,
+    vulnerability: { seniorsCount: 0, pwdsCount: 0, infantsCount: 0, lactatingMothersCount: 0 },
+    actualDistributed: { familyFoodPacks: 20, kitchenSets: 5, hygieneKits: 10, infantCarePacks: 2, seniorCarePacks: 4 },
+    notes: 'Geological incidents: Purok 5 Layo 25th IB base ground rupture (4 locations, troops evacuated to brgy hall), Singapore road landslide passable to motorcycle only, Mascareg terminal ground rupture, Day Care hall cracks.',
+    damagedInfrastructureCount: 2,
+  },
+  {
+    id: 'mab-2025-10-11-cabuyuan',
+    eventName: 'October 2025 Mabini Earthquake Series',
+    date: '2025-10-11',
+    hazardType: 'earthquake',
+    severityLevel: 'severe',
+    barangayId: 'cabuyuan',
+    barangayName: 'Cabuyuan',
+    affectedHouseholds: 0,
+    affectedFamilies: 0,
+    displacementDays: 2,
+    vulnerability: { seniorsCount: 0, pwdsCount: 0, infantsCount: 0, lactatingMothersCount: 0 },
+    actualDistributed: { familyFoodPacks: 0, kitchenSets: 0, hygieneKits: 0, infantCarePacks: 0, seniorCarePacks: 0 },
+    notes: 'Lifeline disruption: Purok Lower B Water Reservoir (ELCAC funded) beam, posts, and floor have significant cracks; temporarily stopped, reported to MEO for rehab.',
+    damagedInfrastructureCount: 1,
+  },
+  {
+    id: 'mab-2025-10-11-pindasan',
+    eventName: 'October 2025 Mabini Earthquake Series',
+    date: '2025-10-11',
+    hazardType: 'earthquake',
+    severityLevel: 'moderate',
+    barangayId: 'pindasan',
+    barangayName: 'Pindasan',
+    affectedHouseholds: 0,
+    affectedFamilies: 0,
+    displacementDays: 1,
+    vulnerability: { seniorsCount: 0, pwdsCount: 0, infantsCount: 0, lactatingMothersCount: 0 },
+    actualDistributed: { familyFoodPacks: 0, kitchenSets: 0, hygieneKits: 0, infantCarePacks: 0, seniorCarePacks: 0 },
+    notes: 'Lifeline inspection: Baybay Water Reservoir (LGSF funded) minimal cracks, functional, reported to MEO for repair recommendation.',
+    damagedInfrastructureCount: 1,
+  },
+  {
+    id: 'mab-2025-10-13-cuambog',
+    eventName: 'October 2025 Mabini Earthquake Series',
+    date: '2025-10-13',
+    hazardType: 'earthquake',
+    severityLevel: 'critical',
+    barangayId: 'cuambog',
+    barangayName: 'Cuambog (Poblacion)',
+    affectedHouseholds: 43,
+    affectedFamilies: 129, // 43 * 3
+    displacementDays: 4,
+    vulnerability: { seniorsCount: 22, pwdsCount: 7, infantsCount: 15, lactatingMothersCount: 9 },
+    actualDistributed: { familyFoodPacks: 135, kitchenSets: 43, hygieneKits: 43, infantCarePacks: 15, seniorCarePacks: 22 },
+    notes: '43 Damaged Houses (1 Totally, 42 Partially; Purok Makiangayon, Matinabangon, Muramurahan, Luyaw). Mabini Central ES 10m x 3m fence collapsed. Brgy Hall 2 outside columns visible cracks.',
+    damagedHousesDetail: { totally: 1, partially: 42, puroks: ['Makiangayon', 'Matinabangon', 'Muramurahan', 'Luyaw'] },
+    damagedInfrastructureCount: 2,
+  },
+  {
+    id: 'mab-2025-10-13-anitapan',
+    eventName: 'October 2025 Mabini Earthquake Series',
+    date: '2025-10-13',
+    hazardType: 'earthquake',
+    severityLevel: 'severe',
+    barangayId: 'anitapan',
+    barangayName: 'Anitapan',
+    affectedHouseholds: 5,
+    affectedFamilies: 15, // 5 * 3
+    displacementDays: 5,
+    vulnerability: { seniorsCount: 4, pwdsCount: 2, infantsCount: 3, lactatingMothersCount: 2 },
+    actualDistributed: { familyFoodPacks: 16, kitchenSets: 5, hygieneKits: 5, infantCarePacks: 3, seniorCarePacks: 4 },
+    notes: '5 Partially Damaged Houses (Purok 4 Bucana - Edem Pandagay, Kidaraan - Jennifer Onlo, Purok Mangurayan, Purok Layo). 25th IB Patrol Base relocated. Water Reservoir stopped. NHS covered court floor leak. ES retaining wall damaged. Masagana plaza leak.',
+    damagedHousesDetail: { totally: 0, partially: 5, puroks: ['Purok 4 Bucana', 'Kidaraan', 'Purok Mangurayan', 'Purok Layo'] },
+    damagedInfrastructureCount: 5,
+  },
+  {
+    id: 'mab-2025-10-13-pangibiran',
+    eventName: 'October 2025 Mabini Earthquake Series',
+    date: '2025-10-13',
+    hazardType: 'earthquake',
+    severityLevel: 'moderate',
+    barangayId: 'pangibiran',
+    barangayName: 'Pangibiran',
+    affectedHouseholds: 3,
+    affectedFamilies: 9, // 3 * 3
+    displacementDays: 2,
+    vulnerability: { seniorsCount: 2, pwdsCount: 1, infantsCount: 2, lactatingMothersCount: 1 },
+    actualDistributed: { familyFoodPacks: 10, kitchenSets: 3, hygieneKits: 3, infantCarePacks: 2, seniorCarePacks: 2 },
+    notes: '3 Partially Damaged Houses (Purok 1 - Rosemarie Flores, Jovanie Talisik; Purok 2 - Felissa Manos; Purok 5 - Romulo Carpentero). Brgy Hall inspected.',
+    damagedHousesDetail: { totally: 0, partially: 3, puroks: ['Purok 1', 'Purok 2', 'Purok 5'] },
+    damagedInfrastructureCount: 1,
+  },
+  {
+    id: 'mab-2025-10-13-golden-valley',
+    eventName: 'October 2025 Mabini Earthquake Series',
+    date: '2025-10-13',
+    hazardType: 'earthquake',
+    severityLevel: 'moderate',
+    barangayId: 'golden-valley',
+    barangayName: 'Golden Valley',
+    affectedHouseholds: 3,
+    affectedFamilies: 9, // 3 * 3
+    displacementDays: 3,
+    vulnerability: { seniorsCount: 2, pwdsCount: 1, infantsCount: 1, lactatingMothersCount: 1 },
+    actualDistributed: { familyFoodPacks: 10, kitchenSets: 3, hygieneKits: 3, infantCarePacks: 1, seniorCarePacks: 2 },
+    notes: '3 Partially Damaged Houses (Dominador L. Plaza, Manuel Brigoly, Purok 19 - Angelita Garalde). NHS minor ceiling joint crack. Panamin ES plaster cracks. Candinuyan ES hairline cracks. Evangel Church minor ceiling/floor damage.',
+    damagedHousesDetail: { totally: 0, partially: 3, puroks: ['Purok 19', 'Sitio Plaza'] },
+    damagedInfrastructureCount: 4,
+  },
+  {
+    id: 'mab-2025-10-13-cabuyuan',
+    eventName: 'October 2025 Mabini Earthquake Series',
+    date: '2025-10-13',
+    hazardType: 'earthquake',
+    severityLevel: 'moderate',
+    barangayId: 'cabuyuan',
+    barangayName: 'Cabuyuan',
+    affectedHouseholds: 2,
+    affectedFamilies: 6, // 2 * 3
+    displacementDays: 2,
+    vulnerability: { seniorsCount: 1, pwdsCount: 1, infantsCount: 1, lactatingMothersCount: 1 },
+    actualDistributed: { familyFoodPacks: 7, kitchenSets: 2, hygieneKits: 2, infantCarePacks: 1, seniorCarePacks: 1 },
+    notes: '2 Partially Damaged Houses (Purok Lower B - Gina Palabao, Elvie Aberella). Fish Landing Deck collapsed one column joint connecting to deck. Elementary School plaster cracks.',
+    damagedHousesDetail: { totally: 0, partially: 2, puroks: ['Purok Lower B'] },
+    damagedInfrastructureCount: 2,
+  },
+  {
+    id: 'mab-2025-10-13-del-pilar',
+    eventName: 'October 2025 Mabini Earthquake Series',
+    date: '2025-10-13',
+    hazardType: 'earthquake',
+    severityLevel: 'moderate',
+    barangayId: 'del-pilar',
+    barangayName: 'Del Pilar',
+    affectedHouseholds: 2,
+    affectedFamilies: 6, // 2 * 3
+    displacementDays: 2,
+    vulnerability: { seniorsCount: 1, pwdsCount: 0, infantsCount: 1, lactatingMothersCount: 1 },
+    actualDistributed: { familyFoodPacks: 7, kitchenSets: 2, hygieneKits: 2, infantCarePacks: 1, seniorCarePacks: 1 },
+    notes: '2 Partially Damaged Houses (Purok 1 - Reynante Llever, Anecita Pisay). Elementary School structurally intact. Brgy Hall hairline cracks.',
+    damagedHousesDetail: { totally: 0, partially: 2, puroks: ['Purok 1'] },
+    damagedInfrastructureCount: 2,
+  },
+  {
+    id: 'mab-2025-10-13-san-antonio',
+    eventName: 'October 2025 Mabini Earthquake Series',
+    date: '2025-10-13',
+    hazardType: 'earthquake',
+    severityLevel: 'low',
+    barangayId: 'san-antonio',
+    barangayName: 'San Antonio',
+    affectedHouseholds: 1,
+    affectedFamilies: 3, // 1 * 3
+    displacementDays: 2,
+    vulnerability: { seniorsCount: 1, pwdsCount: 0, infantsCount: 0, lactatingMothersCount: 0 },
+    actualDistributed: { familyFoodPacks: 4, kitchenSets: 1, hygieneKits: 1, infantCarePacks: 0, seniorCarePacks: 1 },
+    notes: '1 Partially Damaged House (Purok 4). Elementary School minor hairline cracks. National High School pathway entrance cracks. Brgy Hall intact.',
+    damagedHousesDetail: { totally: 0, partially: 1, puroks: ['Purok 4'] },
+    damagedInfrastructureCount: 3,
+  },
+  {
+    id: 'mab-2025-10-13-other-barangays',
+    eventName: 'October 2025 Mabini Earthquake Series',
+    date: '2025-10-13',
+    hazardType: 'earthquake',
+    severityLevel: 'low',
+    barangayId: 'tagnanan',
+    barangayName: 'Tagnanan',
+    affectedHouseholds: 0,
+    affectedFamilies: 0,
+    displacementDays: 1,
+    vulnerability: { seniorsCount: 0, pwdsCount: 0, infantsCount: 0, lactatingMothersCount: 0 },
+    actualDistributed: { familyFoodPacks: 0, kitchenSets: 0, hygieneKits: 0, infantCarePacks: 0, seniorCarePacks: 0 },
+    notes: 'Elementary School minor cracks (non-structural). Brgy Hall hairline cracks inside and outside.',
+    damagedInfrastructureCount: 2,
+  },
+  {
+    id: 'mab-2025-10-15-cuambog',
+    eventName: 'October 2025 Mabini Earthquake Series',
+    date: '2025-10-15',
+    hazardType: 'earthquake',
+    severityLevel: 'moderate',
+    barangayId: 'cuambog',
+    barangayName: 'Cuambog (Poblacion)',
+    affectedHouseholds: 0,
+    affectedFamilies: 0,
+    displacementDays: 1,
+    vulnerability: { seniorsCount: 0, pwdsCount: 0, infantsCount: 0, lactatingMothersCount: 0 },
+    actualDistributed: { familyFoodPacks: 0, kitchenSets: 0, hygieneKits: 0, infantCarePacks: 0, seniorCarePacks: 0 },
+    notes: 'Municipal structures inspection: Mabini Terminal (hairline cracks), Mabini RTC building (floor tiles at main door entrance), Nutrition Office (hairline cracks), Senior Citizen Office (floor tiles detached, hairline cracks inside), Health Office (floor tile crack), Comelec (hairline cracks, hardiflex detached), Moneymall Rural Bank Inc. (lavatory detached, floor tile cracks).',
+    damagedInfrastructureCount: 7,
+  },
+  {
+    id: 'mab-2025-10-15-other-sites',
+    eventName: 'October 2025 Mabini Earthquake Series',
+    date: '2025-10-15',
+    hazardType: 'earthquake',
+    severityLevel: 'low',
+    barangayId: 'libodon',
+    barangayName: 'Libodon',
+    affectedHouseholds: 0,
+    affectedFamilies: 0,
+    displacementDays: 1,
+    vulnerability: { seniorsCount: 0, pwdsCount: 0, infantsCount: 0, lactatingMothersCount: 0 },
+    actualDistributed: { familyFoodPacks: 0, kitchenSets: 0, hygieneKits: 0, infantCarePacks: 0, seniorCarePacks: 0 },
+    notes: 'Libudon Elementary (hairline cracks walls), Libudon Health Center (hairline cracks walls). Cadunan Kapoc Elementary (hairline cracks). Pindasan Day Cares & Level III Water System (column cracks). Khaza De Miranda Beach Resort minimal cracks.',
+    damagedInfrastructureCount: 5,
   },
 ];

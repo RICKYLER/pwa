@@ -18,6 +18,9 @@ interface UploadRequestBody {
   is_active?: boolean;
   metadata?: Record<string, unknown>;
   dataset_events: unknown[];
+  compressed_payload?: string;
+  raw_headers?: string[];
+  raw_rows?: unknown[];
 }
 
 export async function GET(request: NextRequest) {
@@ -50,9 +53,16 @@ export async function GET(request: NextRequest) {
       });
     }
 
+    const mapped = (data || []).map((row: any) => ({
+      ...row,
+      raw_headers: row.raw_headers || row.metadata?.raw_headers,
+      raw_rows: row.raw_rows || row.metadata?.raw_rows,
+      compressed_payload: row.compressed_payload || row.metadata?.compressed_payload,
+    }));
+
     return NextResponse.json({
       success: true,
-      uploads: data || [],
+      uploads: mapped,
     });
   } catch (err: any) {
     return NextResponse.json({
@@ -94,7 +104,16 @@ export async function POST(request: NextRequest) {
     uploaded_by: uploaderName,
     uploaded_at: now,
     is_active: body.is_active ?? true,
-    metadata: body.metadata || {},
+    metadata: {
+      ...(body.metadata || {}),
+      compressed_payload: body.compressed_payload,
+      raw_headers: body.raw_headers,
+      raw_rows: body.raw_rows,
+      saved_percentage:
+        body.file_size_bytes && body.compressed_size_bytes && body.file_size_bytes > 0
+          ? Math.max(0, Math.round((1 - body.compressed_size_bytes / body.file_size_bytes) * 100))
+          : 0,
+    },
     dataset_events: body.dataset_events,
     created_at: now,
     updated_at: now,

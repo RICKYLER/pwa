@@ -20,6 +20,7 @@ import {
   ShieldCheck,
   Building2,
   Layers,
+  Zap,
 } from 'lucide-react';
 import {
   ForecastingUploadRecord,
@@ -208,6 +209,11 @@ export function ForecastingUploadHistoryModal({
                             <span className="inline-flex items-center gap-1">
                               <HardDrive className="h-3.5 w-3.5 text-slate-400" />
                               <span>{formatBytes(upload.file_size_bytes)}</span>
+                              {upload.compressed_size_bytes > 0 && upload.file_size_bytes > upload.compressed_size_bytes && (
+                                <span className="inline-flex items-center gap-0.5 rounded-full bg-emerald-50 px-1.5 py-0.2 text-[10px] font-bold text-emerald-700 border border-emerald-200 dark:bg-emerald-950/60 dark:text-emerald-300">
+                                  ➔ {formatBytes(upload.compressed_size_bytes)} (-{Math.round((1 - upload.compressed_size_bytes / upload.file_size_bytes) * 100)}% compressed)
+                                </span>
+                              )}
                             </span>
 
                             <span className="inline-flex items-center gap-1">
@@ -226,23 +232,66 @@ export function ForecastingUploadHistoryModal({
                               By {upload.uploaded_by}
                             </span>
                           </div>
+
+                          {/* Calculation Snapshot Badges (Resultados sa Kwentada) */}
+                          {upload.calculation_snapshot && (
+                            <div className="mt-2.5 flex flex-wrap items-center gap-1.5 pt-2 border-t border-slate-100 dark:border-slate-800/80">
+                              <span className="inline-flex items-center gap-1 rounded-md bg-emerald-50 px-2 py-0.5 text-xs font-semibold text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300">
+                                👨‍👩‍👧‍👦 {upload.calculation_snapshot.totalFamilies ?? (upload.records_count * 3)} Families
+                              </span>
+                              <span className="inline-flex items-center gap-1 rounded-md bg-indigo-50 px-2 py-0.5 text-xs font-semibold text-indigo-700 dark:bg-indigo-950/50 dark:text-indigo-300">
+                                📦 {upload.calculation_snapshot.familyFoodPacks ?? 0} FFPs Needed
+                              </span>
+                              {(upload.calculation_snapshot.totalHouses ?? 0) > 0 && (
+                                <span className="inline-flex items-center gap-1 rounded-md bg-amber-50 px-2 py-0.5 text-xs font-semibold text-amber-700 dark:bg-amber-950/50 dark:text-amber-300">
+                                  🏠 {upload.calculation_snapshot.totalHouses} Houses Damaged
+                                </span>
+                              )}
+                              {(upload.calculation_snapshot.shelterAssistancePesos ?? 0) > 0 && (
+                                <span className="inline-flex items-center gap-1 rounded-md bg-purple-50 px-2 py-0.5 text-xs font-semibold text-purple-700 dark:bg-purple-950/50 dark:text-purple-300">
+                                  💵 ₱{(upload.calculation_snapshot.shelterAssistancePesos ?? 0).toLocaleString()} Shelter Aid
+                                </span>
+                              )}
+                              {(upload.calculation_snapshot.damagedInfrastructureCount ?? 0) > 0 && (
+                                <span className="inline-flex items-center gap-1 rounded-md bg-rose-50 px-2 py-0.5 text-xs font-semibold text-rose-700 dark:bg-rose-950/50 dark:text-rose-300">
+                                  🏛️ {upload.calculation_snapshot.damagedInfrastructureCount} Infra Damaged
+                                </span>
+                              )}
+                              {upload.calculation_snapshot.reportDate && (
+                                <span className="inline-flex items-center gap-1 rounded-md bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+                                  📅 SitRep: {upload.calculation_snapshot.reportDate}
+                                </span>
+                              )}
+                            </div>
+                          )}
                         </div>
                       </div>
 
                       {/* Right: Actions */}
                       <div className="flex items-center gap-2 self-end sm:self-center">
-                        {!isActive && (
-                          <button
-                            type="button"
-                            disabled={actionLoading}
-                            onClick={() => handleActivate(upload)}
-                            className="inline-flex items-center gap-1 rounded-lg bg-indigo-600 px-2.5 py-1.5 text-xs font-semibold text-white shadow-xs hover:bg-indigo-700 active:scale-95 transition-all"
-                            title="Load this historical dataset into the active simulator"
-                          >
-                            <PlayCircle className="h-3.5 w-3.5" />
-                            <span>Activate</span>
-                          </button>
-                        )}
+                        <button
+                          type="button"
+                          disabled={actionLoading}
+                          onClick={() => handleActivate(upload)}
+                          className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-bold shadow-xs active:scale-95 transition-all ${
+                            isActive
+                              ? 'bg-emerald-600 text-white cursor-default'
+                              : 'bg-indigo-600 text-white hover:bg-indigo-700'
+                          }`}
+                          title={isActive ? 'Active result currently loaded on screen' : 'Ibalik kining maong calculation result sa screen'}
+                        >
+                          {isActive ? (
+                            <>
+                              <CheckCircle2 className="h-3.5 w-3.5" />
+                              <span>Active Result</span>
+                            </>
+                          ) : (
+                            <>
+                              <PlayCircle className="h-3.5 w-3.5" />
+                              <span>Balikan / Load Result</span>
+                            </>
+                          )}
+                        </button>
 
                         <button
                           type="button"
@@ -344,6 +393,36 @@ export function ForecastingUploadHistoryModal({
                             <span className="text-[10px] text-slate-400">MDRRMO Standby Buffer</span>
                           </div>
                         </div>
+
+                        {/* Compression & Storage Optimization Banner */}
+                        {upload.compressed_size_bytes > 0 && upload.file_size_bytes > 0 && (
+                          <div className="rounded-xl border border-emerald-200 bg-emerald-50/70 p-3 text-xs dark:border-emerald-900/60 dark:bg-emerald-950/30">
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-2">
+                                <Zap className="h-4 w-4 text-amber-500" />
+                                <span className="font-bold text-emerald-900 dark:text-emerald-200">
+                                  Database GZIP Compression Status
+                                </span>
+                              </div>
+                              <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-bold text-emerald-800 dark:bg-emerald-900 dark:text-emerald-200">
+                                {Math.round((1 - upload.compressed_size_bytes / upload.file_size_bytes) * 100)}% Space Saved
+                              </span>
+                            </div>
+                            <div className="mt-2 grid grid-cols-2 gap-2 text-[11px] text-slate-600 dark:text-slate-400">
+                              <div>
+                                <span>Orihinal nga File: </span>
+                                <strong className="text-slate-900 dark:text-slate-100">{formatBytes(upload.file_size_bytes)}</strong>
+                              </div>
+                              <div>
+                                <span>Na-compress sa Database: </span>
+                                <strong className="text-emerald-700 dark:text-emerald-300">{formatBytes(upload.compressed_size_bytes)}</strong>
+                              </div>
+                            </div>
+                            <p className="mt-1 text-[10px] text-emerald-700/80 dark:text-emerald-400">
+                              Gipagamay sa sistema aron dili mabug-atan ang database ug magpabilin nga paspas ang pag-compute.
+                            </p>
+                          </div>
+                        )}
 
                         {/* Hazards and Barangays Breakdown */}
                         {upload.metadata && typeof upload.metadata === 'object' && (

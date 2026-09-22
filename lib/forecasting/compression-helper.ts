@@ -98,7 +98,49 @@ export function validateDatasetFile(file: File, maxMb: number = MAX_FORECASTING_
 }
 
 /**
- * Compresses any JSON-serializable payload into a base64 string using gzip
+ * High-performance chunked Uint8Array to base64 conversion (avoids callstack/memory exhaustion on large 10MB+ buffers)
+ */
+export function uint8ArrayToBase64(bytes: Uint8Array): string {
+  if (typeof Buffer !== 'undefined') {
+    return Buffer.from(bytes).toString('base64');
+  }
+  let binary = '';
+  const chunkSize = 0x8000; // 32KB chunks
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    const chunk = bytes.subarray(i, Math.min(i + chunkSize, bytes.length));
+    binary += String.fromCharCode.apply(null, Array.from(chunk));
+  }
+  return btoa(binary);
+}
+
+/**
+ * High-performance chunked base64 to Uint8Array conversion
+ */
+export function base64ToUint8Array(base64: string): Uint8Array {
+  if (typeof Buffer !== 'undefined') {
+    return new Uint8Array(Buffer.from(base64, 'base64'));
+  }
+  const binary = atob(base64);
+  const len = binary.length;
+  const bytes = new Uint8Array(len);
+  for (let i = 0; i < len; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes;
+}
+
+export interface DatasetCompressionReport {
+  originalSizeBytes: number;
+  compressedSizeBytes: number;
+  savedPercentage: number;
+  ratioString: string;
+  originalFormatted: string;
+  compressedFormatted: string;
+  compressedPayload: string;
+}
+
+/**
+ * Compresses any JSON-serializable payload into a base64 string using gzip stream
  */
 export async function compressJsonPayload(payload: unknown): Promise<CompressionResult> {
   const jsonString = JSON.stringify(payload);
@@ -117,12 +159,7 @@ export async function compressJsonPayload(payload: unknown): Promise<Compression
           ? Math.max(0, Math.round((1 - compressedSizeBytes / originalSizeBytes) * 100))
           : 0;
 
-        // Convert to base64
-        let binary = '';
-        for (let i = 0; i < compressedBytes.length; i++) {
-          binary += String.fromCharCode(compressedBytes[i]);
-        }
-        const compressedBase64 = btoa(binary);
+        const compressedBase64 = uint8ArrayToBase64(compressedBytes);
 
         return {
           originalSizeBytes,
@@ -131,8 +168,28 @@ export async function compressJsonPayload(payload: unknown): Promise<Compression
           compressedBase64,
         };
       }
+    } catch (err) {
+      console.warn('[CompressionHelper] CompressionStream error, falling back:', err);
+    }
+  }
+
+  // Node.js fallback
+  if (typeof process !== 'undefined' && process.versions?.node) {
+    try {
+      const zlib = await import('node:zlib');
+      const compressedBuffer = zlib.gzipSync(Buffer.from(rawBytes));
+      const compressedSizeBytes = compressedBuffer.byteLength;
+      const savedPercentage = originalSizeBytes > 0
+        ? Math.max(0, Math.round((1 - compressedSizeBytes / originalSizeBytes) * 100))
+        : 0;
+      return {
+        originalSizeBytes,
+        compressedSizeBytes,
+        savedPercentage,
+        compressedBase64: compressedBuffer.toString('base64'),
+      };
     } catch {
-      // Fallback if compression stream encounters issues
+      // Continue to raw fallback
     }
   }
 
@@ -150,27 +207,79 @@ export async function compressJsonPayload(payload: unknown): Promise<Compression
  * Decompresses a base64 gzip string back into original JSON object
  */
 export async function decompressJsonPayload<T = unknown>(compressedBase64: string): Promise<T> {
-  if (typeof DecompressionStream !== 'undefined') {
-    try {
-      const binary = atob(compressedBase64);
-      const bytes = new Uint8Array(binary.length);
-      for (let i = 0; i < binary.length; i++) {
-        bytes[i] = binary.charCodeAt(i);
-      }
+  if (!compressedBase64) {
+    throw new Error('Cannot decompress empty string');
+  }
 
+  try {
+    const bytes = base64ToUint8Array(compressedBase64);
+
+    if (typeof DecompressionStream !== 'undefined') {
       const stream = new Response(bytes).body?.pipeThrough(new DecompressionStream('gzip'));
       if (stream) {
         const decompressedText = await new Response(stream).text();
         return JSON.parse(decompressedText) as T;
       }
-    } catch {
-      // Fallback to unescape/decode
     }
+
+    // Node.js fallback
+    if (typeof process !== 'undefined' && process.versions?.node) {
+      const zlib = await import('node:zlib');
+      const decompressed = zlib.gunzipSync(Buffer.from(bytes)).toString('utf-8');
+      return JSON.parse(decompressed) as T;
+    }
+  } catch (err) {
+    console.warn('[CompressionHelper] Decompression stream error, attempting fallback:', err);
   }
 
-  // Fallback
-  const raw = decodeURIComponent(escape(atob(compressedBase64)));
-  return JSON.parse(raw) as T;
+  // Fallback if not gzipped
+  try {
+    const raw = decodeURIComponent(escape(atob(compressedBase64)));
+    return JSON.parse(raw) as T;
+  } catch {
+    return JSON.parse(atob(compressedBase64)) as T;
+  }
+}
+
+/**
+ * High-level dataset compressor that packs events, raw headers, and raw rows
+ * into a single heavily compressed binary payload (typically 75% to 92% reduction).
+ */
+export async function compressDisasterDataset(dataset: {
+  events: HistoricalDisasterEvent[];
+  rawHeaders?: string[];
+  rawRows?: (string | number)[][] | null;
+  originalFileSizeBytes?: number;
+}): Promise<DatasetCompressionReport> {
+  const payloadToCompress = {
+    v: 1,
+    events: dataset.events,
+    rawHeaders: dataset.rawHeaders ?? [],
+    rawRows: dataset.rawRows ?? [],
+  };
+
+  const compResult = await compressJsonPayload(payloadToCompress);
+  const baselineSize = dataset.originalFileSizeBytes && dataset.originalFileSizeBytes > 0
+    ? dataset.originalFileSizeBytes
+    : compResult.originalSizeBytes;
+
+  const savedPct = baselineSize > 0
+    ? Math.max(0, Math.round((1 - compResult.compressedSizeBytes / baselineSize) * 100))
+    : 0;
+
+  const ratio = compResult.compressedSizeBytes > 0
+    ? (baselineSize / compResult.compressedSizeBytes).toFixed(1)
+    : '1.0';
+
+  return {
+    originalSizeBytes: baselineSize,
+    compressedSizeBytes: compResult.compressedSizeBytes,
+    savedPercentage: savedPct,
+    ratioString: `${ratio}x smaller`,
+    originalFormatted: formatBytes(baselineSize),
+    compressedFormatted: formatBytes(compResult.compressedSizeBytes),
+    compressedPayload: compResult.compressedBase64,
+  };
 }
 
 /**

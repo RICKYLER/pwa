@@ -9,7 +9,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { MABINI_SYNTHETIC_DISASTER_HISTORY } from '../lib/forecasting/mabini-relief-dataset';
+import { MABINI_BENCHMARK_FIXTURE_EVENTS } from '../lib/forecasting/mabini-relief-dataset';
 import { predictReliefDemand, MSWDO_CONSTANTS } from '../lib/forecasting/demand-predictor';
 import { evaluateForecastingAccuracy } from '../lib/forecasting/accuracy-metrics';
 
@@ -60,7 +60,7 @@ test('2. Validates MDRRMO Bodega Stockpile (2,000 packs) and Augmentation Defici
 });
 
 test('3. Computes High Accuracy (MAPE <= 10%, Accuracy >= 90%) across Mabini Disasters', () => {
-  const report = evaluateForecastingAccuracy(MABINI_SYNTHETIC_DISASTER_HISTORY);
+  const report = evaluateForecastingAccuracy(MABINI_BENCHMARK_FIXTURE_EVENTS);
 
   console.log('\n========================================================================================');
   console.log('       MSWDO MABINI RELIEF GOODS DEMAND FORECASTING & ACCURACY EVALUATION REPORT');
@@ -100,7 +100,7 @@ test('3. Computes High Accuracy (MAPE <= 10%, Accuracy >= 90%) across Mabini Dis
 
 test('4. Comparative Evaluation: Baseline Model (SMA-3) vs Proposed MSWDO Multi-Factor Model', () => {
   const { compareBaselineVsProposed } = require('../lib/forecasting/baseline-model');
-  const comparison = compareBaselineVsProposed(MABINI_SYNTHETIC_DISASTER_HISTORY, 3);
+  const comparison = compareBaselineVsProposed(MABINI_BENCHMARK_FIXTURE_EVENTS, 3);
 
   console.log('\n========================================================================================');
   console.log('       CAPSTONE DEFENSE: BASELINE MODEL (SMA) VS PROPOSED MODEL COMPARISON');
