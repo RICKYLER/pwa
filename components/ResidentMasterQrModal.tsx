@@ -91,13 +91,13 @@ export default function ResidentMasterQrModal({
           </div>
 
           <p className="mt-2 text-[10px] font-black uppercase tracking-[0.2em] text-emerald-200">
-            Republika sa Pilipinas · Munisipyo sa Mabini
+            Republic of the Philippines · Municipality of Mabini
           </p>
           <DialogTitle className="text-lg font-black text-white mt-0.5">
-            Master Evac Pass (Residente QR)
+            Master Evacuation Pass (Resident QR)
           </DialogTitle>
           <DialogDescription className="text-xs text-emerald-100 mt-0.5">
-            Permanente ug offline-ready nga QR pass alang sa pagbakwit sa pamilya.
+            Permanent, offline-ready QR pass for household evacuation registration.
           </DialogDescription>
         </div>
 
@@ -106,7 +106,7 @@ export default function ResidentMasterQrModal({
           <div className="rounded-3xl border-2 border-emerald-500/30 bg-gradient-to-br from-emerald-50/60 to-teal-50/40 p-6 shadow-sm">
             <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-600 px-3 py-0.5 text-[10px] font-black uppercase tracking-wider text-white shadow-xs">
               <ShieldCheck className="h-3 w-3" />
-              Opisyal nga Rehistradong Panimalay
+              Official Registered Household
             </span>
 
             <h3 className="mt-3 text-xl font-black text-slate-950">
@@ -119,7 +119,7 @@ export default function ResidentMasterQrModal({
             <div className="mt-2 flex items-center justify-center gap-2 text-[11px] font-bold text-slate-500">
               <span>ID: <code className="rounded bg-slate-200/80 px-1.5 py-0.5 text-slate-900">{household.id.slice(0, 16)}</code></span>
               <span>·</span>
-              <span className="text-emerald-800">{familyMembersCount} ka Sakop</span>
+              <span className="text-emerald-800">{familyMembersCount} Members</span>
             </div>
 
             {/* QR Code Container */}
@@ -151,14 +151,14 @@ export default function ResidentMasterQrModal({
                 ) : null}
                 {vulnerabilities.pregnant ? (
                   <span className="rounded bg-rose-100 px-2 py-0.5 text-[10px] font-bold text-rose-800">
-                    🤰 {vulnerabilities.pregnant} Mabdos
+                    🤰 {vulnerabilities.pregnant} Pregnant
                   </span>
                 ) : null}
               </div>
             )}
 
             <p className="mt-3 text-[11px] text-slate-500 italic">
-              "Ipakita kini nga QR code sa registration desk sa bisan asang evacuation center aron daling ma-check-in."
+              "Present this QR pass at any designated evacuation center registration desk for rapid check-in."
             </p>
           </div>
 
@@ -174,7 +174,7 @@ export default function ResidentMasterQrModal({
                 className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-600 px-4 py-2 text-xs font-black text-white shadow hover:bg-emerald-700 active:scale-95"
               >
                 <Sparkles className="h-3.5 w-3.5" />
-                <span>I-check-in Gamit Kining QR</span>
+                <span>Check In Using This QR</span>
               </button>
             )}
 
@@ -184,7 +184,7 @@ export default function ResidentMasterQrModal({
               className="inline-flex items-center gap-1.5 rounded-xl bg-slate-900 px-3.5 py-2 text-xs font-bold text-white shadow hover:bg-slate-800 active:scale-95"
             >
               <Printer className="h-3.5 w-3.5" />
-              <span>I-print</span>
+              <span>Print Pass</span>
             </button>
 
             {qrUrl && (
@@ -194,7 +194,7 @@ export default function ResidentMasterQrModal({
                 className="inline-flex items-center gap-1.5 rounded-xl border border-slate-300 bg-white px-3.5 py-2 text-xs font-bold text-slate-700 shadow-sm hover:bg-slate-50 active:scale-95"
               >
                 <Download className="h-3.5 w-3.5" />
-                <span>I-save</span>
+                <span>Download QR</span>
               </a>
             )}
           </div>

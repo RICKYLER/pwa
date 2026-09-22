@@ -410,16 +410,16 @@ export function ForecastingUploadHistoryModal({
                             </div>
                             <div className="mt-2 grid grid-cols-2 gap-2 text-[11px] text-slate-600 dark:text-slate-400">
                               <div>
-                                <span>Orihinal nga File: </span>
+                                <span>Original File: </span>
                                 <strong className="text-slate-900 dark:text-slate-100">{formatBytes(upload.file_size_bytes)}</strong>
                               </div>
                               <div>
-                                <span>Na-compress sa Database: </span>
+                                <span>Compressed in Database: </span>
                                 <strong className="text-emerald-700 dark:text-emerald-300">{formatBytes(upload.compressed_size_bytes)}</strong>
                               </div>
                             </div>
                             <p className="mt-1 text-[10px] text-emerald-700/80 dark:text-emerald-400">
-                              Gipagamay sa sistema aron dili mabug-atan ang database ug magpabilin nga paspas ang pag-compute.
+                              Optimized compression reduces database storage and ensures lightning-fast model evaluation.
                             </p>
                           </div>
                         )}

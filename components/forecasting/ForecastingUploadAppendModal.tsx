@@ -64,7 +64,7 @@ export function ForecastingUploadAppendModal({
           </div>
           <div>
             <h3 className="text-lg font-bold text-slate-900 dark:text-slate-100">
-              Unsay Buhaton sa Bag-ong Data?
+              Choose Dataset Action
             </h3>
             <p className="text-xs text-slate-500 dark:text-slate-400">
               Dataset Upload & Progressive SitRep Aggregator
@@ -82,7 +82,7 @@ export function ForecastingUploadAppendModal({
                   {fileName}
                 </p>
                 <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                  {formatBytes(fileSizeBytes)} · {incomingRecordsCount} ka mga rekord
+                  {formatBytes(fileSizeBytes)} · {incomingRecordsCount} records
                 </p>
               </div>
             </div>
@@ -110,7 +110,7 @@ export function ForecastingUploadAppendModal({
                   ✓
                 </span>
                 <span className="text-sm font-bold text-emerald-950 dark:text-emerald-200">
-                  Idugang sa Kasamtangang Kalamidad (Append)
+                  Append to Current Disaster Dataset
                 </span>
               </div>
               <span className="rounded-full bg-emerald-600 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-white">
@@ -118,7 +118,7 @@ export function ForecastingUploadAppendModal({
               </span>
             </div>
             <p className="mt-2 text-xs leading-relaxed text-emerald-900/80 dark:text-emerald-300/80">
-              <strong>Dili mapapas</strong> ang imong {currentDatasetCount} ka naunang rekord. Awtomatiko kining i-merge aron makwenta ang <strong>Cumulative Running Total</strong> across all dates (Oct 10, 11, 13, 15).
+              <strong>Preserves</strong> existing {currentDatasetCount} records. Automatically merges and recalculates the <strong>Cumulative Running Total</strong> across all dates.
             </p>
           </button>
 
@@ -132,11 +132,11 @@ export function ForecastingUploadAppendModal({
             <div className="flex items-center gap-2">
               <RefreshCw className="h-4 w-4 text-slate-500" />
               <span className="text-sm font-semibold text-slate-800 dark:text-slate-200">
-                Bag-ong Kalamidad (Start Fresh New Disaster)
+                Replace Active Dataset (Start Fresh Baseline)
               </span>
             </div>
             <p className="mt-1 text-xs leading-relaxed text-slate-500 dark:text-slate-400">
-              Tangtangon ang kasamtangang kalamidad ug ilisan niining bag-ong file lamang (Fresh baseline).
+              Replaces the current records with this new file as a clean baseline.
             </p>
           </button>
         </div>
@@ -149,7 +149,7 @@ export function ForecastingUploadAppendModal({
             disabled={isProcessing}
             className="rounded-lg px-4 py-2 text-xs font-medium text-slate-600 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800"
           >
-            Kanselahon (Cancel)
+            Cancel
           </button>
         </div>
       </div>

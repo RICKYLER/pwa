@@ -498,9 +498,9 @@ export function ForecastingInsightsCard({
 
       setImportStatus({
         message: isAppend
-          ? `Gidugang ang ${incomingEvents.length} ka rekord gikan sa "${file.name}"! Gikumpress ang database: ${compression.originalFormatted} ➔ ${compression.compressedFormatted} (${compression.savedPercentage}% Tipig).`
-          : `Malamposong na-load ug na-compress ang "${file.name}" (${finalEvents.length} ka rekord, ${finalRawHeaders?.length ?? 0} ka columns)!`,
-        compressionNote: `⚡ Database Compression: ${compression.originalFormatted} ➔ ${compression.compressedFormatted} (${compression.savedPercentage}% Saved · ${compression.ratioString}) · Gaan kaayo sa memory ug dili mabug-atan ang inyong system!`,
+          ? `Appended ${incomingEvents.length} records from "${file.name}"! Database compressed: ${compression.originalFormatted} ➔ ${compression.compressedFormatted} (${compression.savedPercentage}% Saved).`
+          : `Successfully loaded and compressed "${file.name}" (${finalEvents.length} records, ${finalRawHeaders?.length ?? 0} columns)!`,
+        compressionNote: `⚡ Database Compression: ${compression.originalFormatted} ➔ ${compression.compressedFormatted} (${compression.savedPercentage}% Saved · ${compression.ratioString}) · High efficiency storage optimization.`,
         isError: false,
       });
     } catch (err) {
@@ -541,7 +541,7 @@ export function ForecastingInsightsCard({
       if (!result.success || result.events.length === 0) {
         setIsUploading(false);
         setImportStatus({
-          message: result.errors[0] || 'Dili mabasa ang file. Palihug susiha ang pormat.',
+          message: result.errors[0] || 'Unable to read file. Please check the file format.',
           isError: true,
         });
         return;
@@ -615,9 +615,9 @@ export function ForecastingInsightsCard({
           : null;
 
       setImportStatus({
-        message: `Gibalhin ang dataset ngadto sa "${record.file_name}" (${restored.events.length} records). Model accuracy: ${record.accuracy_rate ?? 99.5}%.`,
+        message: `Switched dataset to "${record.file_name}" (${restored.events.length} records). Model accuracy: ${record.accuracy_rate ?? 99.5}%.`,
         compressionNote: savedPct
-          ? `⚡ Na-compress sa database: ${formatBytes(record.file_size_bytes)} ➔ ${formatBytes(record.compressed_size_bytes)} (${savedPct}% saved)`
+          ? `⚡ Compressed in database: ${formatBytes(record.file_size_bytes)} ➔ ${formatBytes(record.compressed_size_bytes)} (${savedPct}% saved)`
           : undefined,
         isError: false,
       });
@@ -635,7 +635,7 @@ export function ForecastingInsightsCard({
     setActiveTab('table');
     setSelectedDateFilter('all');
     setImportStatus({
-      message: 'Nahaw-asan na ang forecasting records. Andam na para sa bag-ong tinuod nga Excel data.',
+      message: 'Forecasting records cleared. Ready for new Excel damage assessment data.',
       isError: false,
     });
   };
@@ -704,13 +704,13 @@ export function ForecastingInsightsCard({
             <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-500">
               <span className="inline-flex items-center gap-1 font-medium text-slate-700 dark:text-slate-300">
                 <Database className="h-3.5 w-3.5 text-cyan-600" />
-                <span>{activeDataset.length > 0 ? (activeFileName || 'Uploaded Dataset') : 'Walay Naka-load nga Kalamidad'}</span>
+                <span>{activeDataset.length > 0 ? (activeFileName || 'Uploaded Dataset') : 'No Disaster Dataset Loaded'}</span>
                 <span className="font-bold text-cyan-700">({activeDataset.length} events)</span>
               </span>
               <span>
                 {activeDataset.length > 0
                   ? '• Standard: 3 families/HH • 2,000 Bodega Stockpile Buffer'
-                  : '• Andam na sa pag-upload sa Excel/CSV • Standard: 3 families/HH • 2,000 Bodega Buffer'}
+                  : '• Ready for Excel/CSV upload • Standard: 3 families/HH • 2,000 Bodega Buffer'}
               </span>
             </div>
           </div>
@@ -807,16 +807,16 @@ export function ForecastingInsightsCard({
               )}
             </button>
 
-            {/* Clear / Haw-asan Button */}
+            {/* Clear / Reset Button */}
             {isCustomDataset && (
               <button
                 type="button"
                 onClick={handleResetToDefault}
-                title="Haw-asan ang tanang data (Clear All)"
+                title="Clear all disaster data (Reset)"
                 className="inline-flex items-center gap-1 rounded-xl border border-rose-200 bg-rose-50/80 px-2.5 py-1.5 text-xs font-semibold text-rose-700 hover:bg-rose-100 dark:border-rose-900/60 dark:bg-rose-950/40 dark:text-rose-300"
               >
                 <Trash2 className="h-3.5 w-3.5 text-rose-500" />
-                <span>Haw-asan</span>
+                <span>Clear Data</span>
               </button>
             )}
           </div>
@@ -908,7 +908,7 @@ export function ForecastingInsightsCard({
                     Disaster Progressive Timeline & SitRep Aggregator
                   </h3>
                   <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                    Pilia ang petsa aron makita ang specific adlaw o tan-awa ang Kabuukang Running Total (Cumulative).
+                    Filter by date to view daily assessments or inspect the Cumulative Running Total.
                   </p>
                 </div>
               </div>
@@ -923,10 +923,10 @@ export function ForecastingInsightsCard({
               <div className="mt-3.5 rounded-xl border border-dashed border-slate-200 bg-slate-50/70 p-4 text-center dark:border-slate-800 dark:bg-slate-900/40">
                 <div className="flex flex-col items-center justify-center gap-1.5">
                   <p className="text-xs font-bold text-slate-700 dark:text-slate-300">
-                    Walay active calamity records (0 events)
+                    No active calamity records (0 events)
                   </p>
                   <p className="text-[11px] text-slate-500 max-w-md dark:text-slate-400">
-                    Nahaw-asan na ang tanang seed data. Palihug i-click ang <span className="font-semibold text-cyan-700 dark:text-cyan-300">Upload Excel/CSV</span> sa taas aron i-load ang imong tinuod nga MDRRMO SitRep damage assessments.
+                    No records loaded. Please click <span className="font-semibold text-cyan-700 dark:text-cyan-300">Upload Excel/CSV</span> above to import official MDRRMO SitRep damage assessments.
                   </p>
                 </div>
               </div>
@@ -942,7 +942,7 @@ export function ForecastingInsightsCard({
                   }`}
                 >
                   <Layers className="h-3.5 w-3.5 text-cyan-400" />
-                  <span>Tanan / Running Total</span>
+                  <span>All / Running Total</span>
                   <span className="rounded-full bg-cyan-900/80 px-1.5 py-0.2 text-[10px] text-cyan-200">
                     {activeDataset.length}
                   </span>
@@ -1182,7 +1182,7 @@ export function ForecastingInsightsCard({
                     }`}
                   >
                     <FileSpreadsheet className="h-3.5 w-3.5 text-emerald-300" />
-                    <span>Kopya sa Excel</span>
+                    <span>Excel Spreadsheet View</span>
                     <span
                       className={`rounded-full px-1.5 text-[10px] font-bold ${
                         activeTab === 'excel'
@@ -1232,7 +1232,7 @@ export function ForecastingInsightsCard({
                     <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-slate-400" />
                     <input
                       type="text"
-                      placeholder={activeTab === 'excel' ? 'Pangitaa sa Excel...' : 'Search event, brgy...'}
+                      placeholder={activeTab === 'excel' ? 'Search spreadsheet...' : 'Search event, brgy...'}
                       value={tableSearch}
                       onChange={(e) => setTableSearch(e.target.value)}
                       className="rounded-xl border border-slate-200 bg-slate-50 py-1.5 pl-8 pr-3 text-xs text-slate-900 focus:border-cyan-500 focus:bg-white focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
@@ -1264,12 +1264,12 @@ export function ForecastingInsightsCard({
                   <div className="flex items-center gap-2">
                     <FileSpreadsheet className="h-4 w-4 text-emerald-700 dark:text-emerald-400 shrink-0" />
                     <p className="font-semibold text-emerald-900 dark:text-emerald-200">
-                      Orihinal nga Pormat sa Excel:{' '}
+                      Original Excel Format:{' '}
                       <span className="font-bold underline">{activeFileName || 'Uploaded Sheet'}</span>
                     </p>
                   </div>
                   <span className="text-[11px] text-emerald-700 font-medium dark:text-emerald-300">
-                    {displayHeaders.length} ka Columns · {filteredRawRows.length} ka Rows (Live Auto-Calculated)
+                    {displayHeaders.length} Columns · {filteredRawRows.length} Rows (Live Auto-Calculated)
                   </span>
                 </div>
 
@@ -1289,7 +1289,7 @@ export function ForecastingInsightsCard({
                       {filteredRawRows.length === 0 ? (
                         <tr>
                           <td colSpan={displayHeaders.length + 1} className="p-8 text-center text-slate-400">
-                            Walay nakitang linya sa spreadsheet.
+                            No spreadsheet rows found.
                           </td>
                         </tr>
                       ) : (
@@ -1348,10 +1348,10 @@ export function ForecastingInsightsCard({
                               <FileSpreadsheet className="h-7 w-7" />
                             </div>
                             <p className="text-sm font-bold text-slate-700 dark:text-slate-300">
-                              Walay disaster records nga naka-load.
+                              No disaster records loaded.
                             </p>
                             <p className="text-xs text-slate-400 max-w-sm">
-                              Nahaw-asan na ang sample/seed data. Palihug i-upload ang imong opisyal nga Excel o CSV damage assessment file aron makita ang live data ug calculations dinhi.
+                              Sample data cleared. Please upload your official Excel or CSV damage assessment file to view live calculations here.
                             </p>
                             <button
                               type="button"

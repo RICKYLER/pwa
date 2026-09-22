@@ -339,7 +339,7 @@ export default function EvacuationPage() {
         notes: checkInNotes,
       });
 
-      setCheckInSuccessMsg(`Malampusong na-check-in si ${rec.head_name} sa ${rec.evacuation_center_name}!`);
+      setCheckInSuccessMsg(`Successfully checked in ${rec.head_name} to ${rec.evacuation_center_name}!`);
       setSelectedHouseholdForCheckIn(null);
       setCheckInSearch('');
       setCheckInNotes('');
@@ -353,7 +353,7 @@ export default function EvacuationPage() {
 
   // Execute Check-out
   async function handleCheckOut(recordId: string) {
-    if (!confirm('Sigurado ka ba nga i-check out (nakapauli na sa ilang balay) kini nga pamilya?')) {
+    if (!confirm('Are you sure you want to check out this household (marked as returned home)?')) {
       return;
     }
     try {
@@ -429,7 +429,7 @@ export default function EvacuationPage() {
         <CivicHero
           eyebrow="Disaster Response Operations · MSWDO & MDRRMO"
           title="Evacuation Center & Evacuee Management"
-          description="I-scan ang Master Evac QR Code sa mga residente, i-monitor ang gidaghanon sa bakwit, ug dumalaha ang mga Evacuation Centers sa Munisipyo."
+          description="Scan resident Master Evac QR codes, monitor sheltered evacuees, and manage municipal evacuation facilities."
           aside={
             <div className="flex flex-wrap items-center gap-2">
               <button
@@ -446,7 +446,7 @@ export default function EvacuationPage() {
                 className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-700 px-4 py-2 text-xs font-black text-white shadow-md transition hover:from-emerald-700 hover:to-teal-800 active:scale-95"
               >
                 <Plus className="h-4 w-4" />
-                <span>Bag-ong Evacuation Center</span>
+                <span>New Evacuation Center</span>
               </button>
             </div>
           }
@@ -457,28 +457,28 @@ export default function EvacuationPage() {
           <CivicKpiCard
             label="Open Evac Centers"
             value={`${stats.openCentersCount} / ${stats.totalCentersCount}`}
-            hint={stats.openCentersCount > 0 ? 'Aktibo karon' : 'Walay open'}
+            hint={stats.openCentersCount > 0 ? 'Active now' : 'None open'}
             icon={Building2}
             tone={stats.openCentersCount > 0 ? 'emerald' : 'slate'}
           />
           <CivicKpiCard
             label="Sheltered Families"
             value={stats.shelteredFamiliesCount}
-            hint="Mga Panimalay"
+            hint="Households"
             icon={Home}
             tone="teal"
           />
           <CivicKpiCard
             label="Total Evacuees"
             value={stats.totalIndividualsCount}
-            hint="Mga Indibidwal"
+            hint="Individuals"
             icon={Users}
             tone="navy"
           />
           <CivicKpiCard
             label="Vulnerable Sector"
             value={stats.totalVulnerableCount}
-            hint="Seniors, PWD, Bata"
+            hint="Seniors, PWD, Children"
             icon={Baby}
             tone={stats.totalVulnerableCount > 0 ? 'amber' : 'slate'}
           />
@@ -501,11 +501,11 @@ export default function EvacuationPage() {
                   Master Evac QR Check-in Desk
                 </div>
                 <h2 className="mt-2 text-2xl font-black text-slate-950">
-                  I-check-in ang Arriving nga mga Residente
+                  Check In Arriving Residents
                 </h2>
                 <p className="mt-1 text-xs font-medium text-slate-600">
-                  I-scan ang <strong>Master Evac Pass QR</strong> sa resident o i-type ang Household ID / Ngalan sa Ulo sa
-                  Panimalay aron ma-rehistro dayon sa evacuation center.
+                  Scan the <strong>Master Evac Pass QR</strong> of the resident or enter the Household ID / Head of Household
+                  name to register arriving evacuees immediately.
                 </p>
 
                 {/* Prominent Camera QR Scanner and View QR Buttons */}
@@ -516,7 +516,7 @@ export default function EvacuationPage() {
                     className="inline-flex items-center gap-2.5 rounded-2xl bg-gradient-to-r from-emerald-600 via-emerald-700 to-teal-700 px-5 py-3 text-xs font-black text-white shadow-lg shadow-emerald-700/20 transition hover:from-emerald-700 hover:to-teal-800 active:scale-95"
                   >
                     <Camera className="h-4 w-4 text-emerald-200" />
-                    <span>I-scan ang QR (Camera Scanner)</span>
+                    <span>Scan QR (Camera Scanner)</span>
                   </button>
 
                   {households.length > 0 && (
@@ -527,10 +527,10 @@ export default function EvacuationPage() {
                         setSelectedHouseholdForQrModal(target);
                       }}
                       className="inline-flex items-center gap-2 rounded-xl border border-emerald-300 bg-emerald-50 px-3.5 py-2.5 text-xs font-black text-emerald-900 shadow-sm transition hover:bg-emerald-100 active:scale-95"
-                      title="Tan-awa ang sample Master Evac QR Pass sa Residente"
+                      title="View sample Master Evac QR Pass"
                     >
                       <QrCode className="h-4 w-4 text-emerald-700" />
-                      <span>Tan-awa ang Master QR Pass</span>
+                      <span>View Master QR Pass</span>
                     </button>
                   )}
                 </div>
@@ -539,9 +539,9 @@ export default function EvacuationPage() {
                 <div className="mt-3.5 rounded-2xl border border-emerald-200/80 bg-emerald-50/70 p-3 text-xs text-emerald-950 flex items-start gap-2.5">
                   <QrCode className="h-4 w-4 text-emerald-700 shrink-0 mt-0.5" />
                   <div>
-                    <p className="font-black text-slate-950">Asa makita sa mga Residente ilang QR Code?</p>
+                    <p className="font-black text-slate-950">Where can residents find their QR Code?</p>
                     <p className="text-[11px] text-slate-600 mt-0.5 leading-relaxed">
-                      Ang matag residente adunay opisyal nga <strong>Master Evac Pass QR</strong> sulod sa ilang <strong>Resident Portal &rarr; Profile</strong> (icon sa taas sa tuo). Pwede kini ipakita sa cellphone o gi-print nga ID card, ug dali kining ma-detect sa imong camera.
+                      Each registered resident has an official <strong>Master Evac Pass QR</strong> in their <strong>Resident Portal &rarr; Profile</strong> (top right icon). It can be shown on mobile or printed ID cards, easily detected by your camera.
                     </p>
                   </div>
                 </div>
@@ -556,7 +556,7 @@ export default function EvacuationPage() {
                       setCheckInSearch(e.target.value);
                       setSelectedHouseholdForCheckIn(null);
                     }}
-                    placeholder="I-paste ang QR data, o type: Ricky Layno Contiga, HH-HH_17884..."
+                    placeholder="Scan QR data, or type: Ricky Layno Contiga, HH-HH_17884..."
                     className="w-full rounded-2xl border-2 border-slate-200 bg-white py-3 pl-10 pr-4 text-sm font-semibold text-slate-900 shadow-sm transition placeholder:text-slate-400 focus:border-emerald-500 focus:outline-none focus:ring-4 focus:ring-emerald-100"
                   />
                 </div>
@@ -582,13 +582,13 @@ export default function EvacuationPage() {
                             </p>
                           </div>
                           <span className="inline-flex items-center gap-1 rounded-lg bg-emerald-100 px-2.5 py-1 text-xs font-bold text-emerald-800">
-                            Pilia <ArrowRight className="h-3 w-3" />
+                            Select <ArrowRight className="h-3 w-3" />
                           </span>
                         </button>
                       ))
                     ) : (
                       <div className="p-4 text-center text-xs font-bold text-slate-400">
-                        Walay nakitang panimalay nga tugma sa imong gipangita.
+                        No matching households found.
                       </div>
                     )}
                   </div>
@@ -618,7 +618,7 @@ export default function EvacuationPage() {
                     <div className="flex items-start justify-between">
                       <div>
                         <span className="text-[10px] font-black uppercase tracking-wider text-emerald-800">
-                          Residente nga I-Check-in:
+                          Resident to Check In:
                         </span>
                         <h4 className="text-lg font-black text-slate-950">
                           {selectedHouseholdForCheckIn.head_name}
@@ -630,16 +630,16 @@ export default function EvacuationPage() {
                       <div className="flex flex-col items-end gap-1.5">
                         <span className="inline-flex items-center gap-1 rounded-full bg-emerald-600 px-2.5 py-0.5 text-xs font-black text-white">
                           <Users className="h-3 w-3" />
-                          {selectedHhResidents.length || 1} katawo
+                          {selectedHhResidents.length || 1} members
                         </span>
                         <button
                           type="button"
                           onClick={() => setSelectedHouseholdForQrModal(selectedHouseholdForCheckIn)}
                           className="inline-flex items-center gap-1 rounded-lg border border-emerald-300 bg-white px-2 py-0.5 text-[11px] font-bold text-emerald-800 shadow-xs hover:bg-emerald-50 active:scale-95"
-                          title="Ipakita ang QR Pass sa Residente"
+                          title="View Resident QR Pass"
                         >
                           <QrCode className="h-3 w-3 text-emerald-600" />
-                          <span>Ipakita ang QR</span>
+                          <span>View QR</span>
                         </button>
                       </div>
                     </div>
@@ -663,7 +663,7 @@ export default function EvacuationPage() {
                       ) : null}
                       {selectedHhVulnerabilities.pregnant > 0 ? (
                         <span className="rounded-md bg-rose-200 px-2 py-0.5 text-[10px] font-bold text-rose-900">
-                          🤰 {selectedHhVulnerabilities.pregnant} Mabdos
+                          🤰 {selectedHhVulnerabilities.pregnant} Pregnant
                         </span>
                       ) : null}
                     </div>
@@ -672,7 +672,7 @@ export default function EvacuationPage() {
                     {alreadyCheckedInRecord ? (
                       <div className="rounded-lg bg-amber-100 p-2.5 text-xs font-bold text-amber-900 flex items-center gap-2">
                         <AlertTriangle className="h-4 w-4 shrink-0 text-amber-600" />
-                        <span>Kini nga pamilya kasamtangang naka-check-in na sa {alreadyCheckedInRecord.evacuation_center_name}!</span>
+                        <span>This household is currently checked in at {alreadyCheckedInRecord.evacuation_center_name}!</span>
                       </div>
                     ) : null}
 
@@ -681,7 +681,7 @@ export default function EvacuationPage() {
                       type="text"
                       value={checkInNotes}
                       onChange={(e) => setCheckInNotes(e.target.value)}
-                      placeholder="Espesyal nga pahimangno o medikal nga notes (optional)..."
+                      placeholder="Special notes or medical requirements (optional)..."
                       className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-800 placeholder:text-slate-400 focus:outline-none"
                     />
 
@@ -694,15 +694,15 @@ export default function EvacuationPage() {
                     >
                       <UserCheck className="h-4 w-4" />
                       {isSubmittingCheckIn
-                        ? 'Gisave ang check-in...'
+                        ? 'Saving check-in...'
                         : alreadyCheckedInRecord
-                        ? 'I-balhin og Evac Center'
-                        : 'I-Check-in Kini nga Panimalay'}
+                        ? 'Transfer Evacuation Center'
+                        : 'Check In Household'}
                     </button>
                   </div>
                 ) : (
                   <div className="mt-4 rounded-xl border border-dashed border-slate-300 p-6 text-center text-xs text-slate-400 font-medium">
-                    I-type ang ngalan o i-scan ang Master Evac QR sa wala aron mo-gawas ang pamilya nga i-check-in.
+                    Type a name or scan the Master Evac QR on the left to select a household for check-in.
                   </div>
                 )}
 
@@ -720,8 +720,8 @@ export default function EvacuationPage() {
         {/* 3. EVACUATION CENTERS STATUS OVERVIEW */}
         <div className="mt-8">
           <CivicSectionHeading
-            title="Mga Evacuation Center sa Munisipyo"
-            description="I-monitor ang kapasidad, aktibong pamilya, ug i-abli o i-sira ang mga designated evacuation centers."
+            title="Municipal Evacuation Centers"
+            description="Monitor capacity, active sheltered families, and open or close designated evacuation facilities."
           />
 
           <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -750,7 +750,7 @@ export default function EvacuationPage() {
                             center.status === 'open' ? 'text-emerald-700' : 'text-slate-500'
                           }`}
                         >
-                          {center.status === 'open' ? 'Bukas (Open)' : 'Sirado (Closed)'}
+                          {center.status === 'open' ? 'Open' : 'Closed'}
                         </span>
                       </div>
                       <h3 className="mt-1 text-base font-black text-slate-950">{center.name}</h3>
@@ -762,7 +762,7 @@ export default function EvacuationPage() {
                         type="button"
                         onClick={() => setSelectedCenterForPoster(center)}
                         className="inline-flex items-center gap-1 rounded-xl border border-slate-300 bg-white px-2 py-1 text-[11px] font-bold text-slate-700 shadow-xs hover:bg-slate-50 hover:text-emerald-700 active:scale-95"
-                        title="I-display o I-print ang Opisyal nga QR Poster sa Center"
+                        title="Display or print official Center QR Poster"
                       >
                         <QrCode className="h-3 w-3 text-emerald-600" />
                         <span>QR Poster</span>
@@ -776,17 +776,17 @@ export default function EvacuationPage() {
                             ? 'border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100'
                             : 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
                         }`}
-                        title={center.status === 'open' ? 'Isira kini nga center' : 'Ablihan kini nga center'}
+                        title={center.status === 'open' ? 'Close this center' : 'Open this center'}
                       >
                         {center.status === 'open' ? (
                           <>
                             <DoorClosed className="h-3 w-3" />
-                            Isira
+                            Close
                           </>
                         ) : (
                           <>
                             <DoorOpen className="h-3 w-3" />
-                            Ablihan
+                            Open
                           </>
                         )}
                       </button>
@@ -796,7 +796,7 @@ export default function EvacuationPage() {
                   {/* Capacity Bar */}
                   <div className="mt-4">
                     <div className="flex justify-between text-xs font-bold text-slate-600">
-                      <span>{familiesCount} Families / {peopleCount} Katawo</span>
+                      <span>{familiesCount} Families / {peopleCount} Individuals</span>
                       <span>{fillPercent}% (Max: {capacity})</span>
                     </div>
                     <div className="mt-1.5 h-2.5 w-full rounded-full bg-slate-100 overflow-hidden">
@@ -824,8 +824,8 @@ export default function EvacuationPage() {
         <div className="mt-8">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
             <CivicSectionHeading
-              title={`Masterlist sa mga Bakwit / Evacuees (${filteredRoster.length})`}
-              description="Opisyal nga listahan sa mga pamilya nga kasamtangang nagpasilong sa mga evacuation centers."
+              title={`Active Evacuee Masterlist (${filteredRoster.length})`}
+              description="Official roster of families and individuals sheltered in municipal evacuation facilities."
             />
 
             {/* Quick Filters */}
@@ -835,7 +835,7 @@ export default function EvacuationPage() {
                 onChange={(e) => setSelectedCenterFilter(e.target.value)}
                 className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-700 shadow-sm focus:outline-none"
               >
-                <option value="all">Tanang Evac Centers</option>
+                <option value="all">All Evacuation Centers</option>
                 {centers.map((c) => (
                   <option key={c.id} value={c.id}>
                     {c.name}
@@ -848,8 +848,8 @@ export default function EvacuationPage() {
                 onChange={(e) => setSelectedStatusFilter(e.target.value as any)}
                 className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-700 shadow-sm focus:outline-none"
               >
-                <option value="sheltered">Kasamtangang Sheltered Lamang</option>
-                <option value="all">Tanang Rekord (Apil Nakapauli)</option>
+                <option value="sheltered">Currently Sheltered Only</option>
+                <option value="all">All Records (Including Returned Home)</option>
               </select>
             </div>
           </div>
@@ -862,7 +862,7 @@ export default function EvacuationPage() {
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Pangitaa pinaagi sa ngalan, purok, o evacuation center..."
+                placeholder="Search by name, purok, or evacuation center..."
                 className="w-full text-xs font-semibold text-slate-800 placeholder:text-slate-400 focus:outline-none"
               />
             </div>
@@ -871,13 +871,13 @@ export default function EvacuationPage() {
               <table className="w-full text-left text-xs">
                 <thead className="border-b border-slate-200 bg-slate-50 font-black uppercase tracking-wider text-slate-600">
                   <tr>
-                    <th className="py-3.5 px-4">Ulo sa Panimalay</th>
+                    <th className="py-3.5 px-4">Head of Household</th>
                     <th className="py-3.5 px-4">Evacuation Center</th>
                     <th className="py-3.5 px-4">Purok & Barangay</th>
-                    <th className="py-3.5 px-4">Gidaghanon</th>
+                    <th className="py-3.5 px-4">Members</th>
                     <th className="py-3.5 px-4">Vulnerable Sector</th>
-                    <th className="py-3.5 px-4">Oras sa Check-in</th>
-                    <th className="py-3.5 px-4 text-right">Aksyon</th>
+                    <th className="py-3.5 px-4">Check-in Time</th>
+                    <th className="py-3.5 px-4 text-right">Action</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
@@ -888,9 +888,9 @@ export default function EvacuationPage() {
                           <div className="flex items-center gap-2">
                             <span>{row.head_name}</span>
                             {row.status === 'sheltered' ? (
-                              <span className="inline-block h-2 w-2 rounded-full bg-emerald-500" title="Aktibong Sheltered" />
+                              <span className="inline-block h-2 w-2 rounded-full bg-emerald-500" title="Actively Sheltered" />
                             ) : (
-                              <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[9px] text-slate-500">Nakapauli</span>
+                              <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[9px] text-slate-500">Checked Out</span>
                             )}
                           </div>
                         </td>
@@ -901,7 +901,7 @@ export default function EvacuationPage() {
                           {row.purok_sitio}, {row.barangay_name}
                         </td>
                         <td className="py-3.5 px-4 font-bold text-slate-900">
-                          {row.family_members_count} katawo
+                          {row.family_members_count} members
                         </td>
                         <td className="py-3.5 px-4">
                           <div className="flex flex-wrap gap-1">
@@ -922,14 +922,14 @@ export default function EvacuationPage() {
                             ) : null}
                             {row.vulnerabilities.pregnant > 0 ? (
                               <span className="rounded bg-rose-100 px-1.5 py-0.5 text-[10px] font-bold text-rose-800">
-                                {row.vulnerabilities.pregnant} Mabdos
+                                {row.vulnerabilities.pregnant} Pregnant
                               </span>
                             ) : null}
                             {row.vulnerabilities.seniors === 0 &&
                             row.vulnerabilities.infants === 0 &&
                             row.vulnerabilities.pwds === 0 &&
                             row.vulnerabilities.pregnant === 0 ? (
-                              <span className="text-slate-400 italic">Walay na-tag</span>
+                              <span className="text-slate-400 italic">None tagged</span>
                             ) : null}
                           </div>
                         </td>
@@ -959,7 +959,7 @@ export default function EvacuationPage() {
                                 }
                               }}
                               className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs font-bold text-slate-700 shadow-xs transition hover:border-emerald-300 hover:bg-emerald-50 hover:text-emerald-900 active:scale-95"
-                              title="Tan-awa ang Master Evac QR Pass niining bakwit"
+                              title="View Master Evac QR Pass for this evacuee"
                             >
                               <QrCode className="h-3.5 w-3.5 text-emerald-600" />
                               <span className="hidden sm:inline">QR Pass</span>
@@ -970,7 +970,7 @@ export default function EvacuationPage() {
                                 type="button"
                                 onClick={() => void handleCheckOut(row.id)}
                                 className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-xs font-bold text-slate-700 shadow-xs transition hover:border-emerald-300 hover:bg-emerald-50 hover:text-emerald-900 active:scale-95"
-                                title="I-marka nga nakapauli na sa ilang panimalay"
+                                title="Mark as returned home (check-out)"
                               >
                                 <LogOut className="h-3.5 w-3.5 text-emerald-600" />
                                 <span>Check-out</span>
@@ -987,7 +987,7 @@ export default function EvacuationPage() {
                   ) : (
                     <tr>
                       <td colSpan={7} className="py-8 text-center text-slate-400 font-medium">
-                        Walay nakitang mga bakwit sa kasamtangang filter.
+                        No evacuees match the current filter.
                       </td>
                     </tr>
                   )}
@@ -1002,16 +1002,16 @@ export default function EvacuationPage() {
           <DialogContent className="max-w-md rounded-3xl border-slate-200 bg-white p-6 shadow-xl">
             <DialogHeader>
               <DialogTitle className="text-lg font-black text-slate-950">
-                Bag-ong Evacuation Center
+                New Evacuation Center
               </DialogTitle>
               <DialogDescription className="text-xs text-slate-500">
-                Idugang ang bag-ong designated gym, eskwelahan, o pasilidad alang sa pagbakwit sa Mabini.
+                Register a new designated gymnasium, school, or facility for evacuation operations in Mabini.
               </DialogDescription>
             </DialogHeader>
 
             <div className="mt-4 space-y-3.5 text-xs">
               <div>
-                <label className="font-bold text-slate-700">Ngalan sa Evacuation Center *</label>
+                <label className="font-bold text-slate-700">Evacuation Center Name *</label>
                 <input
                   type="text"
                   value={newCenterName}
@@ -1040,7 +1040,7 @@ export default function EvacuationPage() {
               </div>
 
               <div>
-                <label className="font-bold text-slate-700">Kapasidad sa Pamilya (Estimated Max Families)</label>
+                <label className="font-bold text-slate-700">Family Capacity (Estimated Max Families)</label>
                 <input
                   type="number"
                   value={newCenterCapacity}
@@ -1051,11 +1051,11 @@ export default function EvacuationPage() {
               </div>
 
               <div>
-                <label className="font-bold text-slate-700">Deskripsyon o Dugang Pahibalo (Notes)</label>
+                <label className="font-bold text-slate-700">Description & Facility Notes</label>
                 <textarea
                   value={newCenterNotes}
                   onChange={(e) => setNewCenterNotes(e.target.value)}
-                  placeholder="e.g. Naay generator, 4 ka kasilyas, duol sa municipal water supply..."
+                  placeholder="e.g. Generator equipped, 4 washrooms, near municipal water line..."
                   rows={2}
                   className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 p-2.5 font-medium text-slate-900 focus:bg-white focus:outline-none"
                 />
@@ -1068,7 +1068,7 @@ export default function EvacuationPage() {
                 onClick={() => setShowAddCenterModal(false)}
                 className="rounded-xl border border-slate-200 px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-50"
               >
-                Kanselahon
+                Cancel
               </button>
               <button
                 type="button"
@@ -1076,7 +1076,7 @@ export default function EvacuationPage() {
                 disabled={isSavingCenter || !newCenterName.trim()}
                 className="rounded-xl bg-emerald-600 px-5 py-2 text-xs font-black text-white shadow hover:bg-emerald-700 disabled:opacity-50"
               >
-                {isSavingCenter ? 'Gisave...' : 'I-save ang Center'}
+                {isSavingCenter ? 'Saving...' : 'Save Center'}
               </button>
             </DialogFooter>
           </DialogContent>
@@ -1101,7 +1101,7 @@ export default function EvacuationPage() {
                   className="inline-flex items-center gap-1.5 rounded-xl bg-slate-900 px-3 py-1.5 text-xs font-bold text-white shadow-sm hover:bg-slate-800"
                 >
                   <Printer className="h-3.5 w-3.5" />
-                  <span>I-print</span>
+                  <span>Print Report</span>
                 </button>
               </div>
             </DialogHeader>
@@ -1109,21 +1109,21 @@ export default function EvacuationPage() {
             <div className="mt-4 space-y-4 text-xs">
               <div className="grid grid-cols-2 gap-3 bg-slate-50 p-3.5 rounded-2xl border border-slate-200">
                 <div>
-                  <p className="text-slate-500 font-bold">Lungsod / Munisipyo:</p>
+                  <p className="text-slate-500 font-bold">Municipality:</p>
                   <p className="text-sm font-black text-slate-900">Mabini, Davao de Oro</p>
                 </div>
                 <div>
-                  <p className="text-slate-500 font-bold">Petsa ug Oras sa Report:</p>
+                  <p className="text-slate-500 font-bold">Report Date & Time:</p>
                   <p className="text-sm font-black text-slate-900">{formatTimestamp(new Date().toISOString())}</p>
                 </div>
                 <div>
-                  <p className="text-slate-500 font-bold">Aktibong mga Evac Centers:</p>
+                  <p className="text-slate-500 font-bold">Active Evacuation Centers:</p>
                   <p className="text-sm font-black text-emerald-700">{stats.openCentersCount} Open Centers</p>
                 </div>
                 <div>
                   <p className="text-slate-500 font-bold">Total Displaced Families:</p>
                   <p className="text-sm font-black text-slate-900">
-                    {stats.shelteredFamiliesCount} Pamilya ({stats.totalIndividualsCount} Indibidwal)
+                    {stats.shelteredFamiliesCount} Families ({stats.totalIndividualsCount} Individuals)
                   </p>
                 </div>
               </div>
@@ -1131,7 +1131,7 @@ export default function EvacuationPage() {
               {/* Breakdown by center */}
               <div>
                 <h4 className="font-black text-slate-900 uppercase tracking-wider text-[11px]">
-                  Breakdown Kada Evacuation Center:
+                  Breakdown by Evacuation Center:
                 </h4>
                 <div className="mt-2 divide-y divide-slate-100 rounded-xl border border-slate-200">
                   {centers.map((c) => {
@@ -1144,8 +1144,8 @@ export default function EvacuationPage() {
                           <p className="text-[11px] text-slate-500">{getBarangayLabel(c.barangay_id)}</p>
                         </div>
                         <div className="text-right">
-                          <p className="font-black text-slate-950">{cEvac.length} Pamilya</p>
-                          <p className="text-[11px] text-slate-500">{pCount} ka tawo (Max: {c.capacity || 50})</p>
+                          <p className="font-black text-slate-950">{cEvac.length} Families</p>
+                          <p className="text-[11px] text-slate-500">{pCount} individuals (Max: {c.capacity || 50})</p>
                         </div>
                       </div>
                     );
@@ -1160,7 +1160,7 @@ export default function EvacuationPage() {
                 onClick={() => setShowDromicModal(false)}
                 className="w-full sm:w-auto rounded-xl border border-slate-200 px-5 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50"
               >
-                Isira / Close
+                Close
               </button>
             </DialogFooter>
           </DialogContent>
@@ -1200,7 +1200,7 @@ export default function EvacuationPage() {
           onSimulateScan={(hh) => {
             setSelectedHouseholdForCheckIn(hh);
             setCheckInSearch(hh.head_name);
-            setCheckInSuccessMsg(`Master Evac QR ni ${hh.head_name} napili! Pwede na kining i-check-in.`);
+            setCheckInSuccessMsg(`Master Evac QR for ${hh.head_name} loaded! Ready for check-in.`);
           }}
         />
       </div>

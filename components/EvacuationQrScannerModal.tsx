@@ -59,7 +59,7 @@ export default function EvacuationQrScannerModal({
       setCameraError('');
       try {
         if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-          throw new Error('Walay camera support kini nga browser.');
+          throw new Error('Camera is not supported on this browser.');
         }
 
         const mediaStream = await navigator.mediaDevices.getUserMedia({
@@ -87,7 +87,7 @@ export default function EvacuationQrScannerModal({
         console.warn('Camera access issue:', err);
         if (active) {
           setCameraError(
-            'Dili ma-access ang camera (kinahanglan ang camera permission o SSL). Pwede nimong gamiton ang Image Upload o Demo buttons sa ubos.',
+            'Camera access denied or unavailable (camera permission or HTTPS required).',
           );
         }
       } finally {
@@ -177,7 +177,7 @@ export default function EvacuationQrScannerModal({
                 Live Master QR Scanner
               </DialogTitle>
               <DialogDescription className="text-[11px] text-slate-400">
-                I-tumbok ang camera sa Master Evac QR sa residente
+                Point camera at the resident Master Evac QR Pass
               </DialogDescription>
             </div>
           </div>
@@ -229,7 +229,7 @@ export default function EvacuationQrScannerModal({
                   <div className="absolute inset-0 flex flex-col items-center justify-center rounded-3xl bg-emerald-600/80 text-white animate-in zoom-in-95">
                     <CheckCircle2 className="h-12 w-12 text-white animate-bounce" />
                     <p className="mt-2 text-xs font-black uppercase tracking-wider">
-                      QR Code Na-detect!
+                      QR Code Detected!
                     </p>
                   </div>
                 )}
@@ -242,7 +242,7 @@ export default function EvacuationQrScannerModal({
             <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/80 text-white">
               <Loader2 className="h-8 w-8 animate-spin text-emerald-400" />
               <p className="mt-3 text-xs font-bold text-slate-300">
-                Gipaandar ang Camera...
+                Starting Camera...
               </p>
             </div>
           )}
@@ -263,7 +263,7 @@ export default function EvacuationQrScannerModal({
               type="button"
               onClick={handleSwitchCamera}
               className="absolute bottom-4 right-4 flex h-10 w-10 items-center justify-center rounded-full bg-black/60 text-white backdrop-blur-md transition hover:bg-black/80 active:scale-95"
-              title="I-balhin ang camera (Front / Back)"
+              title="Switch camera (Front / Back)"
             >
               <SwitchCamera className="h-5 w-5" />
             </button>
@@ -279,7 +279,7 @@ export default function EvacuationQrScannerModal({
             </span>
           </div>
           <span className="text-[10px] font-semibold text-slate-500">
-            Itumbok sa Master Evac QR Pass
+            Align with Master Evac QR Pass
           </span>
         </div>
       </DialogContent>

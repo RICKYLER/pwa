@@ -75,13 +75,13 @@ export default function EvacuationCenterPosterModal({
           </div>
 
           <p className="mt-2 text-[10px] font-black uppercase tracking-[0.2em] text-emerald-200">
-            Republika sa Pilipinas · Munisipyo sa Mabini
+            Republic of the Philippines · Municipality of Mabini
           </p>
           <DialogTitle className="text-lg font-black text-white mt-0.5">
-            Opisyal nga Evacuation Center QR Pass
+            Official Evacuation Center QR Pass
           </DialogTitle>
           <DialogDescription className="text-xs text-emerald-100 mt-1">
-            I-print ug ibutang kini sa entrance o registration desk sa pasilidad.
+            Print and post this at the entrance or registration desk of the facility.
           </DialogDescription>
         </div>
 
@@ -112,7 +112,7 @@ export default function EvacuationCenterPosterModal({
 
               <div className="mt-4 text-xs text-slate-600 space-y-1">
                 <p className="font-bold text-slate-900">
-                  Estimated Capacity: {center.capacity || 50} ka Panimalay
+                  Estimated Capacity: {center.capacity || 50} Households
                 </p>
                 <p className="text-[11px] text-slate-500">
                   Status: <strong className="uppercase text-emerald-700">{center.status}</strong>
@@ -128,7 +128,7 @@ export default function EvacuationCenterPosterModal({
                 className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-2.5 text-xs font-black text-white shadow hover:bg-slate-800 active:scale-95"
               >
                 <Printer className="h-4 w-4" />
-                <span>I-print ang Poster</span>
+                <span>Print Poster</span>
               </button>
 
               {qrUrl && (
@@ -138,7 +138,7 @@ export default function EvacuationCenterPosterModal({
                   className="inline-flex items-center gap-2 rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-xs font-bold text-slate-700 shadow-sm hover:bg-slate-50 active:scale-95"
                 >
                   <Download className="h-4 w-4" />
-                  <span>I-save ang Image</span>
+                  <span>Download Image</span>
                 </a>
               )}
             </div>
