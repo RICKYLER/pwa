@@ -21,6 +21,7 @@ export const STORE_NAMES = {
   location_master_lists: 'location_master_lists',
   purok_risk_profiles: 'purok_risk_profiles',
   evacuation_centers: 'evacuation_centers',
+  evacuee_records: 'evacuee_records',
   audit_logs: 'audit_logs',
   sync_queue: 'sync_queue',
 } as const;
@@ -40,6 +41,7 @@ const SYNC_TRACKED_STORES = new Set<string>([
   STORE_NAMES.location_master_lists,
   STORE_NAMES.purok_risk_profiles,
   STORE_NAMES.evacuation_centers,
+  STORE_NAMES.evacuee_records,
   STORE_NAMES.audit_logs,
 ]);
 

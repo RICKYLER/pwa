@@ -21,6 +21,8 @@ import {
 import { cn } from '@/lib/utils';
 import { getHouseholds } from '@/lib/db/households';
 import { resolveResidentActiveApprovedHousehold } from '@/lib/resident-households';
+import ResidentProfileModal from '@/components/resident/ResidentProfileModal';
+import type { Household } from '@/lib/db/schema';
 
 declare global {
   interface WindowEventMap {
@@ -29,6 +31,7 @@ declare global {
       table: string;
       mode: 'hydrate' | 'change';
     }>;
+    'mswdo-open-resident-profile': CustomEvent<void>;
   }
 }
 
@@ -48,6 +51,18 @@ export default function ResidentShell({ title, subtitle, children }: ResidentShe
   const accessIssue = useSessionAccessIssue(user, user?.role === 'resident');
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [hasActiveHousehold, setHasActiveHousehold] = useState(() => pathname.startsWith('/resident/household'));
+  const [activeHousehold, setActiveHousehold] = useState<Household | null>(null);
+  const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
+
+  useEffect(() => {
+    function handleOpenProfileEvent() {
+      setIsProfileModalOpen(true);
+    }
+    window.addEventListener('mswdo-open-resident-profile', handleOpenProfileEvent);
+    return () => {
+      window.removeEventListener('mswdo-open-resident-profile', handleOpenProfileEvent);
+    };
+  }, []);
 
   useEffect(() => {
     if (!user || user.role !== 'resident') {
@@ -64,7 +79,9 @@ export default function ResidentShell({ title, subtitle, children }: ResidentShe
           applicant_email: residentUser.email,
         });
         if (!cancelled) {
-          setHasActiveHousehold(Boolean(resolveResidentActiveApprovedHousehold(households)));
+          const activeHh = resolveResidentActiveApprovedHousehold(households);
+          setHasActiveHousehold(Boolean(activeHh));
+          setActiveHousehold(activeHh);
         }
       } catch (error) {
         console.error('Failed to resolve resident household navigation state:', error);
@@ -121,19 +138,56 @@ export default function ResidentShell({ title, subtitle, children }: ResidentShe
       <header className="civic-topbar civic-hairline sticky top-0 z-30">
         <div className="mx-auto flex max-w-[1180px] flex-wrap items-center justify-between gap-4 px-4 py-4 sm:px-6 lg:px-8">
           <div className="flex items-center gap-3">
-            <div className="flex h-14 w-14 items-center justify-center rounded-[20px] bg-white border border-slate-200/70 overflow-hidden p-1.5 shadow-[0_18px_36px_-24px_rgba(8,47,73,0.2)] transition-transform hover:scale-105">
+            <Link
+              href="/resident"
+              className="flex h-14 w-14 items-center justify-center rounded-[20px] bg-white border border-slate-200/70 overflow-hidden p-1.5 shadow-[0_18px_36px_-24px_rgba(8,47,73,0.2)] transition-transform hover:scale-105"
+              title="Balay / Portal"
+            >
               <img src="/dswd-logo.png" alt="DSWD Logo" className="h-full w-full object-contain" />
-            </div>
-            <div className="min-w-0">
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Resident Services</p>
-              <p className="truncate text-sm font-bold text-slate-950">{user?.email || 'Resident portal'}</p>
-            </div>
+            </Link>
+
+            {/* Interactive Resident Profile Chip */}
+            <button
+              type="button"
+              onClick={() => setIsProfileModalOpen(true)}
+              className="group flex items-center gap-2.5 rounded-2xl border border-slate-200/80 bg-white/90 py-1.5 pl-2 pr-3.5 text-left shadow-sm transition hover:border-emerald-400 hover:bg-emerald-50/50 hover:shadow active:scale-[0.98]"
+              title="Pislita aron ablihan ang Imong Profile & Digital ID Pass"
+            >
+              <div className="relative flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-emerald-600 to-teal-700 text-xs font-black text-white shadow-sm transition-transform group-hover:scale-105">
+                {user?.email ? user.email.slice(0, 2).toUpperCase() : 'RP'}
+                <span className="absolute -bottom-0.5 -right-0.5 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-white text-emerald-600 shadow-sm">
+                  <span className="h-2 w-2 rounded-full bg-emerald-500" />
+                </span>
+              </div>
+              <div className="min-w-0">
+                <div className="flex items-center gap-1.5">
+                  <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-cyan-800">
+                    Munisipyo sa Mabini · MSWDO
+                  </p>
+                  <span className="hidden rounded-md bg-emerald-100 px-1.5 py-0.5 text-[9px] font-extrabold uppercase text-emerald-800 sm:inline">
+                    Profile & ID
+                  </span>
+                </div>
+                <p className="truncate text-xs font-black text-slate-900 transition-colors group-hover:text-emerald-950">
+                  {user?.email || 'Portal sa Residente'}
+                </p>
+              </div>
+            </button>
           </div>
 
           <nav className="flex flex-wrap items-center gap-2">
             {navItems.map((item) => {
               const Icon = item.icon;
               const active = isPathActive(pathname, item.href);
+              const friendlyLabel = item.href === '/resident'
+                ? 'Balay / Portal'
+                : item.href === '/resident/notifications'
+                  ? 'Pahibalo / Inbox'
+                  : item.href === '/resident/household'
+                    ? 'Akong Pamilya'
+                    : item.href === '/households/register'
+                      ? 'Bag-ong Rehistro'
+                      : item.mobileLabel;
               return (
                 <Link
                   key={item.href}
@@ -142,11 +196,11 @@ export default function ResidentShell({ title, subtitle, children }: ResidentShe
                     'inline-flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-semibold transition',
                     active
                       ? 'border-cyan-900 bg-cyan-950 text-white shadow-[0_14px_28px_-20px_rgba(8,47,73,0.8)]'
-                      : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50',
+                      : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50',
                   )}
                 >
-                  <Icon className="h-4 w-4" />
-                  {item.mobileLabel}
+                  <Icon className="h-4 w-4 text-cyan-600" />
+                  {friendlyLabel}
                 </Link>
               );
             })}
@@ -156,10 +210,10 @@ export default function ResidentShell({ title, subtitle, children }: ResidentShe
               onClick={() => {
                 void handleLogout();
               }}
-              className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-600 transition hover:border-rose-200 hover:bg-rose-50 hover:text-rose-700"
+              className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-rose-200 hover:bg-rose-50 hover:text-rose-700"
             >
-              <LogOut className="h-4 w-4" />
-              Sign out
+              <LogOut className="h-4 w-4 text-rose-500" />
+              Gawas / Sign out
             </button>
           </nav>
         </div>
@@ -229,6 +283,12 @@ export default function ResidentShell({ title, subtitle, children }: ResidentShe
           </div>
         </DialogContent>
       </Dialog>
+
+      <ResidentProfileModal
+        open={isProfileModalOpen}
+        onOpenChange={setIsProfileModalOpen}
+        household={activeHousehold}
+      />
     </div>
   );
 }

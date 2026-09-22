@@ -143,6 +143,33 @@ export interface EvacuationCenter {
   syncStatus: SyncStatus;
 }
 
+export interface EvacueeVulnerabilitySummary {
+  infants: number;
+  children: number;
+  seniors: number;
+  pwds: number;
+  pregnant: number;
+}
+
+export interface EvacueeRecord {
+  id: string;
+  household_id: string;
+  head_name: string;
+  evacuation_center_id: string;
+  evacuation_center_name: string;
+  barangay_id: string;
+  barangay_name: string;
+  purok_sitio: string;
+  family_members_count: number;
+  contact_number?: string;
+  vulnerabilities: EvacueeVulnerabilitySummary;
+  checked_in_at: string;
+  checked_in_by?: string;
+  status: 'sheltered' | 'checked_out';
+  checked_out_at?: string;
+  notes?: string;
+}
+
 export interface Resident {
   id: string;
   household_id: string;
