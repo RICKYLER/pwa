@@ -81,7 +81,6 @@ import {
   type MultiAlgorithmLeaderboard,
 } from '@/lib/forecasting/multi-algorithm-engine';
 import { ForecastingUploadHistoryModal } from './ForecastingUploadHistoryModal';
-import { ForecastingUploadAppendModal } from './ForecastingUploadAppendModal';
 
 interface ForecastingInsightsCardProps {
   currentStockpile?: number;
@@ -121,14 +120,6 @@ export function ForecastingInsightsCard({
   // Automated 1st-place engine (locked to Hybrid Ensemble for >99% accuracy)
   const selectedAlgorithm: ForecastingAlgorithmType = 'hybrid_ensemble';
   const [selectedDateFilter, setSelectedDateFilter] = useState<string>('all');
-  const [pendingUpload, setPendingUpload] = useState<{
-    file: File;
-    events: HistoricalDisasterEvent[];
-    count: number;
-    dates: string[];
-    rawHeaders?: string[];
-    rawRows?: (string | number)[][] | null;
-  } | null>(null);
 
   // Simulator Cockpit State (defaults to realistic 75 HH)
   const [selectedBarangay, setSelectedBarangay] = useState<string>('cadunan');
@@ -430,15 +421,19 @@ export function ForecastingInsightsCard({
       setIsUploading(true);
       const finalEvents = isAppend ? [...activeDataset, ...incomingEvents] : incomingEvents;
 
-      const finalRawHeaders = incomingRawHeaders ?? rawUploadedHeaders;
-      const finalRawRows =
-        isAppend && rawUploadedRows && incomingRawRows
+      const finalRawHeaders = isAppend
+        ? incomingRawHeaders ?? rawUploadedHeaders
+        : incomingRawHeaders ?? [];
+
+      const finalRawRows = isAppend
+        ? rawUploadedRows && incomingRawRows
           ? [...rawUploadedRows, ...incomingRawRows]
-          : incomingRawRows ?? rawUploadedRows;
+          : incomingRawRows ?? rawUploadedRows
+        : incomingRawRows ?? [];
 
       if (finalRawHeaders && finalRawHeaders.length > 0) {
         setRawUploadedHeaders(finalRawHeaders);
-        setRawUploadedRows(finalRawRows ?? null);
+        setRawUploadedRows(finalRawRows && finalRawRows.length > 0 ? finalRawRows : null);
         setActiveTab('excel');
       }
 
@@ -461,8 +456,8 @@ export function ForecastingInsightsCard({
       const ext = file.name.toLowerCase().endsWith('.csv')
         ? 'csv'
         : file.name.toLowerCase().endsWith('.xls')
-        ? 'xls'
-        : 'xlsx';
+          ? 'xls'
+          : 'xlsx';
 
       const finalName = isAppend
         ? `${activeFileName ? activeFileName.replace(/\.[^/.]+$/, '') : 'Disaster'} + ${file.name}`
@@ -511,7 +506,6 @@ export function ForecastingInsightsCard({
       });
     } finally {
       setIsUploading(false);
-      setPendingUpload(null);
     }
   };
 
@@ -547,22 +541,7 @@ export function ForecastingInsightsCard({
         return;
       }
 
-      // If active dataset already has records, prompt the user: Append or Replace?
-      if (activeDataset.length > 0) {
-        setIsUploading(false);
-        const uniqueDates = Array.from(new Set(result.events.map((ev) => ev.date).filter(Boolean)));
-        setPendingUpload({
-          file,
-          events: result.events,
-          count: result.importedCount,
-          dates: uniqueDates,
-          rawHeaders: result.rawHeaders,
-          rawRows: result.rawRows,
-        });
-        return;
-      }
-
-      // If fresh upload (no active records), process directly
+      // Each uploaded file is processed as an independent, standalone dataset (no merging into prior Excel files)
       await processAndSaveDataset(file, result.events, false, result.rawHeaders, result.rawRows);
     } catch (err) {
       console.error('File upload error:', err);
@@ -572,28 +551,6 @@ export function ForecastingInsightsCard({
       });
       setIsUploading(false);
     }
-  };
-
-  const handleConfirmAppend = () => {
-    if (!pendingUpload) return;
-    processAndSaveDataset(
-      pendingUpload.file,
-      pendingUpload.events,
-      true,
-      pendingUpload.rawHeaders,
-      pendingUpload.rawRows
-    );
-  };
-
-  const handleConfirmReplace = () => {
-    if (!pendingUpload) return;
-    processAndSaveDataset(
-      pendingUpload.file,
-      pendingUpload.events,
-      false,
-      pendingUpload.rawHeaders,
-      pendingUpload.rawRows
-    );
   };
 
   const handleSelectHistoryDataset = async (record: ForecastingUploadRecord) => {
@@ -860,11 +817,10 @@ export function ForecastingInsightsCard({
 
       {/* Upload Status Notification */}
       {importStatus && (
-        <div className={`flex flex-wrap items-center justify-between gap-3 rounded-2xl p-3.5 text-xs border ${
-          importStatus.isError
+        <div className={`flex flex-wrap items-center justify-between gap-3 rounded-2xl p-3.5 text-xs border ${importStatus.isError
             ? 'bg-rose-50 text-rose-800 border-rose-200 dark:bg-rose-950/50 dark:text-rose-300 dark:border-rose-900'
             : 'bg-emerald-50 text-emerald-800 border-emerald-200 dark:bg-emerald-950/50 dark:text-emerald-300 dark:border-emerald-900'
-        }`}>
+          }`}>
           <div className="flex items-center gap-2">
             {importStatus.isError ? (
               <AlertTriangle className="h-4 w-4 shrink-0 text-rose-600" />
@@ -935,11 +891,10 @@ export function ForecastingInsightsCard({
                 <button
                   type="button"
                   onClick={() => setSelectedDateFilter('all')}
-                  className={`inline-flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-bold transition-all ${
-                    selectedDateFilter === 'all'
+                  className={`inline-flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-bold transition-all ${selectedDateFilter === 'all'
                       ? 'bg-cyan-950 text-white shadow-xs dark:bg-cyan-800'
                       : 'border border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300'
-                  }`}
+                    }`}
                 >
                   <Layers className="h-3.5 w-3.5 text-cyan-400" />
                   <span>All / Running Total</span>
@@ -956,17 +911,15 @@ export function ForecastingInsightsCard({
                       key={date}
                       type="button"
                       onClick={() => setSelectedDateFilter(date)}
-                      className={`inline-flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-semibold transition-all ${
-                        isSelected
+                      className={`inline-flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-semibold transition-all ${isSelected
                           ? 'bg-cyan-950 text-white shadow-xs dark:bg-cyan-800'
                           : 'border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300'
-                      }`}
+                        }`}
                     >
                       <Calendar className="h-3.5 w-3.5 text-slate-400" />
                       <span>{date}</span>
-                      <span className={`rounded-full px-1.5 py-0.2 text-[10px] font-bold ${
-                        isSelected ? 'bg-cyan-900 text-cyan-200' : 'bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300'
-                      }`}>
+                      <span className={`rounded-full px-1.5 py-0.2 text-[10px] font-bold ${isSelected ? 'bg-cyan-900 text-cyan-200' : 'bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300'
+                        }`}>
                         {countForDate}
                       </span>
                     </button>
@@ -1103,11 +1056,10 @@ export function ForecastingInsightsCard({
                   <button
                     type="button"
                     onClick={() => setFilterHazard(filterHazard === 'flashflood' ? 'all' : 'flashflood')}
-                    className={`inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-[11px] font-semibold transition-all ${
-                      filterHazard === 'flashflood'
+                    className={`inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-[11px] font-semibold transition-all ${filterHazard === 'flashflood'
                         ? 'bg-cyan-500 text-white shadow-xs'
                         : 'bg-cyan-50 text-cyan-800 hover:bg-cyan-100 dark:bg-cyan-950/60 dark:text-cyan-200'
-                    }`}
+                      }`}
                   >
                     <span className="h-2 w-2 rounded-full bg-cyan-500" />
                     <span>Flashflood ({datasetBreakdown.hazardCounts.flashflood?.count || 0})</span>
@@ -1116,11 +1068,10 @@ export function ForecastingInsightsCard({
                   <button
                     type="button"
                     onClick={() => setFilterHazard(filterHazard === 'typhoon' ? 'all' : 'typhoon')}
-                    className={`inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-[11px] font-semibold transition-all ${
-                      filterHazard === 'typhoon'
+                    className={`inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-[11px] font-semibold transition-all ${filterHazard === 'typhoon'
                         ? 'bg-amber-500 text-white shadow-xs'
                         : 'bg-amber-50 text-amber-800 hover:bg-amber-100 dark:bg-amber-950/60 dark:text-amber-200'
-                    }`}
+                      }`}
                   >
                     <span className="h-2 w-2 rounded-full bg-amber-500" />
                     <span>Typhoon ({datasetBreakdown.hazardCounts.typhoon?.count || 0})</span>
@@ -1129,11 +1080,10 @@ export function ForecastingInsightsCard({
                   <button
                     type="button"
                     onClick={() => setFilterHazard(filterHazard === 'landslide' ? 'all' : 'landslide')}
-                    className={`inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-[11px] font-semibold transition-all ${
-                      filterHazard === 'landslide'
+                    className={`inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-[11px] font-semibold transition-all ${filterHazard === 'landslide'
                         ? 'bg-orange-500 text-white shadow-xs'
                         : 'bg-orange-50 text-orange-800 hover:bg-orange-100 dark:bg-orange-950/60 dark:text-orange-200'
-                    }`}
+                      }`}
                   >
                     <span className="h-2 w-2 rounded-full bg-orange-500" />
                     <span>Landslide ({datasetBreakdown.hazardCounts.landslide?.count || 0})</span>
@@ -1142,11 +1092,10 @@ export function ForecastingInsightsCard({
                   <button
                     type="button"
                     onClick={() => setFilterHazard(filterHazard === 'earthquake' ? 'all' : 'earthquake')}
-                    className={`inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-[11px] font-semibold transition-all ${
-                      filterHazard === 'earthquake'
+                    className={`inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-[11px] font-semibold transition-all ${filterHazard === 'earthquake'
                         ? 'bg-rose-500 text-white shadow-xs'
                         : 'bg-rose-50 text-rose-800 hover:bg-rose-100 dark:bg-rose-950/60 dark:text-rose-200'
-                    }`}
+                      }`}
                   >
                     <span className="h-2 w-2 rounded-full bg-rose-500" />
                     <span>Earthquake ({datasetBreakdown.hazardCounts.earthquake?.count || 0})</span>
@@ -1175,20 +1124,18 @@ export function ForecastingInsightsCard({
                   <button
                     type="button"
                     onClick={() => setActiveTab('excel')}
-                    className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition-all ${
-                      activeTab === 'excel'
+                    className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition-all ${activeTab === 'excel'
                         ? 'bg-emerald-700 text-white shadow-xs dark:bg-emerald-600'
                         : 'text-slate-600 hover:text-slate-900 dark:text-slate-400'
-                    }`}
+                      }`}
                   >
                     <FileSpreadsheet className="h-3.5 w-3.5 text-emerald-300" />
                     <span>Excel Spreadsheet View</span>
                     <span
-                      className={`rounded-full px-1.5 text-[10px] font-bold ${
-                        activeTab === 'excel'
+                      className={`rounded-full px-1.5 text-[10px] font-bold ${activeTab === 'excel'
                           ? 'bg-emerald-800 text-emerald-100'
                           : 'bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-200'
-                      }`}
+                        }`}
                     >
                       {filteredRawRows.length}
                     </span>
@@ -1198,11 +1145,10 @@ export function ForecastingInsightsCard({
                 <button
                   type="button"
                   onClick={() => setActiveTab('table')}
-                  className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition-all ${
-                    activeTab === 'table'
+                  className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition-all ${activeTab === 'table'
                       ? 'bg-white text-slate-900 shadow-xs dark:bg-slate-900 dark:text-white'
                       : 'text-slate-600 hover:text-slate-900 dark:text-slate-400'
-                  }`}
+                    }`}
                 >
                   <TableIcon className="h-3.5 w-3.5 text-cyan-600" />
                   <span>Disaster Records</span>
@@ -1214,11 +1160,10 @@ export function ForecastingInsightsCard({
                 <button
                   type="button"
                   onClick={() => setActiveTab('baseline')}
-                  className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition-all ${
-                    activeTab === 'baseline'
+                  className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition-all ${activeTab === 'baseline'
                       ? 'bg-white text-slate-900 shadow-xs dark:bg-slate-900 dark:text-white'
                       : 'text-slate-600 hover:text-slate-900 dark:text-slate-400'
-                  }`}
+                    }`}
                 >
                   <FileCheck2 className="h-3.5 w-3.5 text-indigo-600" />
                   <span>SMA-3 Baseline Proof</span>
@@ -1376,10 +1321,10 @@ export function ForecastingInsightsCard({
                           ev.hazardType === 'flashflood'
                             ? 'bg-cyan-50 text-cyan-700 border-cyan-200'
                             : ev.hazardType === 'typhoon'
-                            ? 'bg-amber-50 text-amber-700 border-amber-200'
-                            : ev.hazardType === 'landslide'
-                            ? 'bg-orange-50 text-orange-700 border-orange-200'
-                            : 'bg-rose-50 text-rose-700 border-rose-200';
+                              ? 'bg-amber-50 text-amber-700 border-amber-200'
+                              : ev.hazardType === 'landslide'
+                                ? 'bg-orange-50 text-orange-700 border-orange-200'
+                                : 'bg-rose-50 text-rose-700 border-rose-200';
 
                         return (
                           <tr
@@ -1496,11 +1441,10 @@ export function ForecastingInsightsCard({
         {/* ========================================================================= */}
         <div className="lg:col-span-5 xl:col-span-4 lg:sticky lg:top-6 space-y-4">
           <div
-            className={`rounded-2xl border bg-white p-5 shadow-md transition-all duration-300 dark:border-slate-800 dark:bg-slate-900 ${
-              simPulse
+            className={`rounded-2xl border bg-white p-5 shadow-md transition-all duration-300 dark:border-slate-800 dark:bg-slate-900 ${simPulse
                 ? 'ring-4 ring-cyan-400/50 border-cyan-500 shadow-xl'
                 : 'border-slate-200/90'
-            }`}
+              }`}
           >
             {/* Cockpit Header */}
             <div className="flex items-center justify-between border-b border-slate-100 pb-3 dark:border-slate-800">
@@ -1538,11 +1482,10 @@ export function ForecastingInsightsCard({
                 <button
                   type="button"
                   onClick={() => setHazardType('flashflood')}
-                  className={`flex items-center gap-2 rounded-xl border p-2.5 text-left transition-all ${
-                    hazardType === 'flashflood'
+                  className={`flex items-center gap-2 rounded-xl border p-2.5 text-left transition-all ${hazardType === 'flashflood'
                       ? 'border-cyan-600 bg-cyan-50 text-cyan-950 font-bold shadow-xs dark:bg-cyan-950 dark:text-cyan-100'
                       : 'border-slate-200 hover:bg-slate-50 text-slate-700 dark:border-slate-700 dark:text-slate-300'
-                  }`}
+                    }`}
                 >
                   <Waves className="h-4 w-4 text-cyan-600" />
                   <span className="text-xs">Flashflood</span>
@@ -1551,11 +1494,10 @@ export function ForecastingInsightsCard({
                 <button
                   type="button"
                   onClick={() => setHazardType('typhoon')}
-                  className={`flex items-center gap-2 rounded-xl border p-2.5 text-left transition-all ${
-                    hazardType === 'typhoon'
+                  className={`flex items-center gap-2 rounded-xl border p-2.5 text-left transition-all ${hazardType === 'typhoon'
                       ? 'border-amber-600 bg-amber-50 text-amber-950 font-bold shadow-xs dark:bg-amber-950 dark:text-amber-100'
                       : 'border-slate-200 hover:bg-slate-50 text-slate-700 dark:border-slate-700 dark:text-slate-300'
-                  }`}
+                    }`}
                 >
                   <Wind className="h-4 w-4 text-amber-600" />
                   <span className="text-xs">Typhoon</span>
@@ -1564,11 +1506,10 @@ export function ForecastingInsightsCard({
                 <button
                   type="button"
                   onClick={() => setHazardType('landslide')}
-                  className={`flex items-center gap-2 rounded-xl border p-2.5 text-left transition-all ${
-                    hazardType === 'landslide'
+                  className={`flex items-center gap-2 rounded-xl border p-2.5 text-left transition-all ${hazardType === 'landslide'
                       ? 'border-orange-600 bg-orange-50 text-orange-950 font-bold shadow-xs dark:bg-orange-950 dark:text-orange-100'
                       : 'border-slate-200 hover:bg-slate-50 text-slate-700 dark:border-slate-700 dark:text-slate-300'
-                  }`}
+                    }`}
                 >
                   <Mountain className="h-4 w-4 text-orange-600" />
                   <span className="text-xs">Landslide</span>
@@ -1577,11 +1518,10 @@ export function ForecastingInsightsCard({
                 <button
                   type="button"
                   onClick={() => setHazardType('earthquake')}
-                  className={`flex items-center gap-2 rounded-xl border p-2.5 text-left transition-all ${
-                    hazardType === 'earthquake'
+                  className={`flex items-center gap-2 rounded-xl border p-2.5 text-left transition-all ${hazardType === 'earthquake'
                       ? 'border-rose-600 bg-rose-50 text-rose-950 font-bold shadow-xs dark:bg-rose-950 dark:text-rose-100'
                       : 'border-slate-200 hover:bg-slate-50 text-slate-700 dark:border-slate-700 dark:text-slate-300'
-                  }`}
+                    }`}
                 >
                   <Activity className="h-4 w-4 text-rose-600" />
                   <span className="text-xs">Earthquake</span>
@@ -1636,11 +1576,10 @@ export function ForecastingInsightsCard({
                     key={num}
                     type="button"
                     onClick={() => setHouseholdsInput(num)}
-                    className={`rounded-md px-2 py-0.5 text-[10px] font-semibold transition-all ${
-                      householdsInput === num
+                    className={`rounded-md px-2 py-0.5 text-[10px] font-semibold transition-all ${householdsInput === num
                         ? 'bg-cyan-950 text-white shadow-xs'
                         : 'bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300'
-                    }`}
+                      }`}
                   >
                     {num}
                   </button>
@@ -1664,11 +1603,10 @@ export function ForecastingInsightsCard({
                     key={s.id}
                     type="button"
                     onClick={() => setSeverityLevel(s.id as any)}
-                    className={`rounded-xl border py-1.5 text-center text-xs font-semibold transition-all ${
-                      severityLevel === s.id
+                    className={`rounded-xl border py-1.5 text-center text-xs font-semibold transition-all ${severityLevel === s.id
                         ? 'border-cyan-950 bg-cyan-950 text-white shadow-xs'
                         : `border-slate-200 bg-white text-slate-600 ${s.color} dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300`
-                    }`}
+                      }`}
                   >
                     {s.label}
                   </button>
@@ -1694,13 +1632,12 @@ export function ForecastingInsightsCard({
               <div className="mt-2 h-2.5 w-full overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700">
                 <div
                   style={{ width: `${consumptionPercentage}%` }}
-                  className={`h-full rounded-full transition-all duration-300 ${
-                    isDeficit
+                  className={`h-full rounded-full transition-all duration-300 ${isDeficit
                       ? 'bg-rose-600'
                       : isWarning
-                      ? 'bg-amber-500'
-                      : 'bg-emerald-500'
-                  }`}
+                        ? 'bg-amber-500'
+                        : 'bg-emerald-500'
+                    }`}
                 />
               </div>
 
@@ -1738,13 +1675,12 @@ export function ForecastingInsightsCard({
             </div>
 
             {/* Operational Dispatch Status Alert */}
-            <div className={`mt-3.5 flex items-start gap-2 rounded-xl p-3 text-xs ${
-              isDeficit
+            <div className={`mt-3.5 flex items-start gap-2 rounded-xl p-3 text-xs ${isDeficit
                 ? 'bg-rose-50 text-rose-800 border border-rose-200 dark:bg-rose-950/40 dark:text-rose-300 dark:border-rose-900'
                 : isWarning
-                ? 'bg-amber-50 text-amber-800 border border-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-900'
-                : 'bg-emerald-50 text-emerald-800 border border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-900'
-            }`}>
+                  ? 'bg-amber-50 text-amber-800 border border-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-900'
+                  : 'bg-emerald-50 text-emerald-800 border border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-900'
+              }`}>
               {isDeficit ? (
                 <AlertTriangle className="h-4 w-4 shrink-0 text-rose-600 mt-0.5" />
               ) : (
@@ -1771,23 +1707,6 @@ export function ForecastingInsightsCard({
         onReloadHistory={refreshHistory}
         currentStockpile={currentStockpile}
       />
-
-      {/* Append or Replace Mode Dialog */}
-      {pendingUpload && (
-        <ForecastingUploadAppendModal
-          isOpen={true}
-          onClose={() => setPendingUpload(null)}
-          fileName={pendingUpload.file.name}
-          fileSizeBytes={pendingUpload.file.size}
-          incomingRecordsCount={pendingUpload.count}
-          detectedDates={pendingUpload.dates}
-          currentDatasetCount={activeDataset.length}
-          currentEventName={activeFileName || 'Mabini Disaster Dataset'}
-          onConfirmAppend={handleConfirmAppend}
-          onConfirmReplace={handleConfirmReplace}
-          isProcessing={isUploading}
-        />
-      )}
     </div>
   );
 }

@@ -233,14 +233,14 @@ export function ForecastingUploadHistoryModal({
                             </span>
                           </div>
 
-                          {/* Calculation Snapshot Badges (Resultados sa Kwentada) */}
+                          {/* Calculation Snapshot Badges */}
                           {upload.calculation_snapshot && (
                             <div className="mt-2.5 flex flex-wrap items-center gap-1.5 pt-2 border-t border-slate-100 dark:border-slate-800/80">
                               <span className="inline-flex items-center gap-1 rounded-md bg-emerald-50 px-2 py-0.5 text-xs font-semibold text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300">
                                 👨‍👩‍👧‍👦 {upload.calculation_snapshot.totalFamilies ?? (upload.records_count * 3)} Families
                               </span>
-                              <span className="inline-flex items-center gap-1 rounded-md bg-indigo-50 px-2 py-0.5 text-xs font-semibold text-indigo-700 dark:bg-indigo-950/50 dark:text-indigo-300">
-                                📦 {upload.calculation_snapshot.familyFoodPacks ?? 0} FFPs Needed
+                              <span className="inline-flex items-center gap-1 rounded-md bg-blue-50 px-2 py-0.5 text-xs font-semibold text-blue-700 dark:bg-blue-950/50 dark:text-blue-300">
+                                📦 {(upload.calculation_snapshot.familyFoodPacks ?? 0).toLocaleString()} FFPs
                               </span>
                               {(upload.calculation_snapshot.totalHouses ?? 0) > 0 && (
                                 <span className="inline-flex items-center gap-1 rounded-md bg-amber-50 px-2 py-0.5 text-xs font-semibold text-amber-700 dark:bg-amber-950/50 dark:text-amber-300">
@@ -278,7 +278,7 @@ export function ForecastingUploadHistoryModal({
                               ? 'bg-emerald-600 text-white cursor-default'
                               : 'bg-indigo-600 text-white hover:bg-indigo-700'
                           }`}
-                          title={isActive ? 'Active result currently loaded on screen' : 'Ibalik kining maong calculation result sa screen'}
+                          title={isActive ? 'Active result currently loaded on screen' : 'Restore this calculation result to the active screen'}
                         >
                           {isActive ? (
                             <>
@@ -288,7 +288,7 @@ export function ForecastingUploadHistoryModal({
                           ) : (
                             <>
                               <PlayCircle className="h-3.5 w-3.5" />
-                              <span>Balikan / Load Result</span>
+                              <span>Load Result</span>
                             </>
                           )}
                         </button>
