@@ -149,10 +149,10 @@ function addSecurityHeaders(response: NextResponse): NextResponse {
 }
 
 // ---------------------------------------------------------------------------
-// Middleware
+// Proxy (Next.js 16+ convention, replaces middleware)
 // ---------------------------------------------------------------------------
 
-export function middleware(request: NextRequest) {
+export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   maybeCleanupRateLimitStore();
