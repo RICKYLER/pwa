@@ -23,6 +23,7 @@ import {
   CivicSectionHeading,
 } from '@/components/ui/civic-primitives';
 import DistributionNotificationQr from '@/components/resident/DistributionNotificationQr';
+import { useResidentLanguage } from '@/lib/i18n/resident-language';
 import { getDefaultRouteForUser, getCurrentUser, isResidentUser } from '@/lib/auth';
 import { getDistributionRecordsForHousehold } from '@/lib/db/distribution';
 import { getHouseholds } from '@/lib/db/households';
@@ -79,9 +80,9 @@ const STATUS_BADGE_TONES: Record<DistributionStatus, 'amber' | 'navy' | 'emerald
   completed: 'emerald',
 };
 
-function formatDateTime(value?: Date) {
+function formatDateTime(value?: Date, lang: 'ceb' | 'en' = 'en') {
   if (!value) {
-    return 'Just now';
+    return lang === 'ceb' ? 'Karon lang' : 'Just now';
   }
 
   return new Intl.DateTimeFormat('en-PH', {
@@ -101,9 +102,9 @@ function formatSchedule(value: string) {
   }).format(parsed);
 }
 
-function formatPayloadDateTime(value?: string) {
+function formatPayloadDateTime(value?: string, lang: 'ceb' | 'en' = 'en') {
   if (!value) {
-    return 'Just now';
+    return lang === 'ceb' ? 'Karon lang' : 'Just now';
   }
 
   const parsed = new Date(value);
@@ -111,12 +112,14 @@ function formatPayloadDateTime(value?: string) {
     return value;
   }
 
-  return formatDateTime(parsed);
+  return formatDateTime(parsed, lang);
 }
 
 export default function ResidentNotificationsPage() {
   const router = useRouter();
   const user = getCurrentUser();
+  const { lang } = useResidentLanguage();
+  const isCeb = lang === 'ceb';
   const [notifications, setNotifications] = useState<UserNotification[]>([]);
   const [activeHousehold, setActiveHousehold] = useState<Household | null>(null);
   const [purokRiskProfile, setPurokRiskProfile] = useState<PurokRiskProfile | null>(null);
@@ -272,21 +275,33 @@ export default function ResidentNotificationsPage() {
 
   return (
     <ResidentShell
-      title="Notifications"
-      subtitle="Review your latest disaster alerts and distribution notices from the barangay."
+      title={isCeb ? 'Mga Pahibalo' : 'Notifications'}
+      subtitle={
+        isCeb
+          ? 'Subaya ang labing bag-ong mga alerto sa kalamidad ug pahibalo sa pagpanghatag gikan sa barangay.'
+          : 'Review your latest disaster alerts and distribution notices from the barangay.'
+      }
     >
       <div className="grid gap-4 sm:grid-cols-2">
         <CivicKpiCard
-          label="Inbox Items"
+          label={isCeb ? 'Mga Pahibalo' : 'Inbox Items'}
           value={visibleNotifications.length}
-          hint="Resident notices include both distribution updates and automatic disaster alerts."
+          hint={
+            isCeb
+              ? 'Apil sa mga pahibalo ang update sa distribusyon ug mga alerto sa panahon.'
+              : 'Resident notices include both distribution updates and automatic disaster alerts.'
+          }
           icon={Inbox}
           tone="navy"
         />
         <CivicKpiCard
-          label="Unread Notices"
+          label={isCeb ? 'Wala pa Nabasa' : 'Unread Notices'}
           value={unreadCount}
-          hint="Opening a notice marks it as read right away."
+          hint={
+            isCeb
+              ? 'Ang pag-abli sa pahibalo magmarka niini nga nabasa na dayon.'
+              : 'Opening a notice marks it as read right away.'
+          }
           icon={Bell}
           tone={unreadCount > 0 ? 'amber' : 'emerald'}
         />
@@ -297,7 +312,11 @@ export default function ResidentNotificationsPage() {
           <PurokFloodProfileCard
             household={activeHousehold}
             profile={purokRiskProfile}
-            description="Your current purok flood profile stays visible here while you review alert history."
+            description={
+              isCeb
+                ? 'Ang kasamtangang flood profile sa inyong purok magpabilin dinhi samtang nagsusi sa mga alerto.'
+                : 'Your current purok flood profile stays visible here while you review alert history.'
+            }
           />
         </div>
       ) : null}
@@ -305,21 +324,29 @@ export default function ResidentNotificationsPage() {
       <CivicPanel className="mt-6 sm:p-6">
         <CivicSectionHeading
           icon={Bell}
-          title="Resident inbox"
-          description="Each inbox item shows the latest distribution update or weather-triggered alert, including the affected area and any evacuation guidance."
+          title={isCeb ? 'Inbox sa Residente' : 'Resident inbox'}
+          description={
+            isCeb
+              ? 'Kada pahibalo nagpakita sa labing bag-ong update sa distribusyon o alerto sa panahon lakip ang apektadong lugar ug giya sa pagbakwit.'
+              : 'Each inbox item shows the latest distribution update or weather-triggered alert, including the affected area and any evacuation guidance.'
+          }
         />
 
         {isLoading ? (
           <div className="mt-6 rounded-[28px] border border-slate-200 bg-slate-50 px-4 py-12 text-center text-sm text-slate-500">
             <Loader2 className="mx-auto h-5 w-5 animate-spin text-slate-400" />
-            <p className="mt-3">Loading your notifications...</p>
+            <p className="mt-3">{isCeb ? 'Gikarga ang inyong mga pahibalo...' : 'Loading your notifications...'}</p>
           </div>
         ) : visibleNotifications.length === 0 ? (
           <div className="mt-6">
             <CivicEmptyState
               icon={Inbox}
-              title="No notifications yet"
-              description="New barangay distribution events will appear here as soon as staff create them."
+              title={isCeb ? 'Wala pay pahibalo karon' : 'No notifications yet'}
+              description={
+                isCeb
+                  ? 'Ang bag-ong mga kalihokan sa pagpanghatag mo-appear dinhi sa higayon nga mabuhat kini sa barangay.'
+                  : 'New barangay distribution events will appear here as soon as staff create them.'
+              }
             />
           </div>
         ) : (
@@ -373,10 +400,10 @@ export default function ResidentNotificationsPage() {
                         <div className="flex flex-wrap items-center gap-2">
                           <h2 className="text-base font-bold text-slate-950">{notification.title}</h2>
                           <CivicBadge
-                            label={isUnread ? 'Unread' : 'Read'}
+                            label={isUnread ? (isCeb ? 'Wala pa Nabasa' : 'Unread') : (isCeb ? 'Nabasa Na' : 'Read')}
                             tone={isUnread ? 'amber' : 'emerald'}
                           />
-                          {isMarkingRead ? <CivicBadge label="Saving..." tone="slate" /> : null}
+                          {isMarkingRead ? <CivicBadge label={isCeb ? 'Gisave...' : 'Saving...'} tone="slate" /> : null}
                         </div>
                         <p className="mt-2 text-sm leading-6 text-slate-600">{notification.body}</p>
 
@@ -384,7 +411,11 @@ export default function ResidentNotificationsPage() {
                           {distributionPayload ? (
                             <>
                               <CivicBadge
-                                label={getDistributionNotificationAudienceLabel(distributionPayload.target_scope, distributionPayload.target_group)}
+                                label={getDistributionNotificationAudienceLabel(
+                                  distributionPayload.target_scope,
+                                  distributionPayload.target_group,
+                                  lang,
+                                )}
                                 tone="teal"
                               />
                               <CivicBadge label={DISTRIBUTION_NOTIFICATION_TYPE_LABELS[distributionPayload.type]} tone="slate" />
@@ -392,9 +423,9 @@ export default function ResidentNotificationsPage() {
                                 label={DISTRIBUTION_NOTIFICATION_STATUS_LABELS[distributionPayload.status]}
                                 tone={claimedRecord ? 'emerald' : STATUS_BADGE_TONES[distributionPayload.status]}
                               />
-                              {claimedRecord ? <CivicBadge label="Claimed" tone="emerald" /> : null}
+                              {claimedRecord ? <CivicBadge label={isCeb ? 'Nakuha Na' : 'Claimed'} tone="emerald" /> : null}
                               {!claimedRecord && distributionPayload.claim_status === 'unclaimed' ? (
-                                <CivicBadge label="Not Claimed" tone="amber" />
+                                <CivicBadge label={isCeb ? 'Wala Makuha' : 'Not Claimed'} tone="amber" />
                               ) : null}
                             </>
                           ) : null}
@@ -411,7 +442,14 @@ export default function ResidentNotificationsPage() {
                               />
                             </>
                           ) : null}
-                          <CivicBadge label={`Received ${formatDateTime(notification.createdAt)}`} tone="slate" />
+                          <CivicBadge
+                            label={
+                              isCeb
+                                ? `Nadawat ${formatDateTime(notification.createdAt, lang)}`
+                                : `Received ${formatDateTime(notification.createdAt, lang)}`
+                            }
+                            tone="slate"
+                          />
                         </div>
                       </div>
 
@@ -427,12 +465,30 @@ export default function ResidentNotificationsPage() {
                     <div className="border-t border-slate-200/80 bg-white/80 px-5 py-5 sm:px-6">
                       <div className="mb-4 flex flex-wrap items-center gap-2">
                         <CivicBadge
-                          label={`Current status: ${DISTRIBUTION_NOTIFICATION_STATUS_LABELS[distributionPayload.status]}`}
+                          label={
+                            isCeb
+                              ? `Kasamtangang status: ${DISTRIBUTION_NOTIFICATION_STATUS_LABELS[distributionPayload.status]}`
+                              : `Current status: ${DISTRIBUTION_NOTIFICATION_STATUS_LABELS[distributionPayload.status]}`
+                          }
                           tone={STATUS_BADGE_TONES[distributionPayload.status]}
                         />
-                        <CivicBadge label={`Latest update ${formatDateTime(notification.updatedAt)}`} tone="slate" />
+                        <CivicBadge
+                          label={
+                            isCeb
+                              ? `Pinakabag-ong update ${formatDateTime(notification.updatedAt, lang)}`
+                              : `Latest update ${formatDateTime(notification.updatedAt, lang)}`
+                          }
+                          tone="slate"
+                        />
                         {claimedRecord ? (
-                          <CivicBadge label={`Claimed ${formatDateTime(claimedRecord.timestamp)}`} tone="emerald" />
+                          <CivicBadge
+                            label={
+                              isCeb
+                                ? `Nakuha ${formatDateTime(claimedRecord.timestamp, lang)}`
+                                : `Claimed ${formatDateTime(claimedRecord.timestamp, lang)}`
+                            }
+                            tone="emerald"
+                          />
                         ) : null}
                       </div>
 
@@ -440,7 +496,7 @@ export default function ResidentNotificationsPage() {
                         <div className="rounded-[22px] border border-slate-200 bg-slate-50 px-4 py-3">
                           <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
                             <CalendarDays className="h-4 w-4" />
-                            Schedule
+                            {isCeb ? 'Iskedyul' : 'Schedule'}
                           </div>
                           <p className="mt-3 text-sm font-semibold text-slate-900">
                             {formatSchedule(distributionPayload.scheduled_date)}
@@ -450,20 +506,26 @@ export default function ResidentNotificationsPage() {
                         <div className="rounded-[22px] border border-slate-200 bg-slate-50 px-4 py-3">
                           <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
                             <Users2 className="h-4 w-4" />
-                            Audience
+                            {isCeb ? 'Puntarya' : 'Audience'}
                           </div>
                           <p className="mt-3 text-sm font-semibold text-slate-900">
-                            {getDistributionNotificationAudienceLabel(distributionPayload.target_scope, distributionPayload.target_group)}
+                            {getDistributionNotificationAudienceLabel(
+                              distributionPayload.target_scope,
+                              distributionPayload.target_group,
+                              lang,
+                            )}
                           </p>
                           <p className="mt-1 text-xs text-slate-500">
-                            {DISTRIBUTION_NOTIFICATION_SCOPE_LABELS[distributionPayload.target_scope]} based event
+                            {isCeb
+                              ? `${distributionPayload.target_scope === 'household' ? 'Panimalay' : 'Residente'} nga kalihokan`
+                              : `${DISTRIBUTION_NOTIFICATION_SCOPE_LABELS[distributionPayload.target_scope]} based event`}
                           </p>
                         </div>
 
                         <div className="rounded-[22px] border border-slate-200 bg-slate-50 px-4 py-3">
                           <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
                             <MapPin className="h-4 w-4" />
-                            Location
+                            {isCeb ? 'Lokasyon' : 'Location'}
                           </div>
                           <p className="mt-3 text-sm font-semibold text-slate-900">{distributionPayload.location}</p>
                         </div>
@@ -471,7 +533,7 @@ export default function ResidentNotificationsPage() {
 
                       {distributionPayload.notes?.trim() ? (
                         <div className="mt-4 rounded-[22px] border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-900">
-                          <p className="font-semibold">Additional notes</p>
+                          <p className="font-semibold">{isCeb ? 'Dugang Pahinumdom' : 'Additional notes'}</p>
                           <p className="mt-1">{distributionPayload.notes.trim()}</p>
                         </div>
                       ) : null}
@@ -480,10 +542,11 @@ export default function ResidentNotificationsPage() {
                         && distributionPayload.claim_status === 'unclaimed'
                         && distributionPayload.status === 'completed' ? (
                         <div className="mt-4 rounded-[22px] border border-rose-200 bg-rose-50 px-4 py-3 text-sm leading-6 text-rose-800">
-                          <p className="font-semibold">Package not claimed</p>
+                          <p className="font-semibold">{isCeb ? 'Wala Makuha ang Package' : 'Package not claimed'}</p>
                           <p className="mt-1">
-                            This distribution event has ended and your household was not able to claim.
-                            Please contact the barangay for follow-up.
+                            {isCeb
+                              ? 'Natapos na kini nga kalihokan sa pagpanghatag ug wala nakuha sa inyong panimalay. Palihog kontaka ang barangay o MSWDO para sa follow-up.'
+                              : 'This distribution event has ended and your household was not able to claim. Please contact the barangay for follow-up.'}
                           </p>
                         </div>
                       ) : null}
@@ -498,6 +561,7 @@ export default function ResidentNotificationsPage() {
                           audienceLabel={getDistributionNotificationAudienceLabel(
                             distributionPayload.target_scope,
                             distributionPayload.target_group,
+                            lang,
                           )}
                           matchedResidentNames={distributionEligibility.matchedResidents.map((resident) => resident.full_name)}
                           claimedRelease={claimedRecord ? {
@@ -510,7 +574,9 @@ export default function ResidentNotificationsPage() {
                       {!isUnread ? (
                         <div className="mt-4 inline-flex items-center gap-2 text-xs font-medium text-emerald-700">
                           <CheckCircle2 className="h-4 w-4" />
-                          Read {formatDateTime(notification.read_at)}
+                          {isCeb
+                            ? `Nabasa ${formatDateTime(notification.read_at, lang)}`
+                            : `Read ${formatDateTime(notification.read_at, lang)}`}
                         </div>
                       ) : null}
                     </div>
@@ -520,32 +586,45 @@ export default function ResidentNotificationsPage() {
                     <div className="border-t border-slate-200/80 bg-white/80 px-5 py-5 sm:px-6">
                       <div className="mb-4 flex flex-wrap items-center gap-2">
                         <CivicBadge
-                          label={`${DISASTER_ALERT_SEVERITY_LABELS[disasterPayload.severity]} alert`}
+                          label={
+                            isCeb
+                              ? `Alerto sa ${DISASTER_ALERT_SEVERITY_LABELS[disasterPayload.severity]}`
+                              : `${DISASTER_ALERT_SEVERITY_LABELS[disasterPayload.severity]} alert`
+                          }
                           tone={disasterPayload.severity === 'warning' ? 'rose' : 'amber'}
                         />
                         <CivicBadge
                           label={DISASTER_ALERT_TRIGGER_SOURCE_LABELS[disasterPayload.trigger_source]}
                           tone="slate"
                         />
-                        <CivicBadge label={`Issued ${formatPayloadDateTime(disasterPayload.issued_at)}`} tone="slate" />
+                        <CivicBadge
+                          label={
+                            isCeb
+                              ? `Gipagula ${formatPayloadDateTime(disasterPayload.issued_at, lang)}`
+                              : `Issued ${formatPayloadDateTime(disasterPayload.issued_at, lang)}`
+                          }
+                          tone="slate"
+                        />
                       </div>
 
                       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
                         <div className="rounded-[22px] border border-slate-200 bg-slate-50 px-4 py-3">
                           <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
                             <ShieldAlert className="h-4 w-4" />
-                            Hazard
+                            {isCeb ? 'Peligro' : 'Hazard'}
                           </div>
                           <p className="mt-3 text-sm font-semibold text-slate-900">{HAZARD_LABELS[disasterPayload.hazard]}</p>
                           <p className="mt-1 text-xs text-slate-500">
-                            {DISASTER_ALERT_SEVERITY_LABELS[disasterPayload.severity]} level
+                            {isCeb
+                              ? `Lebel sa ${DISASTER_ALERT_SEVERITY_LABELS[disasterPayload.severity]}`
+                              : `${DISASTER_ALERT_SEVERITY_LABELS[disasterPayload.severity]} level`}
                           </p>
                         </div>
 
                         <div className="rounded-[22px] border border-slate-200 bg-slate-50 px-4 py-3">
                           <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
                             <MapPin className="h-4 w-4" />
-                            Affected Area
+                            {isCeb ? 'Apektadong Lugar' : 'Affected Area'}
                           </div>
                           <p className="mt-3 text-sm font-semibold text-slate-900">{affectedArea || 'Mabini, Davao de Oro'}</p>
                         </div>
@@ -554,7 +633,7 @@ export default function ResidentNotificationsPage() {
                           <div className="rounded-[22px] border border-slate-200 bg-slate-50 px-4 py-3">
                             <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
                               <MapPin className="h-4 w-4" />
-                              Trigger Pin
+                              {isCeb ? 'Lokasyon sa Trigger' : 'Trigger Pin'}
                             </div>
                             <p className="mt-3 text-sm font-semibold text-slate-900">{triggerCoordinates}</p>
                           </div>
@@ -563,7 +642,7 @@ export default function ResidentNotificationsPage() {
                         <div className="rounded-[22px] border border-slate-200 bg-slate-50 px-4 py-3">
                           <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
                             <CalendarDays className="h-4 w-4" />
-                            Trigger Basis
+                            {isCeb ? 'Basehan sa Alerto' : 'Trigger Basis'}
                           </div>
                           <p className="mt-3 text-sm font-semibold text-slate-900">{disasterPayload.trigger_reason}</p>
                         </div>
@@ -571,21 +650,21 @@ export default function ResidentNotificationsPage() {
 
                       {disasterPayload.weather_summary?.trim() ? (
                         <div className="mt-4 rounded-[22px] border border-cyan-200 bg-cyan-50 px-4 py-3 text-sm leading-6 text-cyan-950">
-                          <p className="font-semibold">Weather summary</p>
+                          <p className="font-semibold">{isCeb ? 'Katingbanan sa Panahon' : 'Weather summary'}</p>
                           <p className="mt-1">{disasterPayload.weather_summary.trim()}</p>
                         </div>
                       ) : null}
 
                       {disasterPayload.evacuation_site?.trim() ? (
                         <div className="mt-4 rounded-[22px] border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm leading-6 text-emerald-900">
-                          <p className="font-semibold">Evacuation site</p>
+                          <p className="font-semibold">{isCeb ? 'Evacuation Site' : 'Evacuation site'}</p>
                           <p className="mt-1">{disasterPayload.evacuation_site.trim()}</p>
                         </div>
                       ) : null}
 
                       {disasterPayload.flood_control_status ? (
                         <div className="mt-4 rounded-[22px] border border-slate-200 bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-700">
-                          <p className="font-semibold text-slate-900">Flood control status</p>
+                          <p className="font-semibold text-slate-900">{isCeb ? 'Status sa Pagkontrol sa Baha' : 'Flood control status'}</p>
                           <p className="mt-1">{PUROK_FLOOD_CONTROL_STATUS_LABELS[disasterPayload.flood_control_status]}</p>
                           {disasterPayload.flood_control_notes?.trim() ? (
                             <p className="mt-2 text-slate-600">{disasterPayload.flood_control_notes.trim()}</p>
@@ -595,21 +674,21 @@ export default function ResidentNotificationsPage() {
 
                       {disasterPayload.default_evacuation_site?.trim() ? (
                         <div className="mt-4 rounded-[22px] border border-cyan-200 bg-cyan-50 px-4 py-3 text-sm leading-6 text-cyan-950">
-                          <p className="font-semibold">Default purok evacuation site</p>
+                          <p className="font-semibold">{isCeb ? 'Default nga Evacuation Site sa Purok' : 'Default purok evacuation site'}</p>
                           <p className="mt-1">{disasterPayload.default_evacuation_site.trim()}</p>
                         </div>
                       ) : null}
 
                       {disasterPayload.warning_notes?.trim() ? (
                         <div className="mt-4 rounded-[22px] border border-rose-200 bg-rose-50 px-4 py-3 text-sm leading-6 text-rose-900">
-                          <p className="font-semibold">Purok warning notes</p>
+                          <p className="font-semibold">{isCeb ? 'Pahimangno sa Purok' : 'Purok warning notes'}</p>
                           <p className="mt-1">{disasterPayload.warning_notes.trim()}</p>
                         </div>
                       ) : null}
 
                       {disasterPayload.special_assistance_notes?.trim() ? (
                         <div className="mt-4 rounded-[22px] border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-900">
-                          <p className="font-semibold">Special assistance notes</p>
+                          <p className="font-semibold">{isCeb ? 'Espesyal nga Tabang' : 'Special assistance notes'}</p>
                           <p className="mt-1">{disasterPayload.special_assistance_notes.trim()}</p>
                         </div>
                       ) : null}
@@ -617,7 +696,9 @@ export default function ResidentNotificationsPage() {
                       {!isUnread ? (
                         <div className="mt-4 inline-flex items-center gap-2 text-xs font-medium text-emerald-700">
                           <CheckCircle2 className="h-4 w-4" />
-                          Read {formatDateTime(notification.read_at)}
+                          {isCeb
+                            ? `Nabasa ${formatDateTime(notification.read_at, lang)}`
+                            : `Read ${formatDateTime(notification.read_at, lang)}`}
                         </div>
                       ) : null}
                     </div>

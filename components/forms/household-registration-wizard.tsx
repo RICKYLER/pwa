@@ -26,6 +26,13 @@ import type { MemberDraft } from '@/components/forms/household-form';
 import { joinNameParts, splitFullName } from '@/lib/name-parts';
 import { useGoogleMaps } from '@/components/GoogleMapsProvider';
 import {
+  useResidentLanguage,
+  getCivilStatusTranslation,
+  getGenderTranslation,
+  getIncomeLevelTranslation,
+  getRelationshipTranslation,
+} from '@/lib/i18n/resident-language';
+import {
   Dialog,
   DialogContent,
   DialogDescription,
@@ -340,6 +347,25 @@ export function HouseholdRegistrationWizard({
 }: RegistrationWizardProps) {
   const router = useRouter();
   const { isLoaded: mapsReady } = useGoogleMaps();
+  const { t, lang } = useResidentLanguage();
+
+  const stepLabels = useMemo(() => [
+    {
+      id: 1,
+      label: lang === 'ceb' ? 'Personal nga Impormasyon' : 'Personal Information',
+      hint: lang === 'ceb' ? 'Pangalan, adlawng natawhan, ug mga sakop' : 'Basic profile, address, and members',
+    },
+    {
+      id: 2,
+      label: lang === 'ceb' ? 'Kumpirmasyon sa Lokasyon' : 'Location Verification',
+      hint: lang === 'ceb' ? 'I-pin ug kumpirmaha ang mapa' : 'Pin and confirm the map location',
+    },
+    {
+      id: 3,
+      label: lang === 'ceb' ? 'Susiha ug Isumiter' : 'Review and Submit',
+      hint: lang === 'ceb' ? 'Susiha ang mga detalye sa dili pa ipadala' : 'Check details before sending',
+    },
+  ], [lang]);
 
   const [step, setStep] = useState(1);
   const [form, setForm] = useState<RegistrationFormState>(() => buildRegistrationFormState(initialValues));
@@ -745,7 +771,7 @@ export function HouseholdRegistrationWizard({
     <form onSubmit={handleSubmit} className="space-y-6">
       <div className="rounded-[32px] border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
         <div className="grid gap-3 md:grid-cols-3">
-          {STEP_LABELS.map((item) => {
+          {stepLabels.map((item) => {
             const active = step === item.id;
             const complete = step > item.id;
 
@@ -812,7 +838,7 @@ export function HouseholdRegistrationWizard({
 
           <div className="mt-6 grid gap-4 md:grid-cols-2">
             <div>
-              <label className="mb-2 block text-sm font-medium text-slate-700">First name *</label>
+              <label className="mb-2 block text-sm font-medium text-slate-700">{t('firstName')} *</label>
               <div className="relative">
                 <User className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                 <input
@@ -826,7 +852,7 @@ export function HouseholdRegistrationWizard({
             </div>
 
             <div>
-              <label className="mb-2 block text-sm font-medium text-slate-700">Middle name</label>
+              <label className="mb-2 block text-sm font-medium text-slate-700">{t('middleName')}</label>
               <div className="relative">
                 <input
                   type="text"
@@ -839,7 +865,7 @@ export function HouseholdRegistrationWizard({
             </div>
 
             <div>
-              <label className="mb-2 block text-sm font-medium text-slate-700">Last name *</label>
+              <label className="mb-2 block text-sm font-medium text-slate-700">{t('lastName')} *</label>
               <div className="relative">
                 <input
                   type="text"
@@ -852,7 +878,7 @@ export function HouseholdRegistrationWizard({
             </div>
 
             <div>
-              <label className="mb-2 block text-sm font-medium text-slate-700">Contact number *</label>
+              <label className="mb-2 block text-sm font-medium text-slate-700">{t('contactNumber')} *</label>
               <div className="relative">
                 <Phone className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                 <input
@@ -884,7 +910,7 @@ export function HouseholdRegistrationWizard({
             </div>
 
             <div>
-              <label className="mb-2 block text-sm font-medium text-slate-700">Birthdate *</label>
+              <label className="mb-2 block text-sm font-medium text-slate-700">{t('birthdate')} *</label>
               <input
                 type="date"
                 value={form.head_birthdate}
@@ -916,52 +942,52 @@ export function HouseholdRegistrationWizard({
             </div>
 
             <div>
-              <label className="mb-2 block text-sm font-medium text-slate-700">Gender</label>
+              <label className="mb-2 block text-sm font-medium text-slate-700">{t('gender')}</label>
               <select
                 value={form.head_gender}
                 onChange={(event) => updateForm('head_gender', event.target.value as 'M' | 'F')}
                 className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
               >
-                <option value="M">Male</option>
-                <option value="F">Female</option>
+                <option value="M">{getGenderTranslation('M', lang)}</option>
+                <option value="F">{getGenderTranslation('F', lang)}</option>
               </select>
             </div>
 
             <div>
-              <label className="mb-2 block text-sm font-medium text-slate-700">Civil status</label>
+              <label className="mb-2 block text-sm font-medium text-slate-700">{t('civilStatus')}</label>
               <select
                 value={form.head_civil_status}
                 onChange={(event) => updateForm('head_civil_status', event.target.value as MemberDraft['civil_status'])}
                 className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
               >
-                <option value="single">Single</option>
-                <option value="married">Married</option>
-                <option value="widowed">Widowed</option>
-                <option value="separated">Separated</option>
+                <option value="single">{getCivilStatusTranslation('single', lang)}</option>
+                <option value="married">{getCivilStatusTranslation('married', lang)}</option>
+                <option value="widowed">{getCivilStatusTranslation('widowed', lang)}</option>
+                <option value="separated">{getCivilStatusTranslation('separated', lang)}</option>
               </select>
             </div>
 
             <div>
-              <label className="mb-2 block text-sm font-medium text-slate-700">Occupation</label>
+              <label className="mb-2 block text-sm font-medium text-slate-700">{t('occupation')}</label>
               <input
                 type="text"
                 value={form.head_occupation}
                 onChange={(event) => updateForm('head_occupation', event.target.value)}
                 className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
-                placeholder="Farmer, vendor, student"
+                placeholder={t('occupationPlaceholder')}
               />
             </div>
 
             <div>
-              <label className="mb-2 block text-sm font-medium text-slate-700">Income level</label>
+              <label className="mb-2 block text-sm font-medium text-slate-700">{t('incomeLevel')}</label>
               <select
                 value={form.head_income_level}
                 onChange={(event) => updateForm('head_income_level', event.target.value as MemberDraft['income_level'])}
                 className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
               >
-                <option value="low">Low</option>
-                <option value="middle">Middle</option>
-                <option value="high">High</option>
+                <option value="low">{lang === 'ceb' ? 'Ubos (Low)' : 'Low'}</option>
+                <option value="middle">{lang === 'ceb' ? 'Taliwala (Middle)' : 'Middle'}</option>
+                <option value="high">{lang === 'ceb' ? 'Taas (High)' : 'High'}</option>
               </select>
             </div>
 
@@ -1938,7 +1964,7 @@ export function HouseholdRegistrationWizard({
                 className="inline-flex items-center gap-2 rounded-2xl border border-amber-300 bg-white px-4 py-2 text-sm font-semibold text-amber-900 hover:bg-amber-100/60"
               >
                 <FileText className="h-4 w-4" />
-                View Requirements
+                {lang === 'ceb' ? 'Tan-awa ang mga Kinahanglanon' : 'View Requirements'}
               </button>
             </div>
             <div className="mt-4 grid gap-2 text-sm text-amber-900 sm:grid-cols-2">
@@ -1959,7 +1985,7 @@ export function HouseholdRegistrationWizard({
           className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 px-4 py-2.5 text-sm font-medium text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
         >
           <ChevronLeft className="h-4 w-4" />
-          Back
+          {lang === 'ceb' ? 'Balik' : 'Back'}
         </button>
 
         {step < 3 ? (
@@ -1968,7 +1994,7 @@ export function HouseholdRegistrationWizard({
             onClick={goNext}
             className="inline-flex items-center gap-2 rounded-2xl bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700"
           >
-            Continue
+            {lang === 'ceb' ? 'Padayon' : 'Continue'}
             <ChevronRight className="h-4 w-4" />
           </button>
         ) : (
@@ -1979,7 +2005,7 @@ export function HouseholdRegistrationWizard({
             className="inline-flex items-center gap-2 rounded-2xl bg-emerald-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
           >
             {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}
-            {isSubmitting ? 'Submitting...' : 'Submit for Approval'}
+            {isSubmitting ? (lang === 'ceb' ? 'Gisumiter...' : 'Submitting...') : (lang === 'ceb' ? 'Isumiter aron Maaprobahan' : 'Submit for Approval')}
           </button>
         )}
       </div>
@@ -1996,9 +2022,13 @@ export function HouseholdRegistrationWizard({
         <DialogContent className="max-w-xl rounded-3xl border-slate-200 p-0 overflow-hidden">
           <div className="bg-amber-50 px-6 py-5">
             <DialogHeader className="text-left">
-              <DialogTitle className="text-xl text-slate-900">MSWDO Office Requirements</DialogTitle>
+              <DialogTitle className="text-xl text-slate-900">
+                {lang === 'ceb' ? 'Mga Kinahanglanon sa Opisina sa MSWDO' : 'MSWDO Office Requirements'}
+              </DialogTitle>
               <DialogDescription className="text-sm text-slate-600">
-                Before your registration can be finalized, please go to the MSWDO office and bring the following:
+                {lang === 'ceb'
+                  ? 'Sa dili pa makompleto ang rehistrasyon, palihug adto sa opisina sa MSWDO ug dad-a ang mosunod:'
+                  : 'Before your registration can be finalized, please go to the MSWDO office and bring the following:'}
               </DialogDescription>
             </DialogHeader>
           </div>

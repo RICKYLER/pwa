@@ -6,6 +6,7 @@ import GoogleMapsProvider from '@/components/GoogleMapsProvider'
 import PwaBootstrap from '@/components/PwaBootstrap'
 import { Toaster } from '@/components/ui/toaster'
 import { PwaInstallProvider } from '@/hooks/usePwaInstall'
+import { ResidentLanguageProvider } from '@/lib/i18n/resident-language'
 import './globals.css'
 import 'leaflet/dist/leaflet.css'
 
@@ -80,7 +81,9 @@ export default function RootLayout({
           <PwaBootstrap />
           <AuthBootstrap>
             <GoogleMapsProvider>
-              {children}
+              <ResidentLanguageProvider>
+                {children}
+              </ResidentLanguageProvider>
             </GoogleMapsProvider>
           </AuthBootstrap>
           <Toaster />

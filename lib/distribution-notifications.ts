@@ -57,7 +57,25 @@ export function isDistributionTargetGroup(value: unknown): value is Distribution
 export function getDistributionNotificationAudienceLabel(
   scope: DistributionTargetScope,
   group: DistributionTargetGroup,
+  lang: 'ceb' | 'en' = 'en',
 ) {
+  if (lang === 'ceb') {
+    if (group === 'all') {
+      return scope === 'household' ? 'Tanan nga Panimalay' : 'Tanan nga Residente';
+    }
+
+    const cebGroupLabels: Record<DistributionTargetGroup, string> = {
+      all: 'Tanan',
+      senior: 'Senior Citizen',
+      pwd: 'PWD',
+      pregnant: 'Mabdos',
+      minor: 'Bata / Menor',
+      low_income: 'Ubos og Kita',
+    };
+
+    return `${cebGroupLabels[group]} nga ${scope === 'household' ? 'panimalay' : 'residente'}`;
+  }
+
   if (group === 'all') {
     return scope === 'household' ? 'All households' : 'All residents';
   }

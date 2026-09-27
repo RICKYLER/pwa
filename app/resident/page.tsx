@@ -65,6 +65,7 @@ import { fetchJsonWithCache } from '@/lib/client-fetch-cache';
 import type { FieldResponseWeatherPayload } from '@/lib/weather';
 import WeatherWidget from '@/components/WeatherWidget';
 import DistributionNotificationQr from '@/components/resident/DistributionNotificationQr';
+import { useResidentLanguage } from '@/lib/i18n/resident-language';
 import { CivicBadge, CivicPanel } from '@/components/ui/civic-primitives';
 import {
   Dialog,
@@ -206,6 +207,8 @@ interface SelectedDistributionModalState {
 export default function ResidentPortalPage() {
   const router = useRouter();
   const user = getCurrentUser();
+  const { lang, t } = useResidentLanguage();
+  const isCeb = lang === 'ceb';
   const [records, setRecords] = useState<Household[]>([]);
   const [notifications, setNotifications] = useState<UserNotification[]>([]);
   const [purokRiskProfile, setPurokRiskProfile] = useState<PurokRiskProfile | null>(null);
@@ -711,6 +714,7 @@ export default function ResidentPortalPage() {
                           audienceLabel: getDistributionNotificationAudienceLabel(
                             firstUnclaimed.payload.target_scope,
                             firstUnclaimed.payload.target_group,
+                            lang,
                           ),
                           matchedResidentNames: firstUnclaimed.eligibility.matchedResidents.map((r) => r.full_name),
                           claimedRecord: firstUnclaimed.claimedRecord,
@@ -1154,6 +1158,7 @@ export default function ResidentPortalPage() {
                   ? getDistributionNotificationAudienceLabel(
                     distributionPayload.target_scope,
                     distributionPayload.target_group,
+                    lang,
                   )
                   : '';
 
@@ -1190,14 +1195,14 @@ export default function ResidentPortalPage() {
                                 tone={claimedRecord ? 'emerald' : STATUS_BADGE_TONES[distributionPayload.status]}
                               />
                               {claimedRecord ? (
-                                <CivicBadge label="✓ Nakuha Na" tone="emerald" />
+                                <CivicBadge label={isCeb ? '✓ Nakuha Na' : '✓ Claimed'} tone="emerald" />
                               ) : isEligible ? (
                                 <span className="inline-flex items-center rounded-full bg-emerald-100 px-2.5 py-0.5 text-xs font-bold text-emerald-800">
-                                  Apil Ka
+                                  {isCeb ? 'Apil Ka' : 'Eligible'}
                                 </span>
                               ) : (
                                 <span className="inline-flex items-center rounded-full bg-slate-200 px-2.5 py-0.5 text-xs font-medium text-slate-600">
-                                  Dili Apil
+                                  {isCeb ? 'Dili Apil' : 'Not Eligible'}
                                 </span>
                               )}
                             </>
@@ -1218,15 +1223,15 @@ export default function ResidentPortalPage() {
 
                         {isDistribution && distributionPayload ? (
                           <div className="mt-3 flex flex-wrap items-center gap-3 text-xs text-slate-600">
-                            <span>📅 Petsa: <strong>{formatScheduleDate(distributionPayload.scheduled_date)}</strong></span>
-                            <span>📍 Lugar: <strong>{distributionPayload.location}</strong></span>
-                            <span>👥 Target: <strong>{audienceLabel}</strong></span>
+                            <span>📅 {isCeb ? 'Petsa:' : 'Date:'} <strong>{formatScheduleDate(distributionPayload.scheduled_date)}</strong></span>
+                            <span>📍 {isCeb ? 'Lugar:' : 'Location:'} <strong>{distributionPayload.location}</strong></span>
+                            <span>👥 {isCeb ? 'Puntarya:' : 'Target:'} <strong>{audienceLabel}</strong></span>
                           </div>
                         ) : null}
 
                         {disasterPayload?.evacuation_site?.trim() ? (
                           <div className="mt-2 text-xs font-bold text-emerald-800">
-                            🏃 Dangpanan: {disasterPayload.evacuation_site.trim()}
+                            🏃 {isCeb ? 'Dangpanan:' : 'Evacuation Site:'} {disasterPayload.evacuation_site.trim()}
                           </div>
                         ) : null}
                       </div>
@@ -1237,7 +1242,9 @@ export default function ResidentPortalPage() {
                           {claimedRecord ? (
                             <div className="inline-flex items-center gap-1.5 rounded-full bg-emerald-100 px-3.5 py-2 text-xs font-bold text-emerald-900">
                               <PackageCheck className="h-4 w-4 text-emerald-700" />
-                              Nakuha na ni {claimedRecord.received_by_name || activeHousehold.head_name}
+                              {isCeb
+                                ? `Nakuha na ni ${claimedRecord.received_by_name || activeHousehold.head_name}`
+                                : `Claimed by ${claimedRecord.received_by_name || activeHousehold.head_name}`}
                             </div>
                           ) : isEligible ? (
                             <button
@@ -1257,11 +1264,11 @@ export default function ResidentPortalPage() {
                               className="inline-flex h-11 items-center gap-2 rounded-xl bg-emerald-700 px-5 text-xs font-black text-white shadow-md transition hover:bg-emerald-800 active:scale-95"
                             >
                               <QrCode className="h-4 w-4" />
-                              Ablihi ang Release QR Code
+                              {isCeb ? 'Ablihi ang Release QR Code' : 'Open Release QR Code'}
                             </button>
                           ) : (
                             <span className="inline-block text-xs font-medium text-slate-400 italic">
-                              Wala maapil niini nga release
+                              {isCeb ? 'Wala maapil niini nga release' : 'Not eligible for this release'}
                             </span>
                           )}
                         </div>
@@ -1442,13 +1449,15 @@ export default function ResidentPortalPage() {
                   <img src="/dswd-logo.png" alt="DSWD Logo" className="h-full w-full object-contain" />
                 </div>
                 <p className="mt-3 text-xs font-bold uppercase tracking-[0.2em] text-emerald-200">
-                  Opisyal nga Food Pack Release QR Code
+                  {isCeb ? 'Opisyal nga Food Pack Release QR Code' : 'Official Food Pack Release QR Code'}
                 </p>
                 <DialogTitle className="mt-1 text-xl font-black text-white">
                   {selectedDistributionEvent.title}
                 </DialogTitle>
                 <DialogDescription className="text-xs text-emerald-100 mt-1">
-                  Kini nga QR code talagsaon (unique) alang lamang niining maong distribusyon sa food packs.
+                  {isCeb
+                    ? 'Kini nga QR code talagsaon (unique) alang lamang niining maong distribusyon sa food packs.'
+                    : 'This QR code is uniquely generated for this specific food pack distribution event.'}
                 </DialogDescription>
               </div>
 
@@ -1456,19 +1465,19 @@ export default function ResidentPortalPage() {
               <div className="p-6">
                 <div className="rounded-2xl bg-slate-50 border border-slate-200 p-4 text-xs space-y-1.5 mb-2">
                   <p>
-                    <span className="text-slate-500">Ulo sa Panimalay:</span>{' '}
+                    <span className="text-slate-500">{isCeb ? 'Ulo sa Panimalay:' : 'Head of Household:'}</span>{' '}
                     <strong className="text-slate-900">{activeHousehold.head_name}</strong>
                   </p>
                   <p>
-                    <span className="text-slate-500">Lugar sa Pag-claim:</span>{' '}
+                    <span className="text-slate-500">{isCeb ? 'Lugar sa Pag-claim:' : 'Claim Location:'}</span>{' '}
                     <strong className="text-slate-900">{selectedDistributionEvent.location}</strong>
                   </p>
                   <p>
-                    <span className="text-slate-500">Target Audience:</span>{' '}
+                    <span className="text-slate-500">{isCeb ? 'Puntarya:' : 'Target Audience:'}</span>{' '}
                     <strong className="text-emerald-800">{selectedDistributionEvent.audienceLabel}</strong>
                   </p>
                   <p>
-                    <span className="text-slate-500">Iskedyul:</span>{' '}
+                    <span className="text-slate-500">{isCeb ? 'Iskedyul:' : 'Schedule:'}</span>{' '}
                     <strong className="text-slate-900">{formatScheduleDate(selectedDistributionEvent.schedule)}</strong>
                   </p>
                 </div>
@@ -1497,7 +1506,7 @@ export default function ResidentPortalPage() {
                     onClick={() => setSelectedDistributionEvent(null)}
                     className="inline-flex h-11 w-full items-center justify-center rounded-2xl border border-slate-300 bg-white text-xs font-bold text-slate-700 hover:bg-slate-50"
                   >
-                    Isira / Close
+                    {isCeb ? 'Isira' : 'Close'}
                   </button>
                 </div>
               </div>

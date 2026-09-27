@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react';
 import QRCode from 'qrcode';
 import { CheckCircle2, Download, Loader2, PackageCheck, QrCode, ShieldCheck, Sparkles } from 'lucide-react';
 import { extractDistributionQrToken } from '@/lib/distribution-qr';
+import { useResidentLanguage, type ResidentLanguage } from '@/lib/i18n/resident-language';
 
 type DistributionQrPayload = {
   deepLink: string;
@@ -32,9 +33,9 @@ const QR_LOGO_RATIO = 0.10;
 const QR_POSTER_WIDTH = 1200;
 const QR_POSTER_HEIGHT = 1600;
 
-function formatClaimedAt(value?: Date) {
+function formatClaimedAt(value?: Date, lang: ResidentLanguage = 'ceb') {
   if (!value) {
-    return 'Karon lang';
+    return lang === 'ceb' ? 'Karon lang' : 'Just now';
   }
 
   return new Intl.DateTimeFormat('en-PH', {
@@ -220,6 +221,7 @@ async function createQrDownloadPosterDataUrl(input: {
   householdName: string;
   audienceLabel: string;
   matchedNames: string;
+  lang?: ResidentLanguage;
 }) {
   const poster = document.createElement('canvas');
   poster.width = QR_POSTER_WIDTH;
@@ -264,11 +266,23 @@ async function createQrDownloadPosterDataUrl(input: {
   context.fillStyle = '#5eead4';
   context.font = 'bold 22px system-ui, sans-serif';
   context.textAlign = 'left';
-  context.fillText('REPUBLIKA SA PILIPINAS · MUNISIPYO SA MABINI · MSWDO', 215, 115);
+  context.fillText(
+    input.lang === 'ceb'
+      ? 'REPUBLIKA SA PILIPINAS · MUNISIPYO SA MABINI · MSWDO'
+      : 'REPUBLIC OF THE PHILIPPINES · MUNICIPALITY OF MABINI · MSWDO',
+    215,
+    115,
+  );
 
   context.fillStyle = '#ffffff';
   context.font = '900 36px system-ui, sans-serif';
-  context.fillText('OPISYAL NGA FOOD PACK RELEASE QR PASS', 215, 160);
+  context.fillText(
+    input.lang === 'ceb'
+      ? 'OPISYAL NGA FOOD PACK RELEASE QR PASS'
+      : 'OFFICIAL FOOD PACK RELEASE QR PASS',
+    215,
+    160,
+  );
 
   // QR Code Frame
   const qrBoxSize = 920;
@@ -301,23 +315,36 @@ async function createQrDownloadPosterDataUrl(input: {
 
   context.fillStyle = '#065f46';
   context.font = 'bold 22px system-ui, sans-serif';
-  context.fillText('ULO SA PANIMALAY:', 140, 1270);
+  context.fillText(input.lang === 'ceb' ? 'ULO SA PANIMALAY:' : 'HEAD OF HOUSEHOLD:', 140, 1270);
   context.fillStyle = '#0f172a';
   context.font = '900 36px system-ui, sans-serif';
   drawWrappedText(context, input.householdName, 140, 1315, 900, 42, 1);
 
   context.fillStyle = '#047857';
   context.font = 'bold 22px system-ui, sans-serif';
-  context.fillText(`Target Release: ${input.audienceLabel}`, 140, 1375);
+  context.fillText(
+    input.lang === 'ceb'
+      ? `Puntarya nga Pagpanghatag: ${input.audienceLabel}`
+      : `Target Release: ${input.audienceLabel}`,
+    140,
+    1375,
+  );
 
   context.fillStyle = '#475569';
   context.font = '600 20px system-ui, sans-serif';
-  drawWrappedText(context, `Mga Kwalipikadong Sakop: ${input.matchedNames}`, 140, 1415, 900, 28, 2);
+  const matchedMembersPrefix = input.lang === 'ceb' ? 'Mga Kwalipikadong Sakop' : 'Eligible Members';
+  drawWrappedText(context, `${matchedMembersPrefix}: ${input.matchedNames}`, 140, 1415, 900, 28, 2);
 
   context.fillStyle = '#64748b';
   context.font = '500 18px system-ui, sans-serif';
   context.textAlign = 'center';
-  context.fillText('Ipakita kini nga QR code sa relief distribution desk. Paspas nga ma-scan bisan walay internet.', QR_POSTER_WIDTH / 2, 1530);
+  context.fillText(
+    input.lang === 'ceb'
+      ? 'Ipakita kini nga QR code sa relief distribution desk. Paspas nga ma-scan bisan walay internet.'
+      : 'Present this QR code at the relief distribution desk. Scans quickly even without internet.',
+    QR_POSTER_WIDTH / 2,
+    1530,
+  );
 
   return poster.toDataURL('image/png');
 }
@@ -327,6 +354,7 @@ async function createQrImageUrls(input: {
   householdName: string;
   audienceLabel: string;
   matchedNames: string;
+  lang?: ResidentLanguage;
 }) {
   const { qrCanvas, displayUrl } = await createBrandedQrCanvas(input.value);
   const downloadUrl = await createQrDownloadPosterDataUrl({
@@ -334,6 +362,7 @@ async function createQrImageUrls(input: {
     householdName: input.householdName,
     audienceLabel: input.audienceLabel,
     matchedNames: input.matchedNames,
+    lang: input.lang,
   });
 
   return { displayUrl, downloadUrl };
@@ -346,6 +375,9 @@ export default function DistributionNotificationQr({
   matchedResidentNames,
   claimedRelease,
 }: DistributionNotificationQrProps) {
+  const { lang } = useResidentLanguage();
+  const isCeb = lang === 'ceb';
+
   const [qrPayload, setQrPayload] = useState<DistributionQrPayload | null>(null);
   const [qrImageUrl, setQrImageUrl] = useState('');
   const [qrDownloadUrl, setQrDownloadUrl] = useState('');
@@ -384,7 +416,7 @@ export default function DistributionNotificationQr({
         } | null;
 
         if (!response.ok || !payload?.deepLink) {
-          throw new Error(payload?.error || 'Dili ma-andam ang inyong event QR code.');
+          throw new Error(payload?.error || (isCeb ? 'Dili ma-andam ang inyong event QR code.' : 'Unable to prepare your event QR code.'));
         }
 
         const qrCodeValue = extractDistributionQrToken(payload.deepLink)?.token || payload.deepLink;
@@ -401,6 +433,7 @@ export default function DistributionNotificationQr({
           householdName: nextHouseholdName,
           audienceLabel,
           matchedNames: nextMatchedNames,
+          lang,
         });
 
         if (!cancelled) {
@@ -415,7 +448,9 @@ export default function DistributionNotificationQr({
       } catch (loadError) {
         if (!cancelled) {
           setError(
-            loadError instanceof Error ? loadError.message : 'Dili ma-andam ang inyong event QR code.',
+            loadError instanceof Error
+              ? loadError.message
+              : (isCeb ? 'Dili ma-andam ang inyong event QR code.' : 'Unable to prepare your event QR code.'),
           );
         }
       }
@@ -426,7 +461,7 @@ export default function DistributionNotificationQr({
     return () => {
       cancelled = true;
     };
-  }, [audienceLabel, claimedRelease, eventId, householdHeadName, matchedResidentNames]);
+  }, [audienceLabel, claimedRelease, eventId, householdHeadName, matchedResidentNames, lang, isCeb]);
 
   // Already claimed UI: Premium Official Receipt View
   if (claimedRelease) {
@@ -438,33 +473,39 @@ export default function DistributionNotificationQr({
 
         <div className="mt-4 inline-flex items-center gap-1.5 rounded-full bg-emerald-100 px-3.5 py-1 text-xs font-black uppercase tracking-wider text-emerald-800">
           <CheckCircle2 className="h-4 w-4 text-emerald-700" />
-          Opisyal nga Nakuha Na (Claimed)
+          {isCeb ? 'Opisyal nga Nakuha Na (Claimed)' : 'Official Record: Claimed'}
         </div>
 
-        <h3 className="mt-2 text-2xl font-black text-slate-950">Food Pack Released</h3>
+        <h3 className="mt-2 text-2xl font-black text-slate-950">
+          {isCeb ? 'Food Pack Nadawat Na' : 'Food Pack Released'}
+        </h3>
         <p className="mt-1 text-sm font-semibold text-emerald-800">
-          Malampusong nadawat na sa inyong panimalay ang package alang sa {audienceLabel.toLowerCase()}.
+          {isCeb
+            ? `Malampusong nadawat na sa inyong panimalay ang package alang sa ${audienceLabel.toLowerCase()}.`
+            : `Your household has successfully received the package for ${audienceLabel.toLowerCase()}.`}
         </p>
 
         <div className="mt-5 mx-auto max-w-sm rounded-2xl border border-emerald-200 bg-white p-4 text-left shadow-sm">
           <div className="space-y-2 text-xs">
             <div className="flex justify-between border-b border-slate-100 pb-2">
-              <span className="text-slate-500">Nidawat (Claimant):</span>
+              <span className="text-slate-500">{isCeb ? 'Nidawat (Claimant):' : 'Claimed By (Claimant):'}</span>
               <span className="font-bold text-slate-900">{claimedRelease.receivedByName || householdHeadName}</span>
             </div>
             <div className="flex justify-between border-b border-slate-100 pb-2">
-              <span className="text-slate-500">Petsa sa Pag-claim:</span>
-              <span className="font-bold text-slate-900">{formatClaimedAt(claimedRelease.claimedAt)}</span>
+              <span className="text-slate-500">{isCeb ? 'Petsa sa Pag-claim:' : 'Date Claimed:'}</span>
+              <span className="font-bold text-slate-900">{formatClaimedAt(claimedRelease.claimedAt, lang)}</span>
             </div>
             <div className="flex justify-between">
-              <span className="text-slate-500">Status sa Pass:</span>
-              <span className="font-bold text-emerald-700">Sirado na (Used)</span>
+              <span className="text-slate-500">{isCeb ? 'Status sa Pass:' : 'Pass Status:'}</span>
+              <span className="font-bold text-emerald-700">{isCeb ? 'Sirado na (Used)' : 'Completed (Used)'}</span>
             </div>
           </div>
         </div>
 
         <p className="mt-4 text-xs font-medium text-slate-500">
-          Kini nga QR code na-rekord na sa MSWDO system ug dili na magamit pag-usab.
+          {isCeb
+            ? 'Kini nga QR code na-rekord na sa MSWDO system ug dili na magamit pag-usab.'
+            : 'This QR code has been recorded in the MSWDO system and can no longer be reused.'}
         </p>
       </div>
     );
@@ -482,8 +523,14 @@ export default function DistributionNotificationQr({
     return (
       <div className="flex flex-col items-center justify-center rounded-[28px] border-2 border-dashed border-emerald-200 bg-emerald-50/40 p-8 text-center text-sm text-emerald-900">
         <Loader2 className="h-8 w-8 animate-spin text-emerald-600" />
-        <p className="mt-3 font-bold">Gi-andam ang inyong opisyal nga Event QR Code...</p>
-        <p className="mt-1 text-xs text-slate-500">Palihog huwat kadiyot samtang gina-verify ang inyong record.</p>
+        <p className="mt-3 font-bold">
+          {isCeb ? 'Gi-andam ang inyong opisyal nga Event QR Code...' : 'Preparing your official Event QR Code...'}
+        </p>
+        <p className="mt-1 text-xs text-slate-500">
+          {isCeb
+            ? 'Palihog huwat kadiyot samtang gina-verify ang inyong record.'
+            : 'Please wait a moment while your record is being verified.'}
+        </p>
       </div>
     );
   }
@@ -500,15 +547,17 @@ export default function DistributionNotificationQr({
         <span className="flex h-2.5 w-2.5 rounded-full bg-emerald-500 animate-ping" />
         <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-100 px-3.5 py-1 text-xs font-black uppercase tracking-wider text-emerald-900">
           <ShieldCheck className="h-4 w-4 text-emerald-700" />
-          Aktibo · Andam Na I-scan sa Release Desk
+          {isCeb ? 'Aktibo · Andam Na I-scan sa Release Desk' : 'Active · Ready to Scan at Release Desk'}
         </span>
       </div>
 
       <h3 className="mt-3 text-xl font-black text-slate-950 sm:text-2xl">
-        Opisyal nga Food Pack Claim Pass
+        {isCeb ? 'Opisyal nga Food Pack Claim Pass' : 'Official Food Pack Claim Pass'}
       </h3>
       <p className="mt-1 text-xs font-semibold text-slate-600">
-        Ipakita kini nga QR code sa MSWDO volunteer aron makuha ang inyong relief package.
+        {isCeb
+          ? 'Ipakita kini nga QR code sa MSWDO volunteer aron makuha ang inyong relief package.'
+          : 'Present this QR code to the MSWDO volunteer to receive your relief package.'}
       </p>
 
       {/* Prominent High-Resolution QR Card */}
@@ -529,15 +578,21 @@ export default function DistributionNotificationQr({
       <div className="mt-5 rounded-2xl border border-slate-200 bg-white p-4 text-left shadow-sm">
         <div className="space-y-2 text-xs">
           <div className="flex flex-wrap justify-between gap-1 border-b border-slate-100 pb-2">
-            <span className="font-semibold text-slate-500">Ulo sa Panimalay:</span>
+            <span className="font-semibold text-slate-500">
+              {isCeb ? 'Ulo sa Panimalay:' : 'Head of Household:'}
+            </span>
             <span className="font-black text-slate-950">{qrPayload.householdName}</span>
           </div>
           <div className="flex flex-wrap justify-between gap-1 border-b border-slate-100 pb-2">
-            <span className="font-semibold text-slate-500">Target Release:</span>
+            <span className="font-semibold text-slate-500">
+              {isCeb ? 'Target Release:' : 'Target Release:'}
+            </span>
             <span className="font-bold text-emerald-800">{audienceLabel}</span>
           </div>
           <div className="flex flex-wrap justify-between gap-1">
-            <span className="font-semibold text-slate-500">Mga Kwalipikadong Sakop:</span>
+            <span className="font-semibold text-slate-500">
+              {isCeb ? 'Mga Kwalipikadong Sakop:' : 'Eligible Members:'}
+            </span>
             <span className="font-semibold text-slate-800 text-right">{matchedNames}</span>
           </div>
         </div>
@@ -552,14 +607,23 @@ export default function DistributionNotificationQr({
           aria-label={`Download QR code for ${qrPayload.householdName}`}
         >
           <Download className="h-5 w-5 text-emerald-200" />
-          I-download / I-save sa Litrato (HD Poster)
+          {isCeb ? 'I-download / I-save sa Litrato (HD Poster)' : 'Download / Save Image (HD Poster)'}
         </a>
       </div>
 
       {/* Elder Friendly Reminder */}
       <div className="mt-4 rounded-xl bg-emerald-50/80 border border-emerald-200/80 p-3 text-[11px] font-medium leading-relaxed text-emerald-900">
-        💡 <strong>Pahinumdom para sa Pamilya:</strong> Mahimo kining i-screenshot o i-save daan sa inyong telepono aron
-        ma-ablihan ug ma-scan bisan walay internet o signal sa distribution center.
+        {isCeb ? (
+          <>
+            💡 <strong>Pahinumdom para sa Pamilya:</strong> Mahimo kining i-screenshot o i-save daan sa inyong telepono aron
+            ma-ablihan ug ma-scan bisan walay internet o signal sa distribution center.
+          </>
+        ) : (
+          <>
+            💡 <strong>Family Reminder:</strong> You can screenshot or save this image to your phone in advance so it can be
+            opened and scanned even without mobile data or internet at the distribution site.
+          </>
+        )}
       </div>
     </div>
   );
