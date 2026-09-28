@@ -219,7 +219,7 @@ export default function AdminMemberApprovalsPage() {
       return;
     }
     void (async () => {
-      await bootstrapSupabaseTables([...BOOTSTRAP_TABLES], { force: true });
+      await bootstrapSupabaseTables([...BOOTSTRAP_TABLES], { force: false });
       await load();
     })();
   }, [load, router, user]);

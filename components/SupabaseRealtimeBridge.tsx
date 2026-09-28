@@ -122,7 +122,7 @@ export default function SupabaseRealtimeBridge() {
 
       await disconnectChannel();
       await supabaseClient.realtime.setAuth(session.access_token);
-      await bootstrapPathnameData(pathname);
+      void bootstrapPathnameData(pathname);
 
       if (cancelled || runId !== activeRunId) return;
 
@@ -179,12 +179,20 @@ export default function SupabaseRealtimeBridge() {
       });
     }
 
+    const FOCUS_BOOTSTRAP_COOLDOWN_MS = 120_000;
+    let lastFocusBootstrapTime = Date.now();
+
     function handleWindowFocus() {
       if (cancelled) {
         return;
       }
 
-      void bootstrapPathnameData(pathname);
+      const now = Date.now();
+      // Only refetch on focus if realtime channels had issues or if more than 2 minutes elapsed
+      if (failedTopics.size > 0 || (now - lastFocusBootstrapTime > FOCUS_BOOTSTRAP_COOLDOWN_MS)) {
+        lastFocusBootstrapTime = now;
+        void bootstrapPathnameData(pathname);
+      }
     }
 
     const {

@@ -41,7 +41,7 @@ export async function getCases(filters?: CaseQueryFilters): Promise<CaseRecord[]
     if (allCases.length === 0 && typeof window !== 'undefined') {
       try {
         const { bootstrapPathnameData } = await import('@/lib/supabase/route-bootstrap');
-        await bootstrapPathnameData('/cases', true);
+        await bootstrapPathnameData('/cases', false);
         allCases = await db.getAll<CaseRecord>(STORE_NAMES.cases);
       } catch (err) {
         console.warn('Failed to auto-bootstrap cases from Supabase:', err);

@@ -11,7 +11,8 @@ const bootstrapPromises = new Map<string, Promise<void>>();
 const hydratedBootstrapKeys = new Set<string>();
 const SUPABASE_BOOTSTRAP_TIMEOUT_MS = 15_000;
 const FULL_BOOTSTRAP_TABLES = SUPABASE_BOOTSTRAP_TABLES.map((entry) => entry.table);
-const FORCE_BOOTSTRAP_COOLDOWN_MS = 900;
+const FORCE_BOOTSTRAP_COOLDOWN_MS = 6_000;
+const RECENT_BOOTSTRAP_TTL_MS = 45_000;
 const lastBootstrapStartedAt = new Map<string, number>();
 const lastBootstrapCompletedAt = new Map<string, number>();
 
@@ -110,6 +111,7 @@ export async function clearSupabaseBootstrapData(options?: {
 
   if (options?.includeSyncQueue) {
     await db.clear(STORE_NAMES.sync_queue);
+    await db.clearAllCache();
   }
 }
 
@@ -134,11 +136,12 @@ export async function bootstrapSupabaseTables(
     return existingPromise;
   }
 
-  if (!options?.force && hydratedBootstrapKeys.has(bootstrapKey)) {
+  const now = Date.now();
+  const lastCompleted = lastBootstrapCompletedAt.get(bootstrapKey) ?? 0;
+  if (!options?.force && (hydratedBootstrapKeys.has(bootstrapKey) || (now - lastCompleted < RECENT_BOOTSTRAP_TTL_MS))) {
     return;
   }
 
-  const now = Date.now();
   const lastStartedAt = lastBootstrapStartedAt.get(bootstrapKey) ?? 0;
   if (options?.force && now - lastStartedAt < FORCE_BOOTSTRAP_COOLDOWN_MS) {
     return;
@@ -172,22 +175,14 @@ export async function bootstrapSupabaseTables(
       return;
     }
 
-    await clearSupabaseBootstrapData({
-      notifyTables: false,
-      tables: requestedTables,
-    });
-
+    // Direct in-place store replacement: avoids clearing the UI into a blank state
     for (const tableConfig of getRequestedTableConfigs(requestedTables)) {
       const rows = payload[tableConfig.table];
       if (Array.isArray(rows)) {
-        await Promise.all(
-          rows
-            .filter((row): row is Record<string, unknown> => Boolean(row && typeof row === 'object'))
-            .map((row) => db.put(
-              tableConfig.storeName,
-              mapSupabaseRow(tableConfig.table, row),
-            )),
-        );
+        const mappedRows = rows
+          .filter((row): row is Record<string, unknown> => Boolean(row && typeof row === 'object'))
+          .map((row) => mapSupabaseRow(tableConfig.table, row));
+        db.replaceStore(tableConfig.storeName, mappedRows);
       }
 
       notifyBootstrapTableChanged(tableConfig.table, 'hydrate');

@@ -271,7 +271,7 @@ export default function ResidentPortalPage() {
         ]);
 
         if (households.length === 0 && !isRetry) {
-          await bootstrapPathnameData('/resident', true).catch(() => null);
+          await bootstrapPathnameData('/resident', false).catch(() => null);
           [households] = await Promise.all([
             getHouseholds({
               applicant_user_id: residentUser.id,

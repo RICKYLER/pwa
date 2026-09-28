@@ -136,7 +136,7 @@ async function loadResidentsForHouseholds(householdIds: string[]) {
   if (!householdIds.length) return [];
 
   const supabase = getSupabaseAdminClient();
-  const CHUNK_SIZE = 100;
+  const CHUNK_SIZE = 200;
   if (householdIds.length <= CHUNK_SIZE) {
     const { data, error } = await supabase
       .from('residents')
@@ -188,7 +188,7 @@ async function loadVulnerabilityFlags(residentIds: string[]) {
   }
 
   const supabase = getSupabaseAdminClient();
-  const CHUNK_SIZE = 100;
+  const CHUNK_SIZE = 200;
   if (residentIds.length <= CHUNK_SIZE) {
     const { data, error } = await supabase
       .from('vulnerability_flags')
@@ -316,7 +316,7 @@ async function loadInventoryBundle() {
   const supabase = getSupabaseAdminClient();
   const [items, movements, templates] = await Promise.all([
     supabase.from('inventory_items').select('*').order('item_name', { ascending: true }),
-    supabase.from('inventory_movements').select('*').order('timestamp', { ascending: false }),
+    supabase.from('inventory_movements').select('*').order('timestamp', { ascending: false }).limit(300),
     supabase.from('package_templates').select('*').order('name', { ascending: true }),
   ]);
 
@@ -404,7 +404,8 @@ async function loadDistributionRecords() {
   const { data, error } = await supabase
     .from('distribution_records')
     .select('*')
-    .order('timestamp', { ascending: false });
+    .order('timestamp', { ascending: false })
+    .limit(600);
 
   if (error) throw new Error(error.message);
   return data ?? [];
@@ -436,7 +437,8 @@ async function loadIncidents() {
   const { data, error } = await supabase
     .from('incidents')
     .select('*')
-    .order('reported_at', { ascending: false });
+    .order('reported_at', { ascending: false })
+    .limit(300);
 
   if (error) throw new Error(error.message);
   return (data ?? []).filter((incident) => !isLegacySampleIncident({
@@ -673,16 +675,22 @@ async function loadCaseAttachments(user: User) {
     return [];
   }
   const supabase = getSupabaseAdminClient();
+  // EXCLUDE the heavy file_url base64 blob from bulk bootstrap query
   const { data, error } = await supabase
     .from('case_attachments')
-    .select('*')
+    .select('id, case_id, file_name, file_type, file_size, document_type, uploaded_by, uploaded_at')
     .order('uploaded_at', { ascending: false });
 
   if (error) {
     if (isMissingTableError(error, 'case_attachments')) return [];
     throw new Error(error.message);
   }
-  return data ?? [];
+
+  // Provide lightweight on-demand URL for downloading/opening
+  return (data ?? []).map((att) => ({
+    ...att,
+    file_url: `/api/cases/attachment-file?id=${att.id}`,
+  }));
 }
 
 async function buildBootstrapPayload(
@@ -900,6 +908,14 @@ async function buildBootstrapPayload(
   return payload;
 }
 
+type ServerCacheEntry = {
+  timestamp: number;
+  payload: BootstrapPayload;
+};
+
+const SERVER_CACHE_TTL_MS = 6_000;
+const serverBootstrapCache = new Map<string, ServerCacheEntry>();
+
 export async function GET(request: NextRequest) {
   const authResult = await requireAuthenticatedUser(request);
   if ('response' in authResult) {
@@ -922,11 +938,33 @@ export async function GET(request: NextRequest) {
       );
     }
 
+    const cacheKey = `${authResult.user.id}:${authResult.user.role}:${requestedTables?.slice().sort().join(',') ?? 'ALL'}`;
+    const now = Date.now();
+    const cached = serverBootstrapCache.get(cacheKey);
+    if (cached && now - cached.timestamp < SERVER_CACHE_TTL_MS) {
+      return NextResponse.json(cached.payload, {
+        headers: {
+          'Cache-Control': 'private, max-age=5, stale-while-revalidate=30',
+          'X-Bootstrap-Cache': 'HIT',
+        },
+      });
+    }
+
     const payload = await buildBootstrapPayload(authResult.user, requestedTables ?? undefined);
+    serverBootstrapCache.set(cacheKey, { timestamp: now, payload });
+
+    if (serverBootstrapCache.size > 200) {
+      for (const [k, v] of serverBootstrapCache.entries()) {
+        if (now - v.timestamp > SERVER_CACHE_TTL_MS * 2) {
+          serverBootstrapCache.delete(k);
+        }
+      }
+    }
 
     return NextResponse.json(payload, {
       headers: {
-        'Cache-Control': 'no-store',
+        'Cache-Control': 'private, max-age=5, stale-while-revalidate=30',
+        'X-Bootstrap-Cache': 'MISS',
       },
     });
   } catch (error) {

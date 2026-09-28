@@ -75,6 +75,100 @@ function normalizeConflictDate(value: unknown) {
   return undefined;
 }
 
+const CACHE_DB_NAME = 'mswdo_session_cache';
+const CACHE_DB_VERSION = 1;
+const CACHE_STORE_NAME = 'tables';
+
+function openCacheDb(): Promise<IDBDatabase | null> {
+  if (typeof window === 'undefined' || typeof indexedDB === 'undefined') {
+    return Promise.resolve(null);
+  }
+
+  return new Promise((resolve) => {
+    try {
+      const request = indexedDB.open(CACHE_DB_NAME, CACHE_DB_VERSION);
+      request.onupgradeneeded = () => {
+        const db = request.result;
+        if (!db.objectStoreNames.contains(CACHE_STORE_NAME)) {
+          db.createObjectStore(CACHE_STORE_NAME, { keyPath: 'table' });
+        }
+      };
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => resolve(null);
+      request.onblocked = () => resolve(null);
+    } catch {
+      resolve(null);
+    }
+  });
+}
+
+async function loadAllFromCacheDb(): Promise<Map<string, Record<string, any>[]>> {
+  const result = new Map<string, Record<string, any>[]>();
+  const db = await openCacheDb();
+  if (!db) return result;
+
+  return new Promise((resolve) => {
+    try {
+      const tx = db.transaction(CACHE_STORE_NAME, 'readonly');
+      const store = tx.objectStore(CACHE_STORE_NAME);
+      const request = store.getAll();
+      request.onsuccess = () => {
+        const entries = request.result as Array<{ table: string; records: Record<string, any>[] }> | undefined;
+        if (Array.isArray(entries)) {
+          for (const entry of entries) {
+            if (entry && entry.table && Array.isArray(entry.records)) {
+              result.set(entry.table, entry.records);
+            }
+          }
+        }
+        resolve(result);
+      };
+      request.onerror = () => resolve(result);
+    } catch {
+      resolve(result);
+    }
+  });
+}
+
+async function saveStoreToCacheDb(storeName: string, records: Record<string, any>[]): Promise<void> {
+  const db = await openCacheDb();
+  if (!db) return;
+
+  try {
+    const tx = db.transaction(CACHE_STORE_NAME, 'readwrite');
+    const store = tx.objectStore(CACHE_STORE_NAME);
+    store.put({ table: storeName, records });
+  } catch {
+    // Graceful silent fallback
+  }
+}
+
+async function clearStoreInCacheDb(storeName: string): Promise<void> {
+  const db = await openCacheDb();
+  if (!db) return;
+
+  try {
+    const tx = db.transaction(CACHE_STORE_NAME, 'readwrite');
+    const store = tx.objectStore(CACHE_STORE_NAME);
+    store.delete(storeName);
+  } catch {
+    // Graceful fallback
+  }
+}
+
+async function clearAllCacheDb(): Promise<void> {
+  const db = await openCacheDb();
+  if (!db) return;
+
+  try {
+    const tx = db.transaction(CACHE_STORE_NAME, 'readwrite');
+    const store = tx.objectStore(CACHE_STORE_NAME);
+    store.clear();
+  } catch {
+    // Graceful fallback
+  }
+}
+
 export class IndexedDBManager {
   private initialized = false;
   private stores = new Map<string, Map<string, Record<string, any>>>();
@@ -191,6 +285,7 @@ export class IndexedDBManager {
   private async putSilently<T extends Record<string, any>>(storeName: string, data: T): Promise<T> {
     await this.init();
     this.getStore(storeName).set(String(data.id), cloneValue(data));
+    void saveStoreToCacheDb(storeName, Array.from(this.getStore(storeName).values()));
     return data;
   }
 
@@ -233,8 +328,49 @@ export class IndexedDBManager {
       this.getStore(storeName);
     });
 
+    if (typeof window !== 'undefined' && typeof indexedDB !== 'undefined') {
+      try {
+        const cachedStores = await loadAllFromCacheDb();
+        for (const [storeName, records] of cachedStores.entries()) {
+          const store = this.getStore(storeName);
+          for (const record of records) {
+            if (record && record.id !== undefined && record.id !== null) {
+              store.set(String(record.id), record);
+            }
+          }
+        }
+      } catch {
+        // Safe fallback to empty store
+      }
+    }
+
     this.initialized = true;
-    console.log('Local IndexedDB disabled. Using in-memory session store backed by Supabase.');
+  }
+
+  hasAnyData(storeNames?: string[]): boolean {
+    const targets = storeNames ?? ALL_STORE_NAMES.filter((name) => name !== STORE_NAMES.sync_queue);
+    return targets.some((name) => {
+      const store = this.stores.get(name);
+      return Boolean(store && store.size > 0);
+    });
+  }
+
+  replaceStore<T extends Record<string, any>>(storeName: string, records: T[]): void {
+    const store = this.getStore(storeName);
+    store.clear();
+    for (const record of records) {
+      if (record && typeof record === 'object' && record.id !== undefined && record.id !== null) {
+        store.set(String(record.id), cloneValue(record));
+      }
+    }
+    void saveStoreToCacheDb(storeName, records);
+  }
+
+  async clearAllCache(): Promise<void> {
+    for (const store of this.stores.values()) {
+      store.clear();
+    }
+    await clearAllCacheDb();
   }
 
   async add<T extends Record<string, any>>(storeName: string, data: T): Promise<T> {
@@ -306,6 +442,7 @@ export class IndexedDBManager {
       });
     }
 
+    void saveStoreToCacheDb(storeName, Array.from(this.getStore(storeName).values()));
     return cloneValue(data);
   }
 
@@ -326,6 +463,7 @@ export class IndexedDBManager {
     await this.init();
 
     this.getStore(storeName).delete(key);
+    void saveStoreToCacheDb(storeName, Array.from(this.getStore(storeName).values()));
     console.log(`Deleted from ${storeName}:`, key);
 
     try {
@@ -334,6 +472,7 @@ export class IndexedDBManager {
       console.error(`Failed to queue delete mutation for ${storeName}:`, error);
       if (existingRecord) {
         this.getStore(storeName).set(key, cloneValue(existingRecord));
+        void saveStoreToCacheDb(storeName, Array.from(this.getStore(storeName).values()));
       }
       throw error;
     }
@@ -352,11 +491,13 @@ export class IndexedDBManager {
   async deleteSilently(storeName: string, key: string): Promise<void> {
     await this.init();
     this.getStore(storeName).delete(key);
+    void saveStoreToCacheDb(storeName, Array.from(this.getStore(storeName).values()));
   }
 
   async clear(storeName: string): Promise<void> {
     await this.init();
     this.getStore(storeName).clear();
+    void clearStoreInCacheDb(storeName);
   }
 
   async query<T = any>(

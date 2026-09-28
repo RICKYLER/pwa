@@ -50,6 +50,7 @@ import { db, STORE_NAMES } from '@/lib/db/indexeddb';
 import { getCurrentUser } from '@/lib/auth';
 import { printGeneralIntakeSheet } from '@/lib/cases/gis-printer';
 import CaseIntakeSheetTab from '@/components/cases/CaseIntakeSheetTab';
+import { compressDocumentPhoto } from '@/lib/solo-parents/document-compressor';
 import { cn } from '@/lib/utils';
 
 interface CaseDetailModalProps {
@@ -199,22 +200,21 @@ export default function CaseDetailModal({
 
     setIsUploadingFile(true);
     try {
-      const reader = new FileReader();
-      reader.onload = async () => {
-        const fileUrl = reader.result as string;
-        const newAtt = await addCaseAttachment(caseRecord.id, {
-          file_name: file.name,
-          file_type: file.type || 'application/octet-stream',
-          file_size: file.size,
-          file_url: fileUrl,
-          document_type: uploadDocType,
-          uploaded_by: currentUser?.name || 'Social Worker',
-        });
-        setAttachments((prev) => [newAtt, ...prev]);
-        setIsUploadingFile(false);
-        onCaseUpdated?.();
-      };
-      reader.readAsDataURL(file);
+      const compressed = await compressDocumentPhoto(file, {
+        documentType: uploadDocType,
+      });
+
+      const newAtt = await addCaseAttachment(caseRecord.id, {
+        file_name: compressed.name,
+        file_type: file.type.startsWith('image/') ? 'image/jpeg' : (file.type || 'application/octet-stream'),
+        file_size: compressed.file_size,
+        file_url: compressed.file_url,
+        document_type: uploadDocType,
+        uploaded_by: currentUser?.name || 'Social Worker',
+      });
+      setAttachments((prev) => [newAtt, ...prev]);
+      setIsUploadingFile(false);
+      onCaseUpdated?.();
     } catch (err) {
       console.error('Failed to attach file:', err);
       setIsUploadingFile(false);

@@ -443,7 +443,7 @@ export default function AdminLocationReviewPage() {
     }
 
     void (async () => {
-      await bootstrapSupabaseTables([...REVIEW_BOOTSTRAP_TABLES], { force: true });
+      await bootstrapSupabaseTables([...REVIEW_BOOTSTRAP_TABLES], { force: false });
       await load();
     })();
   }, [load, router, user]);
