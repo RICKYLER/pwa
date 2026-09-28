@@ -20,6 +20,7 @@ export async function POST(req: NextRequest) {
 
     const roleLabels: Record<string, string> = {
       admin: 'Administrator',
+      social_worker: 'Social Worker',
       encoder: 'Encoder',
       health_worker: 'Health Worker',
       responder: 'Responder',

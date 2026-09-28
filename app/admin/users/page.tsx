@@ -10,12 +10,17 @@ import { purgeHouseholdsByApplicant } from '@/lib/db/households';
 import {
   AlertTriangle,
   Building2,
+  Check,
   CheckCircle2,
   Edit2,
+  FileSpreadsheet,
+  HeartHandshake,
   KeyRound,
   Loader2,
+  Lock,
   Mail,
   ShieldCheck,
+  Table,
   Trash2,
   User as UserIcon,
   UserPlus,
@@ -23,12 +28,118 @@ import {
   X,
 } from 'lucide-react';
 
-const ROLES: { key: UserRole; label: string; desc: string; color: string; bg: string }[] = [
-  { key: 'admin', label: 'Admin', desc: 'Full system access', color: 'text-violet-700', bg: 'bg-violet-50 ring-violet-200' },
-  { key: 'encoder', label: 'Encoder', desc: 'Add and edit census records', color: 'text-blue-700', bg: 'bg-blue-50 ring-blue-200' },
-  { key: 'health_worker', label: 'Health Worker', desc: 'Manage health vulnerability flags', color: 'text-emerald-700', bg: 'bg-emerald-50 ring-emerald-200' },
-  { key: 'responder', label: 'Responder', desc: 'Respond to incidents and operations', color: 'text-rose-700', bg: 'bg-rose-50 ring-rose-200' },
-  { key: 'resident', label: 'Resident', desc: 'Household leader portal access', color: 'text-cyan-700', bg: 'bg-cyan-50 ring-cyan-200' },
+export interface RoleMeta {
+  key: UserRole;
+  label: string;
+  desc: string;
+  soloParentRole: string;
+  soloParentScope: string;
+  soloParentDuties: string[];
+  restrictions?: string;
+  color: string;
+  bg: string;
+}
+
+const ROLES: RoleMeta[] = [
+  {
+    key: 'admin',
+    label: 'Admin',
+    desc: 'Full system access & municipal oversight',
+    soloParentRole: 'Full Masterlist Oversight',
+    soloParentScope: 'Full administrative access: walk-in intake, ID issuance, renewals, legal revocation, reactivations, ROSP export, and master record deletion.',
+    soloParentDuties: [
+      'Full Master Registry Access',
+      'Walk-In Applicant Registration',
+      'Print Official ID & QR Code',
+      'Revoke & Reactivate Status',
+      'Export DSWD ROSP CSV',
+      'Permanent Record Deletion',
+    ],
+    color: 'text-violet-700',
+    bg: 'bg-violet-50 ring-violet-200',
+  },
+  {
+    key: 'social_worker',
+    label: 'Social Worker',
+    desc: 'Confidential VAWC, VAC & casework',
+    soloParentRole: 'Welfare Assessment & Revocation',
+    soloParentScope: 'Welfare evaluation & status revocation: RA 11861 subsidy eligibility qualification, casework notes, legal status revocation (e.g. remarried/custody loss), and ROSP export.',
+    soloParentDuties: [
+      'RA 11861 Welfare Evaluation',
+      '₱1,000 Cash Subsidy Tagging',
+      'Statutory Status Revocation',
+      'Casework Notes & Timeline',
+      'Export DSWD ROSP CSV',
+      'Print Official ID Cards',
+    ],
+    restrictions: 'Cannot permanently delete master database records (Admin only).',
+    color: 'text-amber-700',
+    bg: 'bg-amber-50 ring-amber-200',
+  },
+  {
+    key: 'encoder',
+    label: 'Encoder',
+    desc: 'Add and edit census records',
+    soloParentRole: 'Walk-In Intake & ID Issuance',
+    soloParentScope: 'Frontline walk-in desk: encode new applicants, link to verified census records, encode child dependents, and print official ID cards & renewals.',
+    soloParentDuties: [
+      'Walk-In Intake Desk Encoding',
+      'Census Household Linking',
+      'Child Dependent Registration',
+      'Print Official ID Cards',
+      'Annual Card Renewals',
+    ],
+    restrictions: 'Restricted from revoking legal status or deleting master records.',
+    color: 'text-blue-700',
+    bg: 'bg-blue-50 ring-blue-200',
+  },
+  {
+    key: 'health_worker',
+    label: 'Health Worker',
+    desc: 'Manage health vulnerability flags',
+    soloParentRole: 'Nutrition & Maternal Health',
+    soloParentScope: 'Health & nutrition tracking: monitor pregnant/lactating solo mothers, infant immunization, and health vulnerability flags in medical missions.',
+    soloParentDuties: [
+      'Maternal Care & Nutrition Monitoring',
+      'Infant Immunization Tracking',
+      'Health Vulnerability Tagging',
+      'Medical Mission Outreach',
+    ],
+    restrictions: 'Read-only access for solo parent health tags in Vulnerability module; cannot edit civil registry.',
+    color: 'text-emerald-700',
+    bg: 'bg-emerald-50 ring-emerald-200',
+  },
+  {
+    key: 'responder',
+    label: 'Responder',
+    desc: 'Respond to incidents and operations',
+    soloParentRole: 'Evacuation & Relief Priority',
+    soloParentScope: 'Disaster evacuation & relief: identify solo parents with dependent minors/infants for priority rescue evacuation and targeted relief packs during operations.',
+    soloParentDuties: [
+      'Priority Evacuation Mapping',
+      'Targeted Relief Distribution',
+      'Sectoral High-Risk Pinning',
+    ],
+    restrictions: 'Read-only access during disaster response operations in Field Response.',
+    color: 'text-rose-700',
+    bg: 'bg-rose-50 ring-rose-200',
+  },
+  {
+    key: 'resident',
+    label: 'Resident',
+    desc: 'Household leader portal access',
+    soloParentRole: 'Personal Solo Parent ID',
+    soloParentScope: 'Self-service portal: view personal verified digital Solo Parent ID card, digital QR code validation, enrolled child dependents, and RA 11861 subsidy entitlement status.',
+    soloParentDuties: [
+      'View Own Digital Solo Parent ID',
+      'QR Code Verification',
+      'Enrolled Child Dependents List',
+      'Subsidy Entitlement Status',
+    ],
+    restrictions: 'Strictly restricted to own verified record and household members.',
+    color: 'text-cyan-700',
+    bg: 'bg-cyan-50 ring-cyan-200',
+  },
 ];
 const ASSIGNABLE_ROLES = ROLES.filter((role) => role.key !== 'resident');
 
@@ -68,6 +179,7 @@ export default function AdminUsersPage() {
   const [actionConfirm, setActionConfirm] = useState<{ userId: string; action: AccountAction } | null>(null);
   const [actionLoadingId, setActionLoadingId] = useState<string | null>(null);
   const [deleteConfirmText, setDeleteConfirmText] = useState('');
+  const [referenceTab, setReferenceTab] = useState<'solo_parents' | 'matrix' | 'general'>('solo_parents');
 
   const usersByRole = useMemo(() => (
     ROLES.map((role) => ({
@@ -414,6 +526,9 @@ export default function AdminUsersPage() {
                       >
                         <p className="text-xs font-bold">{role.label}</p>
                         <p className="text-[10px] leading-tight opacity-70">{role.desc}</p>
+                        <p className="mt-1 text-[9.5px] font-semibold text-teal-800">
+                          SP: {role.soloParentRole}
+                        </p>
                       </button>
                     ))}
                   </div>
@@ -479,7 +594,12 @@ export default function AdminUsersPage() {
                         </span>
                       )}
                     </div>
-                    <p className="mt-0.5 text-xs text-slate-500">{role.desc}</p>
+                    <div className="flex flex-wrap items-center gap-2 mt-0.5">
+                      <p className="text-xs text-slate-500">{role.desc}</p>
+                      <span className="text-[10.5px] font-semibold text-teal-800 bg-teal-50 px-2 py-0.5 rounded border border-teal-200">
+                        Solo Parents: {role.soloParentRole}
+                      </span>
+                    </div>
                   </div>
                 </div>
 
@@ -700,18 +820,228 @@ export default function AdminUsersPage() {
           </div>
         )}
 
-        <div className="rounded-2xl border border-slate-200/60 bg-slate-50/80 p-5">
-          <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-slate-400">
-            Role Permissions Reference
-          </p>
-          <div className="grid grid-cols-2 gap-2 lg:grid-cols-5">
-            {ROLES.map((role) => (
-              <div key={role.key} className={`rounded-xl px-3 py-2.5 ring-1 ${role.bg}`}>
-                <p className={`text-xs font-bold ${role.color}`}>{role.label}</p>
-                <p className="mt-0.5 text-[10px] text-slate-500">{role.desc}</p>
+        {/* Role Permissions Reference with Dedicated Solo Parents (RA 11861) Access Control */}
+        <div className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-xs space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-b border-slate-100 pb-3">
+            <div>
+              <div className="flex items-center gap-2">
+                <HeartHandshake className="h-4 w-4 text-teal-700" />
+                <h3 className="text-xs font-bold uppercase tracking-wider text-slate-900">
+                  Role Permissions & Access Control Reference
+                </h3>
               </div>
-            ))}
+              <p className="text-[11px] text-slate-500 mt-0.5">
+                Role duties, system privileges, and Republic Act 11861 (Solo Parents Welfare Act) access boundaries.
+              </p>
+            </div>
+
+            {/* Tab Filter */}
+            <div className="flex items-center gap-1 rounded-xl bg-slate-100 p-1 text-xs">
+              <button
+                type="button"
+                onClick={() => setReferenceTab('solo_parents')}
+                className={`flex items-center gap-1.5 rounded-lg px-3 py-1 font-semibold transition ${
+                  referenceTab === 'solo_parents'
+                    ? 'bg-white text-teal-900 shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <HeartHandshake className="h-3.5 w-3.5 text-teal-600" />
+                Solo Parents Scope
+              </button>
+              <button
+                type="button"
+                onClick={() => setReferenceTab('matrix')}
+                className={`flex items-center gap-1.5 rounded-lg px-3 py-1 font-semibold transition ${
+                  referenceTab === 'matrix'
+                    ? 'bg-white text-teal-900 shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <Table className="h-3.5 w-3.5 text-indigo-600" />
+                Comparison Matrix
+              </button>
+              <button
+                type="button"
+                onClick={() => setReferenceTab('general')}
+                className={`flex items-center gap-1.5 rounded-lg px-3 py-1 font-semibold transition ${
+                  referenceTab === 'general'
+                    ? 'bg-white text-slate-900 shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <Users className="h-3.5 w-3.5 text-slate-500" />
+                General Roles
+              </button>
+            </div>
           </div>
+
+          {/* View 1: Solo Parents Scope Cards */}
+          {referenceTab === 'solo_parents' && (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5 pt-1">
+              {ROLES.map((role) => (
+                <div
+                  key={role.key}
+                  className={`flex flex-col justify-between rounded-xl p-3.5 ring-1 ${role.bg} transition`}
+                >
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className={`text-xs font-bold ${role.color}`}>{role.label}</span>
+                      <span className="text-[10px] font-bold text-teal-900 bg-teal-100/90 px-2 py-0.5 rounded-md border border-teal-200">
+                        {role.soloParentRole}
+                      </span>
+                    </div>
+
+                    <p className="text-[11.5px] text-slate-700 leading-relaxed font-normal">
+                      {role.soloParentScope}
+                    </p>
+
+                    <div className="pt-1">
+                      <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">
+                        Authorized Duties:
+                      </p>
+                      <ul className="space-y-1">
+                        {role.soloParentDuties.map((duty, idx) => (
+                          <li key={idx} className="flex items-center gap-1.5 text-[11px] text-slate-600">
+                            <Check className="h-3 w-3 text-teal-600 shrink-0" />
+                            <span>{duty}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  </div>
+
+                  {role.restrictions && (
+                    <div className="mt-3 pt-2 border-t border-slate-200/60 flex items-start gap-1.5 text-[10.5px] text-slate-500">
+                      <Lock className="h-3 w-3 text-amber-600 shrink-0 mt-0.5" />
+                      <span>{role.restrictions}</span>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* View 2: Detailed Capability Comparison Matrix */}
+          {referenceTab === 'matrix' && (
+            <div className="overflow-x-auto rounded-xl border border-slate-200">
+              <table className="w-full text-left text-xs">
+                <thead>
+                  <tr className="bg-slate-50 text-[11px] font-bold text-slate-600 uppercase tracking-wider border-b border-slate-200">
+                    <th className="py-2.5 px-3">Solo Parents Action / Capability</th>
+                    <th className="py-2.5 px-2.5 text-center">Admin</th>
+                    <th className="py-2.5 px-2.5 text-center">Social Worker</th>
+                    <th className="py-2.5 px-2.5 text-center">Encoder</th>
+                    <th className="py-2.5 px-2.5 text-center">Health Worker</th>
+                    <th className="py-2.5 px-2.5 text-center">Responder</th>
+                    <th className="py-2.5 px-2.5 text-center">Resident</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 text-[11.5px]">
+                  <tr>
+                    <td className="py-2 px-3 font-semibold text-slate-800">
+                      Walk-In Intake Desk & Dependent Entry
+                    </td>
+                    <td className="py-2 px-2.5 text-center text-emerald-700 font-bold">✓ Full</td>
+                    <td className="py-2 px-2.5 text-center text-emerald-700 font-bold">✓ Full</td>
+                    <td className="py-2 px-2.5 text-center text-emerald-700 font-bold">✓ Full Desk</td>
+                    <td className="py-2 px-2.5 text-center text-slate-300">—</td>
+                    <td className="py-2 px-2.5 text-center text-slate-300">—</td>
+                    <td className="py-2 px-2.5 text-center text-slate-300">—</td>
+                  </tr>
+                  <tr>
+                    <td className="py-2 px-3 font-semibold text-slate-800">
+                      Official Solo Parent ID & QR Generation
+                    </td>
+                    <td className="py-2 px-2.5 text-center text-emerald-700 font-bold">✓ Issue/Print</td>
+                    <td className="py-2 px-2.5 text-center text-emerald-700 font-bold">✓ Issue/Print</td>
+                    <td className="py-2 px-2.5 text-center text-emerald-700 font-bold">✓ Issue/Print</td>
+                    <td className="py-2 px-2.5 text-center text-slate-300">—</td>
+                    <td className="py-2 px-2.5 text-center text-slate-300">—</td>
+                    <td className="py-2 px-2.5 text-center text-cyan-700 font-bold">✓ View Own ID</td>
+                  </tr>
+                  <tr>
+                    <td className="py-2 px-3 font-semibold text-slate-800">
+                      RA 11861 ₱1,000 Subsidy Assessment
+                    </td>
+                    <td className="py-2 px-2.5 text-center text-emerald-700 font-bold">✓ Full</td>
+                    <td className="py-2 px-2.5 text-center text-amber-700 font-bold">✓ Lead Evaluator</td>
+                    <td className="py-2 px-2.5 text-center text-slate-600">View Tag</td>
+                    <td className="py-2 px-2.5 text-center text-slate-300">—</td>
+                    <td className="py-2 px-2.5 text-center text-slate-300">—</td>
+                    <td className="py-2 px-2.5 text-center text-cyan-700">View Status</td>
+                  </tr>
+                  <tr>
+                    <td className="py-2 px-3 font-semibold text-slate-800">
+                      Statutory Status Revocation (RA 11861 Sec 13)
+                    </td>
+                    <td className="py-2 px-2.5 text-center text-emerald-700 font-bold">✓ Full</td>
+                    <td className="py-2 px-2.5 text-center text-emerald-700 font-bold">✓ Authorized</td>
+                    <td className="py-2 px-2.5 text-center text-rose-500 font-bold text-[10px]">Restricted</td>
+                    <td className="py-2 px-2.5 text-center text-slate-300">—</td>
+                    <td className="py-2 px-2.5 text-center text-slate-300">—</td>
+                    <td className="py-2 px-2.5 text-center text-slate-300">—</td>
+                  </tr>
+                  <tr>
+                    <td className="py-2 px-3 font-semibold text-slate-800">
+                      Registry Deletion (Purge Database Record)
+                    </td>
+                    <td className="py-2 px-2.5 text-center text-violet-700 font-bold">✓ Admin Only</td>
+                    <td className="py-2 px-2.5 text-center text-rose-500 font-bold text-[10px]">Restricted</td>
+                    <td className="py-2 px-2.5 text-center text-rose-500 font-bold text-[10px]">Restricted</td>
+                    <td className="py-2 px-2.5 text-center text-slate-300">—</td>
+                    <td className="py-2 px-2.5 text-center text-slate-300">—</td>
+                    <td className="py-2 px-2.5 text-center text-slate-300">—</td>
+                  </tr>
+                  <tr>
+                    <td className="py-2 px-3 font-semibold text-slate-800">
+                      DSWD ROSP CSV Masterlist Export
+                    </td>
+                    <td className="py-2 px-2.5 text-center text-emerald-700 font-bold">✓ Export</td>
+                    <td className="py-2 px-2.5 text-center text-emerald-700 font-bold">✓ Export</td>
+                    <td className="py-2 px-2.5 text-center text-emerald-700 font-bold">✓ Export</td>
+                    <td className="py-2 px-2.5 text-center text-slate-300">—</td>
+                    <td className="py-2 px-2.5 text-center text-slate-300">—</td>
+                    <td className="py-2 px-2.5 text-center text-slate-300">—</td>
+                  </tr>
+                  <tr>
+                    <td className="py-2 px-3 font-semibold text-slate-800">
+                      Maternal Nutrition & Infant Health Tracking
+                    </td>
+                    <td className="py-2 px-2.5 text-center text-slate-600">Shared</td>
+                    <td className="py-2 px-2.5 text-center text-slate-600">Shared</td>
+                    <td className="py-2 px-2.5 text-center text-slate-600">Shared</td>
+                    <td className="py-2 px-2.5 text-center text-emerald-700 font-bold">✓ Health Lead</td>
+                    <td className="py-2 px-2.5 text-center text-slate-300">—</td>
+                    <td className="py-2 px-2.5 text-center text-cyan-700">Health Profile</td>
+                  </tr>
+                  <tr>
+                    <td className="py-2 px-3 font-semibold text-slate-800">
+                      Disaster Evacuation & Relief Prioritization
+                    </td>
+                    <td className="py-2 px-2.5 text-center text-slate-600">Shared</td>
+                    <td className="py-2 px-2.5 text-center text-slate-600">Shared</td>
+                    <td className="py-2 px-2.5 text-center text-slate-600">Shared</td>
+                    <td className="py-2 px-2.5 text-center text-slate-600">Shared</td>
+                    <td className="py-2 px-2.5 text-center text-rose-700 font-bold">✓ Response Lead</td>
+                    <td className="py-2 px-2.5 text-center text-cyan-700">Priority Aid</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {/* View 3: General System Roles (Original Overview) */}
+          {referenceTab === 'general' && (
+            <div className="grid grid-cols-2 gap-2 lg:grid-cols-6 pt-1">
+              {ROLES.map((role) => (
+                <div key={role.key} className={`rounded-xl px-3 py-2.5 ring-1 ${role.bg}`}>
+                  <p className={`text-xs font-bold ${role.color}`}>{role.label}</p>
+                  <p className="mt-0.5 text-[10px] text-slate-500">{role.desc}</p>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
     </AppShell>

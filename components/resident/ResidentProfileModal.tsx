@@ -38,11 +38,14 @@ import {
 } from '@/lib/db/vulnerability';
 import { getPurokRiskProfile } from '@/lib/db/purok-risk-profiles';
 import { resolveResidentActiveApprovedHousehold } from '@/lib/resident-households';
+import SoloParentIdCardModal from '@/components/solo-parents/SoloParentIdCardModal';
+import { getSoloParentByResidentId } from '@/lib/db/solo-parents';
 import type {
   Household,
   PurokRiskProfile,
   Resident,
   VulnerabilityFlags,
+  SoloParentRecord,
 } from '@/lib/db/schema';
 
 interface ResidentProfileModalProps {
@@ -85,6 +88,21 @@ export default function ResidentProfileModal({
   const [qrDataUrl, setQrDataUrl] = useState<string>('');
   const [copiedId, setCopiedId] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
+  const [soloParentRecord, setSoloParentRecord] = useState<SoloParentRecord | null>(null);
+  const [showSoloParentCard, setShowSoloParentCard] = useState(false);
+
+  async function handleOpenSoloParentCard() {
+    if (!resident) return;
+    try {
+      const record = await getSoloParentByResidentId(resident.id);
+      if (record) {
+        setSoloParentRecord(record);
+        setShowSoloParentCard(true);
+      }
+    } catch (err) {
+      console.error('Failed to load solo parent record:', err);
+    }
+  }
 
   // Sync props if provided
   useEffect(() => {
@@ -341,7 +359,8 @@ export default function ResidentProfileModal({
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <>
+      <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         showCloseButton={false}
         className="max-h-[90vh] max-w-2xl overflow-y-auto rounded-[32px] border border-emerald-200/80 bg-white p-0 shadow-[0_30px_90px_-20px_rgba(4,47,46,0.35)]"
@@ -471,6 +490,17 @@ export default function ResidentProfileModal({
                     <span className="inline-flex items-center gap-1 rounded-full bg-amber-500 px-3 py-1 text-xs font-black text-white shadow-sm">
                       Senior Citizen (60+)
                     </span>
+                  ) : null}
+                  {flags?.is_solo_parent ? (
+                    <button
+                      type="button"
+                      onClick={handleOpenSoloParentCard}
+                      className="inline-flex items-center gap-1 rounded-full bg-teal-700 hover:bg-teal-800 px-3 py-1 text-xs font-black text-white shadow-sm transition active:scale-95 cursor-pointer"
+                      title="Tan-awa ang Opisyal nga Solo Parent ID Card"
+                    >
+                      <HeartHandshake className="h-3.5 w-3.5" />
+                      Solo Parent {flags.solo_parent_id ? `(${flags.solo_parent_id})` : ''} • Tan-awa ang ID 🪪
+                    </button>
                   ) : null}
                   {flags?.is_pwd ? (
                     <span className="inline-flex items-center gap-1 rounded-full bg-indigo-600 px-3 py-1 text-xs font-black text-white shadow-sm">
@@ -651,5 +681,14 @@ export default function ResidentProfileModal({
         </div>
       </DialogContent>
     </Dialog>
+
+    {showSoloParentCard && soloParentRecord && (
+      <SoloParentIdCardModal
+        isOpen={showSoloParentCard}
+        record={soloParentRecord}
+        onClose={() => setShowSoloParentCard(false)}
+      />
+    )}
+    </>
   );
 }

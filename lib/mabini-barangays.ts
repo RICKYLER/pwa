@@ -61,6 +61,10 @@ export function getBarangayRegistryEntry(id: string): MabiniBarangayRegistryEntr
   return REGISTRY_BY_ID.get(id as BarangayId) ?? null;
 }
 
+export function getBarangayName(id: string): string {
+  return REGISTRY_BY_ID.get(id as BarangayId)?.label ?? id;
+}
+
 export function getBarangayByPsgc(psgc: string): MabiniBarangayRegistryEntry | null {
   return REGISTRY_BY_PSGC.get(psgc) ?? null;
 }

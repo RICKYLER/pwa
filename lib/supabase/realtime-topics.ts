@@ -50,6 +50,13 @@ export function getRealtimeTopicsForUser(user: User | null | undefined): string[
         `user:${user.id}:audit`,
         `user:${user.id}:notifications`,
       ]);
+    case 'social_worker':
+      return uniqueTopics([
+        ...topics,
+        `barangay:${user.barangay_id}:registry`,
+        'role:social_worker:cases',
+        `user:${user.id}:notifications`,
+      ]);
     default:
       return uniqueTopics(topics);
   }

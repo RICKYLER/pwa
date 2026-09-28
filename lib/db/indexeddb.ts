@@ -23,6 +23,10 @@ export const STORE_NAMES = {
   evacuation_centers: 'evacuation_centers',
   evacuee_records: 'evacuee_records',
   audit_logs: 'audit_logs',
+  cases: 'cases',
+  case_attachments: 'case_attachments',
+  case_notes: 'case_notes',
+  solo_parents: 'solo_parents',
   sync_queue: 'sync_queue',
 } as const;
 

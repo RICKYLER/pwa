@@ -3,6 +3,8 @@ import {
   Activity,
   Bell,
   FileText,
+  FolderLock,
+  HeartHandshake,
   Home,
   MapPinned,
   Package,
@@ -16,6 +18,21 @@ import {
   Users,
 } from 'lucide-react';
 
+export type NavGroup =
+  | 'Overview'
+  | 'Social Work'
+  | 'Disaster Response'
+  | 'Relief & Logistics'
+  | 'Reports & Records'
+  | 'Administration'
+  | 'Resident';
+
+export interface NavGroupConfig {
+  id: NavGroup;
+  label: string;
+  icon: LucideIcon;
+}
+
 export interface AppNavItem {
   href: string;
   label: string;
@@ -25,14 +42,29 @@ export interface AppNavItem {
   pageEyebrow: string;
   icon: LucideIcon;
   perm: string | null;
-  group: 'Core' | 'Operations' | 'Administration' | 'Resident';
+  group: NavGroup;
   showInBottomNav?: boolean;
   mobilePriority?: number;
 }
 
+export const STAFF_NAV_GROUPS: NavGroupConfig[] = [
+  { id: 'Overview', label: 'Overview', icon: Home },
+  { id: 'Social Work', label: 'Social Work', icon: HeartHandshake },
+  { id: 'Disaster Response', label: 'Disaster Response', icon: ShieldAlert },
+  { id: 'Relief & Logistics', label: 'Relief & Logistics', icon: Truck },
+  { id: 'Reports & Records', label: 'Reports & Analytics', icon: FileText },
+];
+
+export const ADMIN_NAV_GROUP: NavGroupConfig = {
+  id: 'Administration',
+  label: 'Administration',
+  icon: UserCog,
+};
+
 export const MOBILE_BOTTOM_NAV_LIMIT = 4;
 
 export const STAFF_NAV_ITEMS: AppNavItem[] = [
+  // ── Overview ─────────────────────────────────────────────
   {
     href: '/dashboard',
     label: 'Dashboard',
@@ -42,9 +74,33 @@ export const STAFF_NAV_ITEMS: AppNavItem[] = [
     pageEyebrow: 'Municipal Operations',
     icon: Home,
     perm: null,
-    group: 'Core',
+    group: 'Overview',
     showInBottomNav: true,
     mobilePriority: 1,
+  },
+
+  // ── Social Work ──────────────────────────────────────────
+  {
+    href: '/cases',
+    label: 'Social Cases',
+    mobileLabel: 'Cases',
+    description: 'Confidential VAWC, VAC & case folders',
+    pageTitle: 'Social Cases & VAWC',
+    pageEyebrow: 'Social Welfare Operations',
+    icon: FolderLock,
+    perm: 'view_cases',
+    group: 'Social Work',
+  },
+  {
+    href: '/solo-parents',
+    label: 'Solo Parents',
+    mobileLabel: 'Solo Parents',
+    description: 'Walk-in desk, ID card printing & ROSP',
+    pageTitle: 'Solo Parents Registry',
+    pageEyebrow: 'Social Welfare Operations',
+    icon: HeartHandshake,
+    perm: 'view_solo_parents',
+    group: 'Social Work',
   },
   {
     href: '/households',
@@ -55,7 +111,7 @@ export const STAFF_NAV_ITEMS: AppNavItem[] = [
     pageEyebrow: 'Census Records',
     icon: Users,
     perm: 'view_households',
-    group: 'Core',
+    group: 'Social Work',
     showInBottomNav: true,
     mobilePriority: 2,
   },
@@ -68,10 +124,12 @@ export const STAFF_NAV_ITEMS: AppNavItem[] = [
     pageEyebrow: 'Risk Monitoring',
     icon: ShieldAlert,
     perm: 'view_vulnerability',
-    group: 'Core',
+    group: 'Social Work',
     showInBottomNav: true,
     mobilePriority: 3,
   },
+
+  // ── Disaster Response ────────────────────────────────────
   {
     href: '/responder',
     label: 'Field Response',
@@ -81,7 +139,7 @@ export const STAFF_NAV_ITEMS: AppNavItem[] = [
     pageEyebrow: 'Response Operations',
     icon: Radio,
     perm: 'view_incidents',
-    group: 'Operations',
+    group: 'Disaster Response',
     showInBottomNav: true,
     mobilePriority: 4,
   },
@@ -94,7 +152,7 @@ export const STAFF_NAV_ITEMS: AppNavItem[] = [
     pageEyebrow: 'Disaster Management',
     icon: TentTree,
     perm: null,
-    group: 'Operations',
+    group: 'Disaster Response',
   },
   {
     href: '/alerts',
@@ -105,40 +163,7 @@ export const STAFF_NAV_ITEMS: AppNavItem[] = [
     pageEyebrow: 'Response Operations',
     icon: Bell,
     perm: 'view_incidents',
-    group: 'Operations',
-  },
-  {
-    href: '/distribution',
-    label: 'Distribution',
-    mobileLabel: 'Relief',
-    description: 'Relief events and assignment tracking',
-    pageTitle: 'Distribution',
-    pageEyebrow: 'Relief Operations',
-    icon: Truck,
-    perm: 'view_reports',
-    group: 'Operations',
-  },
-  {
-    href: '/reports',
-    label: 'Reports',
-    mobileLabel: 'Reports',
-    description: 'Exports, summaries, and reporting',
-    pageTitle: 'Reports',
-    pageEyebrow: 'Analytics',
-    icon: FileText,
-    perm: 'view_reports',
-    group: 'Operations',
-  },
-  {
-    href: '/inventory',
-    label: 'Inventory',
-    mobileLabel: 'Supply',
-    description: 'Stock visibility and warehouse readiness',
-    pageTitle: 'Inventory',
-    pageEyebrow: 'Resource Readiness',
-    icon: Package,
-    perm: 'view_reports',
-    group: 'Operations',
+    group: 'Disaster Response',
   },
   {
     href: '/forecast',
@@ -149,7 +174,44 @@ export const STAFF_NAV_ITEMS: AppNavItem[] = [
     pageEyebrow: 'MSWDO Predictive Analytics',
     icon: TrendingUp,
     perm: 'view_reports',
-    group: 'Operations',
+    group: 'Disaster Response',
+  },
+
+  // ── Relief & Logistics ───────────────────────────────────
+  {
+    href: '/distribution',
+    label: 'Distribution',
+    mobileLabel: 'Relief',
+    description: 'Relief events and assignment tracking',
+    pageTitle: 'Distribution',
+    pageEyebrow: 'Relief Operations',
+    icon: Truck,
+    perm: 'view_reports',
+    group: 'Relief & Logistics',
+  },
+  {
+    href: '/inventory',
+    label: 'Inventory',
+    mobileLabel: 'Supply',
+    description: 'Stock visibility and warehouse readiness',
+    pageTitle: 'Inventory',
+    pageEyebrow: 'Resource Readiness',
+    icon: Package,
+    perm: 'view_reports',
+    group: 'Relief & Logistics',
+  },
+
+  // ── Reports & Records ────────────────────────────────────
+  {
+    href: '/reports',
+    label: 'Reports',
+    mobileLabel: 'Reports',
+    description: 'Exports, summaries, and reporting',
+    pageTitle: 'Reports',
+    pageEyebrow: 'Analytics',
+    icon: FileText,
+    perm: 'view_reports',
+    group: 'Reports & Records',
   },
 ];
 
