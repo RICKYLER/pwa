@@ -71,10 +71,125 @@ alter table public.vulnerability_flags
   add column if not exists solo_parent_id text,
   add column if not exists solo_parent_category text;
 
--- 4. Enable Row Level Security
+-- 4. Update public.users role check constraint to include 'solo_parent_focal'
+alter table public.users drop constraint if exists users_role_check;
+
+alter table public.users
+  add constraint users_role_check
+  check (role in ('admin', 'social_worker', 'solo_parent_focal', 'encoder', 'responder', 'resident'));
+
+-- Update handle_auth_user_created trigger function to recognize 'solo_parent_focal'
+create or replace function public.handle_auth_user_created()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_role text;
+  v_name text;
+  v_first_name text;
+  v_middle_name text;
+  v_last_name text;
+  v_barangay_id text;
+begin
+  v_role := case
+    when coalesce(new.raw_user_meta_data ->> 'role', '') in ('admin', 'social_worker', 'solo_parent_focal', 'encoder', 'responder', 'resident')
+      then new.raw_user_meta_data ->> 'role'
+    else 'resident'
+  end;
+
+  v_name := coalesce(
+    nullif(trim(new.raw_user_meta_data ->> 'name'), ''),
+    nullif(trim(new.raw_user_meta_data ->> 'full_name'), ''),
+    split_part(coalesce(new.email, ''), '@', 1)
+  );
+
+  v_first_name := nullif(trim(coalesce(new.raw_user_meta_data ->> 'first_name', '')), '');
+  v_middle_name := nullif(trim(coalesce(new.raw_user_meta_data ->> 'middle_name', '')), '');
+  v_last_name := nullif(trim(coalesce(new.raw_user_meta_data ->> 'last_name', '')), '');
+
+  if v_first_name is null and v_middle_name is null and v_last_name is null then
+    select parts.first_name, parts.middle_name, parts.last_name
+      into v_first_name, v_middle_name, v_last_name
+      from public.split_full_name(v_name) as parts;
+  end if;
+
+  v_barangay_id := coalesce(
+    nullif(trim(new.raw_user_meta_data ->> 'barangay_id'), ''),
+    'anitapan'
+  );
+
+  insert into public.users (
+    id,
+    email,
+    name,
+    first_name,
+    middle_name,
+    last_name,
+    role,
+    barangay_id,
+    status,
+    created_at,
+    updated_at
+  ) values (
+    new.id,
+    coalesce(new.email, ''),
+    v_name,
+    v_first_name,
+    v_middle_name,
+    v_last_name,
+    v_role,
+    v_barangay_id,
+    'active',
+    now(),
+    now()
+  )
+  on conflict (id) do update set
+    email = excluded.email,
+    name = excluded.name,
+    first_name = coalesce(excluded.first_name, public.users.first_name),
+    middle_name = coalesce(excluded.middle_name, public.users.middle_name),
+    last_name = coalesce(excluded.last_name, public.users.last_name),
+    role = excluded.role,
+    barangay_id = excluded.barangay_id,
+    status = coalesce(public.users.status, 'active'),
+    updated_at = now();
+
+  return new;
+end;
+$$;
+
+-- Allow solo_parent_focal to read households in their assigned barangay for walk-in resident matching
+create or replace function public.can_access_household(target_household_id text)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select exists (
+    select 1
+    from public.households h
+    where h.id = target_household_id
+      and (
+        public.is_admin()
+        or (
+          public.current_user_role() in ('encoder', 'responder', 'solo_parent_focal')
+          and h.barangay_id = public.current_user_barangay_id()
+        )
+        or (
+          public.current_user_role() = 'resident'
+          and h.applicant_user_id = auth.uid()
+        )
+      )
+  )
+$$;
+
+-- 5. Enable Row Level Security
 alter table public.solo_parents enable row level security;
 
--- Policy: MSWDO Staff (Admin, Social Worker, Encoder) have full access
+-- Policy: Exclusive access for MSWDO Admin and designated Solo Parent Officers
 drop policy if exists "staff_solo_parents_access" on public.solo_parents;
 create policy "staff_solo_parents_access"
   on public.solo_parents
@@ -83,14 +198,14 @@ create policy "staff_solo_parents_access"
     exists (
       select 1 from public.users
       where users.id = auth.uid()
-        and users.role in ('admin', 'social_worker', 'encoder')
+        and users.role in ('admin', 'solo_parent_focal')
     )
   )
   with check (
     exists (
       select 1 from public.users
       where users.id = auth.uid()
-        and users.role in ('admin', 'social_worker', 'encoder')
+        and users.role in ('admin', 'solo_parent_focal')
     )
   );
 

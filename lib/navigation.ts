@@ -101,6 +101,8 @@ export const STAFF_NAV_ITEMS: AppNavItem[] = [
     icon: HeartHandshake,
     perm: 'view_solo_parents',
     group: 'Social Work',
+    showInBottomNav: true,
+    mobilePriority: 2,
   },
   {
     href: '/households',
@@ -151,7 +153,7 @@ export const STAFF_NAV_ITEMS: AppNavItem[] = [
     pageTitle: 'Evacuation Operations',
     pageEyebrow: 'Disaster Management',
     icon: TentTree,
-    perm: null,
+    perm: 'view_incidents',
     group: 'Disaster Response',
   },
   {

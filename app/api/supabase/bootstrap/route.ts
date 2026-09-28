@@ -553,7 +553,7 @@ async function buildBootstrapPayload(
   const canReadInventory = user.role === 'admin' || user.role === 'encoder';
   const canReadDistributionEvents = user.role === 'admin' || user.role === 'encoder' || user.role === 'responder';
   const canReadDistributionRecords = user.role === 'admin' || user.role === 'encoder';
-  const canReadIncidents = ['admin', 'encoder', 'health_worker', 'responder'].includes(user.role);
+  const canReadIncidents = ['admin', 'encoder', 'responder'].includes(user.role);
   const canReadDisasterAlertRules = ['admin', 'responder'].includes(user.role);
   const canReadDisasterAlerts = ['admin', 'responder'].includes(user.role);
   const canReadEvacuationCenters = ['admin', 'responder'].includes(user.role);

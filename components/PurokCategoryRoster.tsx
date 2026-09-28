@@ -235,7 +235,7 @@ export default function PurokCategoryRoster({
                     <p className="mt-1.5 text-[11px] text-red-600" role="alert">{errorByResidentId[resident.id]}</p>
                   ) : null}
                   {!residentFlags ? (
-                    <p className="mt-1.5 text-[11px] text-slate-400">No health flags record yet — a health worker must encode this resident first.</p>
+                    <p className="mt-1.5 text-[11px] text-slate-400">No health flags record yet — a staff encoder must encode this resident first.</p>
                   ) : null}
                 </div>
               );

@@ -1,6 +1,6 @@
 // Core type definitions for MSWDO Census PWA
 
-export type UserRole = 'admin' | 'encoder' | 'health_worker' | 'responder' | 'resident' | 'social_worker';
+export type UserRole = 'admin' | 'encoder' | 'responder' | 'resident' | 'social_worker' | 'solo_parent_focal';
 export type UserAccountStatus = 'active' | 'inactive';
 export type HouseholdStatus = 'active' | 'moved_out' | 'deceased';
 export type ResidentStatus = 'active' | 'moved_out' | 'deceased' | 'rejected';

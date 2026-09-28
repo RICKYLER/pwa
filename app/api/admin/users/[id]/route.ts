@@ -9,7 +9,7 @@ export const runtime = 'nodejs';
 
 const updateUserSchema = z.object({
   name: z.string().min(1).optional(),
-  role: z.enum(['admin', 'encoder', 'health_worker', 'responder', 'resident']).optional(),
+  role: z.enum(['admin', 'social_worker', 'solo_parent_focal', 'encoder', 'responder', 'resident']).optional(),
   status: z.enum(['active', 'inactive']).optional(),
   barangay_id: z.string()
     .trim()

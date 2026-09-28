@@ -20,9 +20,9 @@ export async function POST(req: NextRequest) {
 
     const roleLabels: Record<string, string> = {
       admin: 'Administrator',
+      solo_parent_focal: 'Solo Parent Focal Officer',
       social_worker: 'Social Worker',
       encoder: 'Encoder',
-      health_worker: 'Health Worker',
       responder: 'Responder',
     };
     await sendAccountSetupEmail({

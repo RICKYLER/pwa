@@ -118,15 +118,20 @@ export default function SoloParentsMobile() {
             <ShieldCheck className="h-3 w-3 text-violet-600" />
             Admin Oversight • Full Access
           </span>
+        ) : currentUser?.role === 'solo_parent_focal' ? (
+          <span className="inline-flex items-center gap-1 rounded-full bg-teal-50 px-2.5 py-0.5 text-[10px] font-bold text-teal-800 ring-1 ring-teal-200">
+            <HeartHandshake className="h-3 w-3 text-teal-600" />
+            Solo Parent Officer • Exclusive RA 11861 Desk
+          </span>
         ) : currentUser?.role === 'social_worker' ? (
           <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2.5 py-0.5 text-[10px] font-bold text-amber-800 ring-1 ring-amber-200">
             <HeartHandshake className="h-3 w-3 text-amber-600" />
-            Social Worker • RA 11861 Assessment & Revocation
+            Social Worker • Welfare Assessment
           </span>
         ) : (
           <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2.5 py-0.5 text-[10px] font-bold text-blue-700 ring-1 ring-blue-200">
             <Edit2 className="h-3 w-3 text-blue-600" />
-            Encoder Desk • Walk-In & ID Issuance
+            Staff Desk
           </span>
         )}
       </div>

@@ -30,12 +30,6 @@ export function getRealtimeTopicsForUser(user: User | null | undefined): string[
         'role:admin_encoder:distribution',
         'role:incident_staff:incidents',
       ]);
-    case 'health_worker':
-      return uniqueTopics([
-        ...topics,
-        `barangay:${user.barangay_id}:registry`,
-        'role:incident_staff:incidents',
-      ]);
     case 'responder':
       return uniqueTopics([
         ...topics,
@@ -55,6 +49,13 @@ export function getRealtimeTopicsForUser(user: User | null | undefined): string[
         ...topics,
         `barangay:${user.barangay_id}:registry`,
         'role:social_worker:cases',
+        `user:${user.id}:notifications`,
+      ]);
+    case 'solo_parent_focal':
+      return uniqueTopics([
+        ...topics,
+        `barangay:${user.barangay_id}:registry`,
+        'role:solo_parent_focal:registry',
         `user:${user.id}:notifications`,
       ]);
     default:

@@ -56,16 +56,16 @@ test('staff accounts can also be permanently deleted when needed', async () => {
   try {
     const authStore = await import('../lib/server/auth-store');
     const staff = await authStore.createUserAccount({
-      name: 'Health Worker Example',
-      email: 'health-worker@example.com',
-      role: 'health_worker',
+      name: 'Solo Parent Officer Example',
+      email: 'solo-parent@example.com',
+      role: 'solo_parent_focal',
       barangay_id: 'anitapan',
     });
 
     const setupToken = await authStore.createPasswordSetupToken(staff.id);
-    await authStore.completePasswordSetup(setupToken, 'healthworker123');
+    await authStore.completePasswordSetup(setupToken, 'soloparent123');
 
-    const activeLogin = await authStore.authenticateUser('health-worker@example.com', 'healthworker123');
+    const activeLogin = await authStore.authenticateUser('solo-parent@example.com', 'soloparent123');
     assert.equal(activeLogin.status, 'success');
 
     await authStore.deleteUserAccount(staff.id);

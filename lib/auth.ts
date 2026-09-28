@@ -45,6 +45,8 @@ const PERMISSIONS = {
     'upload_cases',
     'view_residents',
     'view_households',
+  ],
+  solo_parent_focal: [
     'view_solo_parents',
     'manage_solo_parents',
     'revoke_solo_parents',
@@ -53,17 +55,10 @@ const PERMISSIONS = {
     'view_households',
     'create_household',
     'update_resident',
+    'update_health_flags',
     'view_vulnerability',
     'view_reports',
     'manage_inventory',
-    'view_solo_parents',
-    'manage_solo_parents',
-  ],
-  health_worker: [
-    'view_residents',
-    'update_health_flags',
-    'view_vulnerability',
-    'view_solo_parent_health',
   ],
   responder: [
     'view_vulnerable',
@@ -263,7 +258,11 @@ export function isResidentUser(user: User | null | undefined): user is User & { 
 
 export function getDefaultRouteForUser(user: User | null | undefined): string {
   if (!user) return '/login';
-  return user.role === 'resident' ? '/resident' : '/dashboard';
+  if (user.role === 'resident') return '/resident';
+  if (user.role === 'solo_parent_focal') return '/solo-parents';
+  if (user.role === 'social_worker') return '/cases';
+  if (user.role === 'responder') return '/responder';
+  return '/dashboard';
 }
 
 /**

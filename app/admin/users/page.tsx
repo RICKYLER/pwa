@@ -59,55 +59,55 @@ const ROLES: RoleMeta[] = [
     bg: 'bg-violet-50 ring-violet-200',
   },
   {
-    key: 'social_worker',
-    label: 'Social Worker',
-    desc: 'Confidential VAWC, VAC & casework',
-    soloParentRole: 'Welfare Assessment & Revocation',
-    soloParentScope: 'Welfare evaluation & status revocation: RA 11861 subsidy eligibility qualification, casework notes, legal status revocation (e.g. remarried/custody loss), and ROSP export.',
+    key: 'solo_parent_focal',
+    label: 'Solo Parent Officer',
+    desc: 'Exclusive RA 11861 Solo Parents desk (No access to other departments)',
+    soloParentRole: 'Exclusive Solo Parents Desk',
+    soloParentScope: 'Dedicated Solo Parents Desk: Exclusive access to walk-in intake, RA 11861 assessment, ₱1,000 subsidy qualification, ID issuance, renewals, revocation, and ROSP export. Restricted from accessing other municipal modules.',
     soloParentDuties: [
+      'Solo Parents Walk-In Intake Desk',
       'RA 11861 Welfare Evaluation',
       '₱1,000 Cash Subsidy Tagging',
+      'Print Official ID & QR Code',
+      'Annual Card Renewals',
       'Statutory Status Revocation',
-      'Casework Notes & Timeline',
       'Export DSWD ROSP CSV',
-      'Print Official ID Cards',
     ],
-    restrictions: 'Cannot permanently delete master database records (Admin only).',
+    restrictions: 'Exclusive to Solo Parents Desk only. Cannot access Bodega/Inventory, Relief Distribution, VAWC Cases, Census Profiling, or Incident Reports.',
+    color: 'text-teal-700',
+    bg: 'bg-teal-50 ring-teal-200',
+  },
+  {
+    key: 'social_worker',
+    label: 'Social Worker',
+    desc: 'Confidential VAWC, VAC & child protection cases',
+    soloParentRole: 'Social Cases Department',
+    soloParentScope: 'Dedicated to confidential social cases: VAWC, child protection, BPO/TPO, and case notes. (Does not manage Solo Parents walk-in desk).',
+    soloParentDuties: [
+      'Confidential VAWC Folders',
+      'Child Abuse & Neglect Cases',
+      'BPO & Court Referrals',
+      'Progress Notes & Casework',
+    ],
+    restrictions: 'Assigned to Social Cases & VAWC. Cannot access Bodega/Inventory or Solo Parents desk.',
     color: 'text-amber-700',
     bg: 'bg-amber-50 ring-amber-200',
   },
   {
     key: 'encoder',
-    label: 'Encoder',
-    desc: 'Add and edit census records',
-    soloParentRole: 'Walk-In Intake & ID Issuance',
-    soloParentScope: 'Frontline walk-in desk: encode new applicants, link to verified census records, encode child dependents, and print official ID cards & renewals.',
+    label: 'Census Encoder',
+    desc: 'Add and edit household census profiling records',
+    soloParentRole: 'Census Department',
+    soloParentScope: 'Frontline census profiling: encode new household records, update residents, manage relief inventory and census reports. (Does not manage Solo Parents walk-in desk).',
     soloParentDuties: [
-      'Walk-In Intake Desk Encoding',
-      'Census Household Linking',
-      'Child Dependent Registration',
-      'Print Official ID Cards',
-      'Annual Card Renewals',
+      'Household Census Profiling',
+      'Resident Records Encoding',
+      'Bodega Inventory Management',
+      'Census Summary Reports',
     ],
-    restrictions: 'Restricted from revoking legal status or deleting master records.',
+    restrictions: 'Assigned to Census Profiling & Households. Cannot access Solo Parents desk or VAWC cases.',
     color: 'text-blue-700',
     bg: 'bg-blue-50 ring-blue-200',
-  },
-  {
-    key: 'health_worker',
-    label: 'Health Worker',
-    desc: 'Manage health vulnerability flags',
-    soloParentRole: 'Nutrition & Maternal Health',
-    soloParentScope: 'Health & nutrition tracking: monitor pregnant/lactating solo mothers, infant immunization, and health vulnerability flags in medical missions.',
-    soloParentDuties: [
-      'Maternal Care & Nutrition Monitoring',
-      'Infant Immunization Tracking',
-      'Health Vulnerability Tagging',
-      'Medical Mission Outreach',
-    ],
-    restrictions: 'Read-only access for solo parent health tags in Vulnerability module; cannot edit civil registry.',
-    color: 'text-emerald-700',
-    bg: 'bg-emerald-50 ring-emerald-200',
   },
   {
     key: 'responder',
@@ -928,103 +928,114 @@ export default function AdminUsersPage() {
               <table className="w-full text-left text-xs">
                 <thead>
                   <tr className="bg-slate-50 text-[11px] font-bold text-slate-600 uppercase tracking-wider border-b border-slate-200">
-                    <th className="py-2.5 px-3">Solo Parents Action / Capability</th>
-                    <th className="py-2.5 px-2.5 text-center">Admin</th>
-                    <th className="py-2.5 px-2.5 text-center">Social Worker</th>
-                    <th className="py-2.5 px-2.5 text-center">Encoder</th>
-                    <th className="py-2.5 px-2.5 text-center">Health Worker</th>
-                    <th className="py-2.5 px-2.5 text-center">Responder</th>
-                    <th className="py-2.5 px-2.5 text-center">Resident</th>
+                    <th className="py-2.5 px-3">Module Action / Department Scope</th>
+                    <th className="py-2.5 px-2 text-center">Admin</th>
+                    <th className="py-2.5 px-2 text-center text-teal-800">Solo Parent Officer</th>
+                    <th className="py-2.5 px-2 text-center text-amber-800">Social Worker</th>
+                    <th className="py-2.5 px-2 text-center text-blue-800">Census Encoder</th>
+                    <th className="py-2.5 px-2 text-center text-rose-800">Responder</th>
+                    <th className="py-2.5 px-2 text-center text-cyan-800">Resident</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 text-[11.5px]">
                   <tr>
                     <td className="py-2 px-3 font-semibold text-slate-800">
-                      Walk-In Intake Desk & Dependent Entry
+                      Solo Parents Walk-In Intake Desk & Dependents
                     </td>
-                    <td className="py-2 px-2.5 text-center text-emerald-700 font-bold">✓ Full</td>
-                    <td className="py-2 px-2.5 text-center text-emerald-700 font-bold">✓ Full</td>
-                    <td className="py-2 px-2.5 text-center text-emerald-700 font-bold">✓ Full Desk</td>
-                    <td className="py-2 px-2.5 text-center text-slate-300">—</td>
-                    <td className="py-2 px-2.5 text-center text-slate-300">—</td>
-                    <td className="py-2 px-2.5 text-center text-slate-300">—</td>
+                    <td className="py-2 px-2 text-center text-emerald-700 font-bold">✓ Full</td>
+                    <td className="py-2 px-2 text-center text-teal-700 font-black bg-teal-50/50">✓ Exclusive Desk</td>
+                    <td className="py-2 px-2 text-center text-slate-300">—</td>
+                    <td className="py-2 px-2 text-center text-slate-300">—</td>
+                    <td className="py-2 px-2 text-center text-slate-300">—</td>
+                    <td className="py-2 px-2 text-center text-slate-300">—</td>
                   </tr>
                   <tr>
                     <td className="py-2 px-3 font-semibold text-slate-800">
                       Official Solo Parent ID & QR Generation
                     </td>
-                    <td className="py-2 px-2.5 text-center text-emerald-700 font-bold">✓ Issue/Print</td>
-                    <td className="py-2 px-2.5 text-center text-emerald-700 font-bold">✓ Issue/Print</td>
-                    <td className="py-2 px-2.5 text-center text-emerald-700 font-bold">✓ Issue/Print</td>
-                    <td className="py-2 px-2.5 text-center text-slate-300">—</td>
-                    <td className="py-2 px-2.5 text-center text-slate-300">—</td>
-                    <td className="py-2 px-2.5 text-center text-cyan-700 font-bold">✓ View Own ID</td>
+                    <td className="py-2 px-2 text-center text-emerald-700 font-bold">✓ Issue/Print</td>
+                    <td className="py-2 px-2 text-center text-teal-700 font-black bg-teal-50/50">✓ Issue/Print</td>
+                    <td className="py-2 px-2 text-center text-slate-300">—</td>
+                    <td className="py-2 px-2 text-center text-slate-300">—</td>
+                    <td className="py-2 px-2 text-center text-slate-300">—</td>
+                    <td className="py-2 px-2 text-center text-cyan-700 font-bold">✓ View Own ID</td>
                   </tr>
                   <tr>
                     <td className="py-2 px-3 font-semibold text-slate-800">
                       RA 11861 ₱1,000 Subsidy Assessment
                     </td>
-                    <td className="py-2 px-2.5 text-center text-emerald-700 font-bold">✓ Full</td>
-                    <td className="py-2 px-2.5 text-center text-amber-700 font-bold">✓ Lead Evaluator</td>
-                    <td className="py-2 px-2.5 text-center text-slate-600">View Tag</td>
-                    <td className="py-2 px-2.5 text-center text-slate-300">—</td>
-                    <td className="py-2 px-2.5 text-center text-slate-300">—</td>
-                    <td className="py-2 px-2.5 text-center text-cyan-700">View Status</td>
+                    <td className="py-2 px-2 text-center text-emerald-700 font-bold">✓ Full</td>
+                    <td className="py-2 px-2 text-center text-teal-700 font-black bg-teal-50/50">✓ Lead Evaluator</td>
+                    <td className="py-2 px-2 text-center text-slate-300">—</td>
+                    <td className="py-2 px-2 text-center text-slate-300">—</td>
+                    <td className="py-2 px-2 text-center text-slate-300">—</td>
+                    <td className="py-2 px-2 text-center text-cyan-700">View Status</td>
                   </tr>
                   <tr>
                     <td className="py-2 px-3 font-semibold text-slate-800">
                       Statutory Status Revocation (RA 11861 Sec 13)
                     </td>
-                    <td className="py-2 px-2.5 text-center text-emerald-700 font-bold">✓ Full</td>
-                    <td className="py-2 px-2.5 text-center text-emerald-700 font-bold">✓ Authorized</td>
-                    <td className="py-2 px-2.5 text-center text-rose-500 font-bold text-[10px]">Restricted</td>
-                    <td className="py-2 px-2.5 text-center text-slate-300">—</td>
-                    <td className="py-2 px-2.5 text-center text-slate-300">—</td>
-                    <td className="py-2 px-2.5 text-center text-slate-300">—</td>
-                  </tr>
-                  <tr>
-                    <td className="py-2 px-3 font-semibold text-slate-800">
-                      Registry Deletion (Purge Database Record)
-                    </td>
-                    <td className="py-2 px-2.5 text-center text-violet-700 font-bold">✓ Admin Only</td>
-                    <td className="py-2 px-2.5 text-center text-rose-500 font-bold text-[10px]">Restricted</td>
-                    <td className="py-2 px-2.5 text-center text-rose-500 font-bold text-[10px]">Restricted</td>
-                    <td className="py-2 px-2.5 text-center text-slate-300">—</td>
-                    <td className="py-2 px-2.5 text-center text-slate-300">—</td>
-                    <td className="py-2 px-2.5 text-center text-slate-300">—</td>
+                    <td className="py-2 px-2 text-center text-emerald-700 font-bold">✓ Full</td>
+                    <td className="py-2 px-2 text-center text-teal-700 font-black bg-teal-50/50">✓ Authorized</td>
+                    <td className="py-2 px-2 text-center text-slate-300">—</td>
+                    <td className="py-2 px-2 text-center text-rose-500 font-bold text-[10px]">Restricted</td>
+                    <td className="py-2 px-2 text-center text-slate-300">—</td>
+                    <td className="py-2 px-2 text-center text-slate-300">—</td>
                   </tr>
                   <tr>
                     <td className="py-2 px-3 font-semibold text-slate-800">
                       DSWD ROSP CSV Masterlist Export
                     </td>
-                    <td className="py-2 px-2.5 text-center text-emerald-700 font-bold">✓ Export</td>
-                    <td className="py-2 px-2.5 text-center text-emerald-700 font-bold">✓ Export</td>
-                    <td className="py-2 px-2.5 text-center text-emerald-700 font-bold">✓ Export</td>
-                    <td className="py-2 px-2.5 text-center text-slate-300">—</td>
-                    <td className="py-2 px-2.5 text-center text-slate-300">—</td>
-                    <td className="py-2 px-2.5 text-center text-slate-300">—</td>
+                    <td className="py-2 px-2 text-center text-emerald-700 font-bold">✓ Export</td>
+                    <td className="py-2 px-2 text-center text-teal-700 font-black bg-teal-50/50">✓ Export</td>
+                    <td className="py-2 px-2 text-center text-slate-300">—</td>
+                    <td className="py-2 px-2 text-center text-slate-300">—</td>
+                    <td className="py-2 px-2 text-center text-slate-300">—</td>
+                    <td className="py-2 px-2 text-center text-slate-300">—</td>
                   </tr>
                   <tr>
                     <td className="py-2 px-3 font-semibold text-slate-800">
-                      Maternal Nutrition & Infant Health Tracking
+                      Social Cases, VAWC & Child Protection (/cases)
                     </td>
-                    <td className="py-2 px-2.5 text-center text-slate-600">Shared</td>
-                    <td className="py-2 px-2.5 text-center text-slate-600">Shared</td>
-                    <td className="py-2 px-2.5 text-center text-slate-600">Shared</td>
-                    <td className="py-2 px-2.5 text-center text-emerald-700 font-bold">✓ Health Lead</td>
-                    <td className="py-2 px-2.5 text-center text-slate-300">—</td>
-                    <td className="py-2 px-2.5 text-center text-cyan-700">Health Profile</td>
+                    <td className="py-2 px-2 text-center text-emerald-700 font-bold">✓ Full</td>
+                    <td className="py-2 px-2 text-center text-rose-500 font-bold text-[10px] bg-rose-50/40">❌ Restricted</td>
+                    <td className="py-2 px-2 text-center text-amber-700 font-bold">✓ Lead Casework</td>
+                    <td className="py-2 px-2 text-center text-rose-500 font-bold text-[10px]">❌ Restricted</td>
+                    <td className="py-2 px-2 text-center text-slate-300">—</td>
+                    <td className="py-2 px-2 text-center text-slate-300">—</td>
                   </tr>
                   <tr>
                     <td className="py-2 px-3 font-semibold text-slate-800">
-                      Disaster Evacuation & Relief Prioritization
+                      Household Census Profiling (/households)
                     </td>
-                    <td className="py-2 px-2.5 text-center text-slate-600">Shared</td>
-                    <td className="py-2 px-2.5 text-center text-slate-600">Shared</td>
-                    <td className="py-2 px-2.5 text-center text-slate-600">Shared</td>
-                    <td className="py-2 px-2.5 text-center text-slate-600">Shared</td>
-                    <td className="py-2 px-2.5 text-center text-rose-700 font-bold">✓ Response Lead</td>
-                    <td className="py-2 px-2.5 text-center text-cyan-700">Priority Aid</td>
+                    <td className="py-2 px-2 text-center text-emerald-700 font-bold">✓ Full</td>
+                    <td className="py-2 px-2 text-center text-rose-500 font-bold text-[10px] bg-rose-50/40">❌ Restricted</td>
+                    <td className="py-2 px-2 text-center text-slate-500">View Only</td>
+                    <td className="py-2 px-2 text-center text-blue-700 font-bold">✓ Lead Encoder</td>
+                    <td className="py-2 px-2 text-center text-slate-300">—</td>
+                    <td className="py-2 px-2 text-center text-cyan-700">Own Household</td>
+                  </tr>
+                  <tr>
+                    <td className="py-2 px-3 font-semibold text-slate-800">
+                      Bodega Inventory & Relief Distribution (/inventory)
+                    </td>
+                    <td className="py-2 px-2 text-center text-emerald-700 font-bold">✓ Full</td>
+                    <td className="py-2 px-2 text-center text-rose-500 font-bold text-[10px] bg-rose-50/40">❌ Restricted</td>
+                    <td className="py-2 px-2 text-center text-rose-500 font-bold text-[10px]">❌ Restricted</td>
+                    <td className="py-2 px-2 text-center text-blue-700 font-bold">✓ Manage Bodega</td>
+                    <td className="py-2 px-2 text-center text-slate-300">—</td>
+                    <td className="py-2 px-2 text-center text-slate-300">—</td>
+                  </tr>
+                  <tr>
+                    <td className="py-2 px-3 font-semibold text-slate-800">
+                      Disaster Field Response & Incidents (/responder)
+                    </td>
+                    <td className="py-2 px-2 text-center text-emerald-700 font-bold">✓ Full</td>
+                    <td className="py-2 px-2 text-center text-rose-500 font-bold text-[10px] bg-rose-50/40">❌ Restricted</td>
+                    <td className="py-2 px-2 text-center text-slate-300">—</td>
+                    <td className="py-2 px-2.5 text-center text-slate-300">—</td>
+                    <td className="py-2 px-2 text-center text-rose-700 font-bold">✓ Response Lead</td>
+                    <td className="py-2 px-2 text-center text-slate-300">—</td>
                   </tr>
                 </tbody>
               </table>

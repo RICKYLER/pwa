@@ -31,16 +31,16 @@ flowchart TD
     VALID -- Yes --> ROLE{Which Role Logged In?}
     ROLE -- Resident --> RESIDENT[Open Resident Portal]
     ROLE -- Admin --> ADMIN[Open Admin Dashboard]
+    ROLE -- Solo Parent Focal --> SOLO[Open Solo Parents Registry & Walk-In Desk]
     ROLE -- Social Worker --> CASES[Open Social Cases & VAWC Portal]
     ROLE -- Encoder --> ENCODER[Open Staff Dashboard]
-    ROLE -- Health Worker --> HEALTH[Open Staff Dashboard]
     ROLE -- Responder --> RESPONDER[Open Field Response Dashboard]
 
     RESIDENT --> END([End])
     ADMIN --> END
+    SOLO --> END
     CASES --> END
     ENCODER --> END
-    HEALTH --> END
     RESPONDER --> END
 ```
 
@@ -466,50 +466,41 @@ Admin
   * Permanent Record Deletion (Supervisor Audit Control)
   * DSWD Registry of Solo Parents (ROSP) CSV Exporter
 
-Social Worker
-- Dashboard
-- Social Cases & VAWC Directory
-- Solo Parents Registry & Welfare Desk
-  * RA 11861 Welfare Evaluation & ₱1k Cash Subsidy Assessment
-  * Statutory Status Revocation (Remarried, Cohabiting, Dependents Aged Out)
-  * Casework Assessment Notes & Timeline
-  * 1-Click Official Solo Parent ID Generation & Printing
-  * Annual Card Renewals
-  * DSWD Registry of Solo Parents (ROSP) CSV Exporter
-  * [Restricted: Cannot permanently delete master registry records]
-- Instant Case Number & Name Search
-- Digital Case Folders
-- Scanned Attachments & BPO Uploads
-- Progress Notes & Casework Timeline
-- Census Household & Resident Linking
-- Excel / CSV Bulk Case Importer
-
-Encoder
-- Dashboard
-- Solo Parents Walk-In Intake Desk
-  * Walk-In Applicant Intake Encoding
-  * Census Household & Resident Record Linking
+Solo Parent Focal Officer (solo_parent_focal)
+- Direct Landing: /solo-parents
+- Solo Parents Walk-In Intake Desk & ROSP Masterlist
+  * Walk-In Applicant Registration & Intake Encoding
+  * RA 11861 Welfare Evaluation & ₱1,000 Cash Subsidy Tagging
   * Child Dependent Registration & Verification
-  * 1-Click Official Solo Parent ID Card Printing & QR Generation
+  * 1-Click Official Solo Parent ID Generation & Printable Card with QR
   * Annual Card Renewals & Expiry Tracking
-  * [Restricted: Cannot revoke legal status or delete master records]
+  * Statutory Status Revocation (Remarried, Cohabiting, Dependents Aged Out, Income Disqualification)
+  * Reactivations with Required Explanation/Justification Log
+  * DSWD Registry of Solo Parents (ROSP) CSV Exporter
+  * [Restricted: Cannot permanently delete master records (Admin only)]
+  * [Restricted: Completely blocked from Bodega/Inventory, Relief Distribution, VAWC Cases, Census Profiling, and Incident Reports]
+
+Social Worker
+- Direct Landing: /cases
+- Social Cases & VAWC Directory
+  * Instant Case Number & Name Search
+  * Confidential Digital Case Folders (RA 9262, RA 7610, Rape, CICL)
+  * Scanned Attachments & Barangay Protection Order (BPO) Uploads
+  * Progress Notes & Casework Timeline
+  * Census Household & Resident Linking
+  * Excel / CSV Bulk Case Importer
+  * [Restricted: Assigned to Social Cases & VAWC; cannot access Bodega/Inventory or Solo Parents desk]
+
+Encoder (Census & Inventory)
+- Dashboard
 - Households
 - Household Details
 - Resident Add/Edit
-- Vulnerability
-- Distribution
-- Inventory
-- Reports
-
-Health Worker
-- Dashboard
-- Vulnerability & Health Profiling
-  * Solo Parent Maternal & Lactating Mother Monitoring
-  * Child Nutrition & Malnutrition Tracking
-  * Infant Immunization Scheduling & Health Flagging
-  * [Restricted: Read-only access to civil registry; no encoding or revocation]
-- Household Details
-- Health Monitoring Flags
+- Vulnerability Profiling
+- Bodega Inventory Management
+- Relief Distribution
+- Census Summary Reports
+- [Restricted: Assigned to Census Profiling & Households; cannot access Solo Parents desk or VAWC cases]
 
 Responder
 - Field Response Dashboard

@@ -195,15 +195,20 @@ export default function SoloParentsDesktop() {
                 <ShieldCheck className="h-3.5 w-3.5 text-violet-600" />
                 Admin Oversight • Full Master Access (Intake, Assessment, Revocation, Deletion, ROSP)
               </span>
+            ) : currentUser?.role === 'solo_parent_focal' ? (
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-teal-50 px-2.5 py-0.5 text-[11px] font-bold text-teal-800 ring-1 ring-teal-200">
+                <HeartHandshake className="h-3.5 w-3.5 text-teal-600" />
+                Solo Parent Officer Desk • Exclusive RA 11861 Intake, ID Generation, Subsidy & Revocation
+              </span>
             ) : currentUser?.role === 'social_worker' ? (
               <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-50 px-2.5 py-0.5 text-[11px] font-bold text-amber-800 ring-1 ring-amber-200">
                 <HeartHandshake className="h-3.5 w-3.5 text-amber-600" />
-                Social Worker Desk • RA 11861 Assessment, ₱1k Subsidy Evaluation & Status Revocation
+                Social Worker • Social Welfare Casework & Assessment
               </span>
             ) : (
               <span className="inline-flex items-center gap-1.5 rounded-full bg-blue-50 px-2.5 py-0.5 text-[11px] font-bold text-blue-700 ring-1 ring-blue-200">
                 <Edit2 className="h-3.5 w-3.5 text-blue-600" />
-                Encoder Desk • Walk-In Registration, Dependent Linking & ID Card Issuance
+                Authorized Staff Desk
               </span>
             )}
           </div>

@@ -12,12 +12,11 @@ export default function SoloParentsPage() {
   const isMobile = useIsMobile();
   const user = getCurrentUser();
 
-  // Role security: Accessible to Admin, Social Worker, and Encoder
+  // Role security: Accessible to Admin and designated Solo Parent Focal Officers
   const canView =
     user &&
     (user.role === 'admin' ||
-      user.role === 'social_worker' ||
-      user.role === 'encoder' ||
+      user.role === 'solo_parent_focal' ||
       hasPermission('view_solo_parents'));
 
   if (!canView) {
@@ -29,24 +28,41 @@ export default function SoloParentsPage() {
           </div>
           <h2 className="text-xl font-bold text-slate-900">Solo Parents Desk Restricted</h2>
           <p className="text-xs text-slate-600 max-w-md mt-2 leading-relaxed">
-            Only authorized <strong>Social Workers</strong>, <strong>Encoders</strong>, and{' '}
+            Only designated <strong>Solo Parent Focal Officers</strong> and{' '}
             <strong>MSWDO Administrators</strong> can access the Solo Parent Walk-In Desk and ROSP Registry.
           </p>
 
-          {user?.role === 'health_worker' ? (
-            <div className="mt-5 rounded-2xl border border-emerald-200 bg-emerald-50/70 p-4 text-xs text-emerald-950 max-w-md text-left shadow-xs space-y-2">
-              <p className="font-bold text-emerald-900 flex items-center gap-1.5">
-                <span>🩺</span> Health Worker Access Notice
+          {user?.role === 'encoder' ? (
+            <div className="mt-5 rounded-2xl border border-blue-200 bg-blue-50/70 p-4 text-xs text-blue-950 max-w-md text-left shadow-xs space-y-2">
+              <p className="font-bold text-blue-900 flex items-center gap-1.5">
+                <span>📋</span> Census Encoder Access Notice
               </p>
-              <p className="text-[11.5px] text-emerald-800 leading-relaxed">
-                Health Workers access Solo Parent nutrition indicators, maternal healthcare, and health vulnerability monitoring via the <strong>Vulnerability & Health profiling module</strong>.
+              <p className="text-[11.5px] text-blue-800 leading-relaxed">
+                As a Census & Inventory Encoder, your workstation is assigned to household census profiling and bodega relief inventory. The Solo Parent desk is managed exclusively by the designated Solo Parent Focal Officer.
               </p>
               <div className="pt-1">
                 <Link
-                  href="/vulnerability"
-                  className="inline-block rounded-xl bg-emerald-700 px-4 py-2 text-xs font-bold text-white shadow-xs hover:bg-emerald-600 transition"
+                  href="/households"
+                  className="inline-block rounded-xl bg-blue-700 px-4 py-2 text-xs font-bold text-white shadow-xs hover:bg-blue-600 transition"
                 >
-                  Open Vulnerability & Health Module
+                  Open Household Census Module
+                </Link>
+              </div>
+            </div>
+          ) : user?.role === 'social_worker' ? (
+            <div className="mt-5 rounded-2xl border border-amber-200 bg-amber-50/70 p-4 text-xs text-amber-950 max-w-md text-left shadow-xs space-y-2">
+              <p className="font-bold text-amber-900 flex items-center gap-1.5">
+                <span>🛡️</span> Social Worker Access Notice
+              </p>
+              <p className="text-[11.5px] text-amber-800 leading-relaxed">
+                Social Workers are assigned to confidential VAWC and child protection case management. The Solo Parent registry is handled exclusively by the Solo Parent Focal Officer.
+              </p>
+              <div className="pt-1">
+                <Link
+                  href="/cases"
+                  className="inline-block rounded-xl bg-amber-700 px-4 py-2 text-xs font-bold text-white shadow-xs hover:bg-amber-600 transition"
+                >
+                  Open Social Cases Module
                 </Link>
               </div>
             </div>

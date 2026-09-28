@@ -110,9 +110,10 @@ export default function SoloParentDetailModal({
   const currentUser = getCurrentUser();
   const isAdmin = currentUser?.role === 'admin';
   const isSocialWorker = currentUser?.role === 'social_worker';
+  const isSoloParentFocal = currentUser?.role === 'solo_parent_focal';
   const canDelete = isAdmin || hasPermission('delete_solo_parents');
-  const canRevoke = isAdmin || isSocialWorker || hasPermission('revoke_solo_parents');
-  const canReactivate = isAdmin || isSocialWorker || hasPermission('revoke_solo_parents');
+  const canRevoke = isAdmin || isSocialWorker || isSoloParentFocal || hasPermission('revoke_solo_parents');
+  const canReactivate = isAdmin || isSocialWorker || isSoloParentFocal || hasPermission('revoke_solo_parents');
 
   if (!isOpen || !record) return null;
 

@@ -1364,7 +1364,7 @@ export async function updateResidentHealthFlagsOnServer(
     medical_notes?: string;
   },
 ) {
-  if (!['admin', 'encoder', 'health_worker'].includes(user.role)) {
+  if (!['admin', 'encoder'].includes(user.role)) {
     throw new Error('You are not allowed to update resident health flags.');
   }
 

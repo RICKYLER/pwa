@@ -50,7 +50,7 @@ const SEED_RECORDS: EvacueeRecord[] = [
       pregnant: 1,
     },
     checked_in_at: new Date(Date.now() - 2 * 3600 * 1000).toISOString(),
-    checked_in_by: 'Brgy. Cuambog Health Worker',
+    checked_in_by: 'Brgy. Cuambog Field Staff',
     status: 'sheltered',
     notes: 'Mabdos 7 months ug PWD (crutches). Gihatagan og priority bed.',
   },
