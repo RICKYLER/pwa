@@ -268,14 +268,19 @@ function SoloParentVerificationContent() {
           {/* BADGE 1: OFFICIAL & VALID SOLO PARENT ID */}
           {isValidActive && (
             <div className="flex flex-col items-center relative z-10">
-              <div className="mb-3">
-                <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-full bg-gradient-to-tr from-emerald-600 to-teal-500 text-white flex items-center justify-center shadow-xl shadow-emerald-600/30">
+              <div className="relative mb-3">
+                {/* Minimalist subtle green breathing halo */}
+                <div className="absolute -inset-1 rounded-full bg-emerald-400/35 animate-pulse pointer-events-none" />
+                <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-full bg-gradient-to-tr from-emerald-600 to-teal-500 text-white flex items-center justify-center shadow-lg shadow-emerald-600/25 relative">
                   <CheckCircle2 className="w-12 h-12 sm:w-14 sm:h-14 stroke-[2.5]" />
                 </div>
               </div>
 
               <div className="inline-flex items-center gap-1.5 bg-emerald-100 text-emerald-800 text-[10px] font-black uppercase tracking-widest px-3 py-1 rounded-full border border-emerald-300 mb-1.5 shadow-xs">
-                <Sparkles className="w-3 h-3 text-emerald-600" />
+                <span className="relative flex h-2 w-2">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-500 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-600"></span>
+                </span>
                 <span>Legitimate & Authenticated</span>
               </div>
 
