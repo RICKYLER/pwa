@@ -39,6 +39,15 @@ export default function SoloParentsMobile() {
 
   useEffect(() => {
     loadRecords();
+
+    function handleDataChanged(event: WindowEventMap['mswdo-data-changed']) {
+      if (event.detail.table === 'solo_parents') {
+        void loadRecords();
+      }
+    }
+
+    window.addEventListener('mswdo-data-changed', handleDataChanged);
+    return () => window.removeEventListener('mswdo-data-changed', handleDataChanged);
   }, []);
 
   async function loadRecords() {

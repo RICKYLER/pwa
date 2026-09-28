@@ -155,3 +155,34 @@ test('6. deleteSoloParent deletes record and unflags vulnerability', async () =>
   assert.equal(flag.is_solo_parent, false);
 });
 
+test('7. mapSupabaseRow restores revocation details from requirements._revocation without schema error', async () => {
+  const { mapSupabaseRow } = await import('../lib/supabase/row-mapper');
+
+  const supabaseRow = {
+    id: 'sp_test_sync',
+    id_number: 'SP-2026-0099',
+    full_name: 'Juana Dela Cruz',
+    category: 'unmarried',
+    status: 'revoked',
+    requirements: {
+      barangay_cert: true,
+      _revocation: {
+        reason: '💍 Remarried',
+        date: '2026-09-28',
+      },
+    },
+    birthdate: '1990-01-01',
+    issued_at: '2026-01-01',
+    expires_at: '2027-01-01',
+    created_at: '2026-01-01T00:00:00.000Z',
+    updated_at: '2026-09-28T00:00:00.000Z',
+  };
+
+  const mapped = mapSupabaseRow('solo_parents', supabaseRow) as any;
+  assert.equal(mapped.id, 'sp_test_sync');
+  assert.equal(mapped.status, 'revoked');
+  assert.equal(mapped.revocation_reason, '💍 Remarried');
+  assert.equal(mapped.revocation_date, '2026-09-28');
+  assert.equal(mapped.syncStatus, 'synced');
+});
+

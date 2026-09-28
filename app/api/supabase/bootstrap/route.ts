@@ -531,6 +531,37 @@ async function loadUserNotifications(
   });
 }
 
+async function loadSoloParents(user: User, residentIds: string[]) {
+  const supabase = getSupabaseAdminClient();
+  const query = supabase
+    .from('solo_parents')
+    .select('*')
+    .order('created_at', { ascending: false });
+
+  if (user.role === 'resident') {
+    if (!residentIds.length) {
+      return [];
+    }
+    const { data, error } = await query.in('resident_id', residentIds);
+    if (error) {
+      if (isMissingTableError(error, 'solo_parents')) {
+        return [];
+      }
+      throw new Error(error.message);
+    }
+    return data ?? [];
+  }
+
+  const { data, error } = await query;
+  if (error) {
+    if (isMissingTableError(error, 'solo_parents')) {
+      return [];
+    }
+    throw new Error(error.message);
+  }
+  return data ?? [];
+}
+
 async function buildBootstrapPayload(
   user: User,
   requestedTables?: SupabaseBootstrapTable[],
@@ -541,10 +572,12 @@ async function buildBootstrapPayload(
   const needsHouseholds = wants('households')
     || wants('residents')
     || wants('vulnerability_flags')
-    || wants('beneficiaries');
+    || wants('beneficiaries')
+    || (wants('solo_parents') && user.role === 'resident');
   const needsResidents = wants('residents')
     || wants('vulnerability_flags')
-    || wants('beneficiaries');
+    || wants('beneficiaries')
+    || (wants('solo_parents') && user.role === 'resident');
   const shouldResolveRemoteUserId = getSupabaseAdminConfig().isConfigured && (
     wants('audit_logs')
     || wants('user_notifications')
@@ -629,6 +662,10 @@ async function buildBootstrapPayload(
 
   if (wants('beneficiaries')) {
     payload.beneficiaries = beneficiaries;
+  }
+
+  if (wants('solo_parents')) {
+    payload.solo_parents = await loadSoloParents(user, residentIds);
   }
 
   if (programsPromise) {

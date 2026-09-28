@@ -18,7 +18,8 @@ export type SupabaseBootstrapTable =
   | 'evacuation_centers'
   | 'programs'
   | 'beneficiaries'
-  | 'audit_logs';
+  | 'audit_logs'
+  | 'solo_parents';
 
 export const SUPABASE_BOOTSTRAP_TABLES: Array<{
   table: SupabaseBootstrapTable;
@@ -42,6 +43,7 @@ export const SUPABASE_BOOTSTRAP_TABLES: Array<{
   { table: 'programs', storeName: STORE_NAMES.programs },
   { table: 'beneficiaries', storeName: STORE_NAMES.beneficiaries },
   { table: 'audit_logs', storeName: STORE_NAMES.audit_logs },
+  { table: 'solo_parents', storeName: STORE_NAMES.solo_parents },
 ];
 
 function toOptionalDate(value: unknown) {
@@ -173,6 +175,39 @@ export function mapSupabaseRow(table: SupabaseBootstrapTable, row: Record<string
         syncStatus: 'synced' as const,
         updatedBy: typeof updated_by === 'string' ? updated_by : undefined,
       };
+    case 'solo_parents': {
+      const requirements =
+        base.requirements && typeof base.requirements === 'object'
+          ? (base.requirements as Record<string, unknown>)
+          : {};
+      const revocationInfo =
+        requirements._revocation && typeof requirements._revocation === 'object'
+          ? (requirements._revocation as Record<string, unknown>)
+          : undefined;
+
+      return {
+        ...base,
+        ...metadata,
+        birthdate: typeof base.birthdate === 'string' ? base.birthdate : '',
+        issued_at: typeof base.issued_at === 'string' ? base.issued_at : '',
+        expires_at: typeof base.expires_at === 'string' ? base.expires_at : '',
+        revocation_reason:
+          typeof base.revocation_reason === 'string'
+            ? base.revocation_reason
+            : typeof revocationInfo?.reason === 'string'
+            ? revocationInfo.reason
+            : undefined,
+        revocation_date:
+          typeof base.revocation_date === 'string'
+            ? base.revocation_date
+            : typeof revocationInfo?.date === 'string'
+            ? revocationInfo.date
+            : undefined,
+        dependents: Array.isArray(base.dependents) ? base.dependents : [],
+        requirements,
+        syncStatus: 'synced' as const,
+      };
+    }
     default:
       return {
         ...base,

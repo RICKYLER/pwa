@@ -47,6 +47,7 @@ const SYNC_TRACKED_STORES = new Set<string>([
   STORE_NAMES.evacuation_centers,
   STORE_NAMES.evacuee_records,
   STORE_NAMES.audit_logs,
+  STORE_NAMES.solo_parents,
 ]);
 
 const ALL_STORE_NAMES = Object.values(STORE_NAMES);
@@ -163,7 +164,7 @@ export class IndexedDBManager {
     entityId: string,
     baseRecord?: Record<string, any>,
   ): Promise<void> {
-    if (storeName === STORE_NAMES.sync_queue || !SYNC_TRACKED_STORES.has(storeName)) {
+    if (typeof window === 'undefined' || storeName === STORE_NAMES.sync_queue || !SYNC_TRACKED_STORES.has(storeName)) {
       return;
     }
 
@@ -195,7 +196,7 @@ export class IndexedDBManager {
     entityId: string,
     rollback: () => Promise<void>,
   ): Promise<void> {
-    if (storeName === STORE_NAMES.sync_queue || !SYNC_TRACKED_STORES.has(storeName)) {
+    if (typeof window === 'undefined' || storeName === STORE_NAMES.sync_queue || !SYNC_TRACKED_STORES.has(storeName)) {
       return;
     }
 

@@ -60,6 +60,10 @@ const ROUTE_TABLES: Array<{
     tables: ['households', 'residents', 'vulnerability_flags', 'distribution_events', 'distribution_records', 'inventory_items', 'location_master_lists'],
   },
   {
+    prefix: '/solo-parents',
+    tables: ['solo_parents', 'residents', 'households', 'vulnerability_flags'],
+  },
+  {
     prefix: '/resident/household',
     tables: ['households', 'residents', 'vulnerability_flags', 'user_notifications', 'distribution_records', 'purok_risk_profiles'],
   },

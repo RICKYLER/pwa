@@ -24,6 +24,7 @@ const SUPPORTED_ENTITY_TYPES = [
   'location_master_lists',
   'purok_risk_profiles',
   'audit_logs',
+  'solo_parents',
 ] as const;
 
 type SupportedEntityType = (typeof SUPPORTED_ENTITY_TYPES)[number];
@@ -67,6 +68,7 @@ const UPSERT_ORDER: SupportedEntityType[] = [
   'package_templates',
   'residents',
   'vulnerability_flags',
+  'solo_parents',
   'beneficiaries',
   'inventory_movements',
   'incidents',
@@ -456,6 +458,56 @@ async function mapQueueItemToSupabaseRow(item: SyncQueueItem, syncActorId: strin
         changes: normalizeJsonValue(data.changes),
         timestamp: toTimestamp(data.timestamp),
       };
+    case 'solo_parents': {
+      const requirementsObj =
+        data.requirements && typeof data.requirements === 'object'
+          ? { ...(data.requirements as Record<string, unknown>) }
+          : {};
+
+      if (data.revocation_reason || data.revocation_date) {
+        requirementsObj._revocation = {
+          reason: toOptionalString(data.revocation_reason),
+          date: toDateOnly(data.revocation_date),
+        };
+      } else {
+        delete requirementsObj._revocation;
+      }
+
+      return {
+        id: toRequiredString(data.id, 'solo_parent.id'),
+        id_number: toRequiredString(data.id_number, 'solo_parent.id_number'),
+        resident_id: toOptionalString(data.resident_id),
+        household_id: toOptionalString(data.household_id),
+        full_name: toRequiredString(data.full_name, 'solo_parent.full_name'),
+        first_name: toOptionalString(data.first_name),
+        middle_name: toOptionalString(data.middle_name),
+        last_name: toOptionalString(data.last_name),
+        birthdate: toDateOnly(data.birthdate),
+        age: toOptionalNumber(data.age) ?? 0,
+        gender: toOptionalString(data.gender) ?? 'F',
+        civil_status: toOptionalString(data.civil_status),
+        contact_number: toOptionalString(data.contact_number),
+        barangay_id: toRequiredString(data.barangay_id, 'solo_parent.barangay_id'),
+        purok_sitio: toOptionalString(data.purok_sitio),
+        street_address: toOptionalString(data.street_address),
+        category: toRequiredString(data.category, 'solo_parent.category'),
+        category_narrative: toOptionalString(data.category_narrative),
+        monthly_income: toOptionalNumber(data.monthly_income) ?? 0,
+        is_minimum_wage_or_below: toBooleanValue(data.is_minimum_wage_or_below),
+        occupation: toOptionalString(data.occupation),
+        employment_status: toOptionalString(data.employment_status),
+        dependents: Array.isArray(data.dependents) ? normalizeJsonValue(data.dependents) : [],
+        requirements: normalizeJsonValue(requirementsObj),
+        issued_at: toDateOnly(data.issued_at),
+        expires_at: toDateOnly(data.expires_at),
+        encoder_id: toOptionalString(data.encoder_id),
+        encoder_name: toOptionalString(data.encoder_name) ?? 'MSWDO Desk Officer',
+        notes: toOptionalString(data.notes),
+        status: toRequiredString(data.status, 'solo_parent.status'),
+        created_at: toTimestamp(data.createdAt ?? data.created_at),
+        updated_at: toTimestamp(data.updatedAt ?? data.updated_at),
+      };
+    }
     default:
       throw new Error(`Unsupported sync entity type: ${item.entity_type}`);
   }

@@ -155,7 +155,7 @@ export async function createSoloParent(
     id,
     createdAt: now,
     updatedAt: now,
-    syncStatus: 'pending',
+    syncStatus: typeof window !== 'undefined' ? 'pending' : 'synced',
   };
 
   await db.add(STORE_NAMES.solo_parents, record);
@@ -189,7 +189,7 @@ export async function updateSoloParent(
     ...existing,
     ...updates,
     updatedAt: new Date(),
-    syncStatus: 'pending',
+    syncStatus: typeof window !== 'undefined' ? 'pending' : 'synced',
   };
 
   await db.put(STORE_NAMES.solo_parents, updated);

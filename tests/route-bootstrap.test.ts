@@ -44,3 +44,10 @@ test('forecast route bootstraps inventory items for bodega buffer tracking', () 
     ['inventory_items'],
   );
 });
+
+test('solo-parents route bootstraps solo_parents, residents, households and vulnerability_flags', () => {
+  assert.deepEqual(
+    getRouteBootstrapTables('/solo-parents'),
+    ['solo_parents', 'residents', 'households', 'vulnerability_flags'],
+  );
+});
