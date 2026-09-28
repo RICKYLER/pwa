@@ -308,7 +308,7 @@ function ResidentShellContent({ title, subtitle, children }: ResidentShellProps)
       {/* Main Container with wide desktop layout and bottom padding for mobile bottom nav */}
       <main className="mx-auto max-w-[1400px] px-4 py-6 pb-28 sm:px-6 md:pb-12 lg:px-8">
         <CivicHero
-          eyebrow={meta.eyebrow}
+          eyebrow={lang === 'ceb' && meta.eyebrow === 'Resident Services' ? 'Mga Serbisyo sa Residente' : meta.eyebrow}
           title={title}
           description={subtitle || meta.description}
           aside={

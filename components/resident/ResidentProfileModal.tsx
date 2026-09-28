@@ -40,6 +40,7 @@ import { getPurokRiskProfile } from '@/lib/db/purok-risk-profiles';
 import { resolveResidentActiveApprovedHousehold } from '@/lib/resident-households';
 import SoloParentIdCardModal from '@/components/solo-parents/SoloParentIdCardModal';
 import { getSoloParentByResidentId } from '@/lib/db/solo-parents';
+import { useResidentLanguage, getCivilStatusTranslation } from '@/lib/i18n/resident-language';
 import type {
   Household,
   PurokRiskProfile,
@@ -57,11 +58,11 @@ interface ResidentProfileModalProps {
   purokRiskProfile?: PurokRiskProfile | null;
 }
 
-function formatBirthdate(dateStr?: string) {
-  if (!dateStr) return 'Wala gibutang';
+function formatBirthdate(dateStr?: string, isCeb: boolean = true) {
+  if (!dateStr) return isCeb ? 'Wala gibutang' : 'Not specified';
   try {
     const d = new Date(dateStr);
-    return new Intl.DateTimeFormat('ceb-PH', {
+    return new Intl.DateTimeFormat(isCeb ? 'ceb-PH' : 'en-PH', {
       month: 'long',
       day: 'numeric',
       year: 'numeric',
@@ -79,6 +80,8 @@ export default function ResidentProfileModal({
   flags: initialFlags,
   purokRiskProfile: initialPurokProfile,
 }: ResidentProfileModalProps) {
+  const { lang } = useResidentLanguage();
+  const isCeb = lang === 'ceb';
   const currentUser = getCurrentUser();
   const [household, setHousehold] = useState<Household | null>(initialHousehold ?? null);
   const [resident, setResident] = useState<Resident | null>(initialResident ?? null);
@@ -377,10 +380,10 @@ export default function ResidentProfileModal({
               </div>
               <div>
                 <p className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-200 sm:text-xs">
-                  Republika sa Pilipinas · Munisipyo sa Mabini
+                  {isCeb ? 'Republika sa Pilipinas · Munisipyo sa Mabini' : 'Republic of the Philippines · Municipality of Mabini'}
                 </p>
                 <DialogTitle className="text-base font-black tracking-tight text-white sm:text-lg">
-                  Opisyal nga Digital Resident ID & Profile
+                  {isCeb ? 'Opisyal nga Digital Resident ID & Profile' : 'Official Digital Resident ID & Profile'}
                 </DialogTitle>
                 <p className="text-[11px] font-semibold text-emerald-100/90">
                   Municipal Social Welfare and Development Office (MSWDO)
@@ -404,7 +407,9 @@ export default function ResidentProfileModal({
           {isLoading ? (
             <div className="flex flex-col items-center justify-center py-16 text-slate-500">
               <div className="h-10 w-10 animate-spin rounded-full border-4 border-emerald-600 border-t-transparent" />
-              <p className="mt-4 text-sm font-bold">Gikuha ang impormasyon sa residente...</p>
+              <p className="mt-4 text-sm font-bold">
+                {isCeb ? 'Gikuha ang impormasyon sa residente...' : 'Loading resident information...'}
+              </p>
             </div>
           ) : household ? (
             <div className="space-y-6">
@@ -423,7 +428,7 @@ export default function ResidentProfileModal({
                     <div>
                       <div className="inline-flex items-center gap-1.5 rounded-full bg-emerald-600/10 px-2.5 py-0.5 text-[11px] font-bold text-emerald-800">
                         <ShieldCheck className="h-3.5 w-3.5 text-emerald-600" />
-                        Ulo sa Panimalay (Household Head)
+                        {isCeb ? 'Ulo sa Panimalay (Household Head)' : 'Head of Household (Household Head)'}
                       </div>
                       <h2 className="mt-1 text-2xl font-black tracking-tight text-slate-950 sm:text-3xl">
                         {household.head_name}
@@ -433,12 +438,12 @@ export default function ResidentProfileModal({
                           type="button"
                           onClick={handleCopyId}
                           className="inline-flex items-center gap-1.5 rounded-xl border border-emerald-300/80 bg-white px-3 py-1 text-xs font-mono font-bold text-emerald-900 shadow-sm transition hover:bg-emerald-50 active:scale-95"
-                          title="I-click aron kopyahon ang ID"
+                          title={isCeb ? 'I-click aron kopyahon ang ID' : 'Click to copy ID'}
                         >
                           {copiedId ? (
                             <>
                               <Check className="h-3.5 w-3.5 text-emerald-600" />
-                              <span>Na-kopya!</span>
+                              <span>{isCeb ? 'Na-kopya!' : 'Copied!'}</span>
                             </>
                           ) : (
                             <>
@@ -449,7 +454,7 @@ export default function ResidentProfileModal({
                         </button>
                         <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-3 py-1 text-xs font-bold text-emerald-800">
                           <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
-                          Opisyal nga Rehistrado
+                          {isCeb ? 'Opisyal nga Rehistrado' : 'Officially Registered'}
                         </span>
                       </div>
                     </div>
@@ -479,7 +484,9 @@ export default function ResidentProfileModal({
 
                 {/* Sectoral Badges Row */}
                 <div className="mt-5 flex flex-wrap items-center gap-2 border-t border-emerald-200/60 pt-4">
-                  <span className="text-xs font-bold text-slate-500">Kwalipikasyon & Sektor:</span>
+                  <span className="text-xs font-bold text-slate-500">
+                    {isCeb ? 'Kwalipikasyon & Sektor:' : 'Qualifications & Sector:'}
+                  </span>
                   {flags?.is_4ps ? (
                     <span className="inline-flex items-center gap-1 rounded-full bg-emerald-600 px-3 py-1 text-xs font-black text-white shadow-sm">
                       <Award className="h-3 w-3" />
@@ -496,10 +503,10 @@ export default function ResidentProfileModal({
                       type="button"
                       onClick={handleOpenSoloParentCard}
                       className="inline-flex items-center gap-1 rounded-full bg-teal-700 hover:bg-teal-800 px-3 py-1 text-xs font-black text-white shadow-sm transition active:scale-95 cursor-pointer"
-                      title="Tan-awa ang Opisyal nga Solo Parent ID Card"
+                      title={isCeb ? 'Tan-awa ang Opisyal nga Solo Parent ID Card' : 'View Official Solo Parent ID Card'}
                     >
                       <HeartHandshake className="h-3.5 w-3.5" />
-                      Solo Parent {flags.solo_parent_id ? `(${flags.solo_parent_id})` : ''} • Tan-awa ang ID 🪪
+                      Solo Parent {flags.solo_parent_id ? `(${flags.solo_parent_id})` : ''} • {isCeb ? 'Tan-awa ang ID 🪪' : 'View ID 🪪'}
                     </button>
                   ) : null}
                   {flags?.is_pwd ? (
@@ -509,17 +516,17 @@ export default function ResidentProfileModal({
                   ) : null}
                   {flags?.is_pregnant ? (
                     <span className="inline-flex items-center gap-1 rounded-full bg-rose-500 px-3 py-1 text-xs font-black text-white shadow-sm">
-                      Mabdos (Pregnant)
+                      {isCeb ? 'Mabdos (Pregnant)' : 'Pregnant'}
                     </span>
                   ) : null}
                   {flags?.is_indigent ? (
                     <span className="inline-flex items-center gap-1 rounded-full bg-cyan-700 px-3 py-1 text-xs font-black text-white shadow-sm">
-                      Indigent Resident
+                      {isCeb ? 'Indigent Resident' : 'Indigent Resident'}
                     </span>
                   ) : null}
                   {flags?.is_low_income ? (
                     <span className="inline-flex items-center gap-1 rounded-full bg-teal-700 px-3 py-1 text-xs font-black text-white shadow-sm">
-                      Low Income Household
+                      {isCeb ? 'Low Income Household' : 'Low Income Household'}
                     </span>
                   ) : null}
                   <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700">
@@ -534,37 +541,47 @@ export default function ResidentProfileModal({
                 <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
                   <div className="flex items-center gap-2 border-b border-slate-200 pb-2 text-xs font-black uppercase tracking-wider text-slate-700">
                     <User className="h-4 w-4 text-emerald-600" />
-                    Personal nga Impormasyon
+                    {isCeb ? 'Personal nga Impormasyon' : 'Personal Information'}
                   </div>
                   <dl className="mt-3 space-y-2.5 text-xs">
                     <div className="flex justify-between">
-                      <dt className="text-slate-500 font-medium">Edad / Birthday:</dt>
+                      <dt className="text-slate-500 font-medium">
+                        {isCeb ? 'Edad / Birthday:' : 'Age / Birthday:'}
+                      </dt>
                       <dd className="font-bold text-slate-900">
-                        {age ? `${age} ka tuig` : ''} {resident?.birthdate ? `(${formatBirthdate(resident.birthdate)})` : 'Wala gibutang'}
+                        {age ? (isCeb ? `${age} ka tuig` : `${age} yrs old`) : ''} {resident?.birthdate ? `(${formatBirthdate(resident.birthdate, isCeb)})` : (isCeb ? 'Wala gibutang' : 'Not specified')}
                       </dd>
                     </div>
                     <div className="flex justify-between">
-                      <dt className="text-slate-500 font-medium">Kasarian (Gender):</dt>
+                      <dt className="text-slate-500 font-medium">
+                        {isCeb ? 'Kasarian (Gender):' : 'Gender:'}
+                      </dt>
                       <dd className="font-bold text-slate-900">
-                        {resident?.gender === 'F' ? 'Babaye (Female)' : 'Lalaki (Male)'}
+                        {resident?.gender === 'F' ? (isCeb ? 'Babaye (Female)' : 'Female') : (isCeb ? 'Lalaki (Male)' : 'Male')}
                       </dd>
                     </div>
                     <div className="flex justify-between">
-                      <dt className="text-slate-500 font-medium">Kahimtang (Civil Status):</dt>
+                      <dt className="text-slate-500 font-medium">
+                        {isCeb ? 'Kahimtang (Civil Status):' : 'Civil Status:'}
+                      </dt>
                       <dd className="font-bold text-slate-900 capitalize">
-                        {resident?.civil_status || 'Single / Not specified'}
+                        {getCivilStatusTranslation(resident?.civil_status, lang)}
                       </dd>
                     </div>
                     <div className="flex justify-between">
-                      <dt className="text-slate-500 font-medium">Trabaho / Propesyon:</dt>
+                      <dt className="text-slate-500 font-medium">
+                        {isCeb ? 'Trabaho / Propesyon:' : 'Occupation / Profession:'}
+                      </dt>
                       <dd className="font-bold text-slate-900">
-                        {resident?.occupation || 'Wala gibutang'}
+                        {resident?.occupation || (isCeb ? 'Wala gibutang' : 'Not specified')}
                       </dd>
                     </div>
                     <div className="flex justify-between">
-                      <dt className="text-slate-500 font-medium">Numero sa Telepono:</dt>
+                      <dt className="text-slate-500 font-medium">
+                        {isCeb ? 'Numero sa Telepono:' : 'Phone Number:'}
+                      </dt>
                       <dd className="font-bold text-slate-900 font-mono">
-                        {household.contact_number || resident?.contact_number || 'Walay contact number'}
+                        {household.contact_number || resident?.contact_number || (isCeb ? 'Walay contact number' : 'No contact number')}
                       </dd>
                     </div>
                   </dl>
@@ -574,7 +591,7 @@ export default function ResidentProfileModal({
                 <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
                   <div className="flex items-center gap-2 border-b border-slate-200 pb-2 text-xs font-black uppercase tracking-wider text-slate-700">
                     <Home className="h-4 w-4 text-cyan-700" />
-                    Panimalay & Komunidad
+                    {isCeb ? 'Panimalay & Komunidad' : 'Household & Community'}
                   </div>
                   <dl className="mt-3 space-y-2.5 text-xs">
                     <div className="flex justify-between">
@@ -586,27 +603,33 @@ export default function ResidentProfileModal({
                       </dd>
                     </div>
                     <div className="flex justify-between">
-                      <dt className="text-slate-500 font-medium">Barangay & Lungsod:</dt>
+                      <dt className="text-slate-500 font-medium">
+                        {isCeb ? 'Barangay & Lungsod:' : 'Barangay & Municipality:'}
+                      </dt>
                       <dd className="font-bold text-slate-900">
                         {household.barangay_name || 'Cuambog'}, Mabini
                       </dd>
                     </div>
                     <div className="flex justify-between">
-                      <dt className="text-slate-500 font-medium">Miyembro sa Balay:</dt>
+                      <dt className="text-slate-500 font-medium">
+                        {isCeb ? 'Miyembro sa Balay:' : 'Household Members:'}
+                      </dt>
                       <dd className="font-bold text-slate-900">
                         <Link
                           href="/resident/household"
                           onClick={() => onOpenChange(false)}
                           className="inline-flex items-center gap-1 text-emerald-700 hover:underline"
                         >
-                          Tan-awa ang Pamilya <ExternalLink className="h-3 w-3" />
+                          {isCeb ? 'Tan-awa ang Pamilya' : 'View Household'} <ExternalLink className="h-3 w-3" />
                         </Link>
                       </dd>
                     </div>
                     <div className="flex justify-between">
-                      <dt className="text-slate-500 font-medium">Dangpanan sa Kalamidad:</dt>
+                      <dt className="text-slate-500 font-medium">
+                        {isCeb ? 'Dangpanan sa Kalamidad:' : 'Assigned Evacuation Center:'}
+                      </dt>
                       <dd className="font-bold text-emerald-800 text-right">
-                        {household.evacuation_site || purokProfile?.default_evacuation_site || 'Barangay Evacuation Center'}
+                        {household.evacuation_site || purokProfile?.default_evacuation_site || (isCeb ? 'Barangay Evacuation Center' : 'Barangay Evacuation Center')}
                       </dd>
                     </div>
                     <div className="flex justify-between">
@@ -623,23 +646,41 @@ export default function ResidentProfileModal({
               <div className="rounded-2xl border border-teal-200/80 bg-teal-50/70 p-4 text-xs text-teal-950 space-y-2.5">
                 <div className="flex items-center gap-2 font-bold text-teal-900">
                   <ShieldCheck className="h-4 w-4 shrink-0 text-teal-700" />
-                  <span>Pamaagi sa Pag-gamit sa Imong mga QR Code:</span>
+                  <span>
+                    {isCeb ? 'Pamaagi sa Pag-gamit sa Imong mga QR Code:' : 'How to Use Your QR Codes:'}
+                  </span>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-[11px] leading-relaxed">
                   <div className="rounded-xl bg-white/90 p-3 border border-teal-100 shadow-xs">
                     <p className="font-black text-emerald-900">
-                      🏠 1. Master Evac & ID Pass (Kini nga QR)
+                      {isCeb ? '🏠 1. Master Evac & ID Pass (Kini nga QR)' : '🏠 1. Master Evac & ID Pass (This QR)'}
                     </p>
                     <p className="mt-1 text-slate-600">
-                      <strong>Permanente.</strong> Gamiton sa <strong>Evacuation Center Check-in</strong> inig baha o kalamidad aron ma-headcount dayon ang inyong pamilya, o sa Barangay Hall alang sa opisyal nga pag-ila.
+                      {isCeb ? (
+                        <>
+                          <strong>Permanente.</strong> Gamiton sa <strong>Evacuation Center Check-in</strong> inig baha o kalamidad aron ma-headcount dayon ang inyong pamilya, o sa Barangay Hall alang sa opisyal nga pag-ila.
+                        </>
+                      ) : (
+                        <>
+                          <strong>Permanent.</strong> Use for <strong>Evacuation Center Check-in</strong> during floods or disasters for quick headcount, or at the Barangay Hall for official identity verification.
+                        </>
+                      )}
                     </p>
                   </div>
                   <div className="rounded-xl bg-white/90 p-3 border border-teal-100 shadow-xs">
                     <p className="font-black text-cyan-900">
-                      🎟️ 2. Event Ayuda QR (Single-Use Claim)
+                      {isCeb ? '🎟️ 2. Event Ayuda QR (Single-Use Claim)' : '🎟️ 2. Event Ayuda QR (Single-Use Claim)'}
                     </p>
                     <p className="mt-1 text-slate-600">
-                      <strong>Kada distribusyon.</strong> Makita sa imong Portal Home kon naay aktibong food pack release nga apil ka. Ipakita kini sa relief desk aron ma-claim ang bugas ug ayuda.
+                      {isCeb ? (
+                        <>
+                          <strong>Kada distribusyon.</strong> Makita sa imong Portal Home kon naay aktibong food pack release nga apil ka. Ipakita kini sa relief desk aron ma-claim ang bugas ug ayuda.
+                        </>
+                      ) : (
+                        <>
+                          <strong>Per distribution.</strong> Available on your Portal Home when an active food pack release includes your household. Show this at the relief desk to claim food packs and aid.
+                        </>
+                      )}
                     </p>
                   </div>
                 </div>
@@ -652,7 +693,7 @@ export default function ResidentProfileModal({
                   onClick={() => onOpenChange(false)}
                   className="inline-flex h-11 items-center justify-center rounded-2xl border border-slate-300 bg-white px-5 text-sm font-bold text-slate-700 transition hover:bg-slate-50 active:scale-95"
                 >
-                  Isira / Close
+                  {isCeb ? 'Isira' : 'Close'}
                 </button>
 
                 <button
@@ -662,19 +703,23 @@ export default function ResidentProfileModal({
                   className="inline-flex h-11 items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-700 px-6 text-sm font-black text-white shadow-md transition hover:from-emerald-700 hover:to-teal-800 active:scale-95 disabled:opacity-50"
                 >
                   <Download className="h-4 w-4" />
-                  {isDownloading ? 'Gi-download ang ID...' : 'I-download ang Digital ID Card'}
+                  {isDownloading
+                    ? (isCeb ? 'Gi-download ang ID...' : 'Downloading ID...')
+                    : (isCeb ? 'I-download ang Digital ID Card' : 'Download Digital ID Card')}
                 </button>
               </div>
             </div>
           ) : (
             <div className="py-12 text-center text-slate-600">
-              <p className="text-sm font-bold">Walay nakita nga aktibong rehistro sa panimalay.</p>
+              <p className="text-sm font-bold">
+                {isCeb ? 'Walay nakita nga aktibong rehistro sa panimalay.' : 'No active household record found.'}
+              </p>
               <Link
                 href="/households/register"
                 onClick={() => onOpenChange(false)}
                 className="mt-3 inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2 text-xs font-bold text-white shadow hover:bg-emerald-700"
               >
-                Magparehistro sa Panimalay
+                {isCeb ? 'Magparehistro sa Panimalay' : 'Register Household'}
               </Link>
             </div>
           )}

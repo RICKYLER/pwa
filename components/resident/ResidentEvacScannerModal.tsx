@@ -29,6 +29,7 @@ import { getEvacuationCenters } from '@/lib/db/evacuation-centers';
 import { checkInHouseholdToEvacuationCenter } from '@/lib/db/evacuees';
 import { getResidentsInHousehold } from '@/lib/db/residents';
 import { getCurrentVulnerabilityFlagsMapForResidents } from '@/lib/db/vulnerability';
+import { useResidentLanguage } from '@/lib/i18n/resident-language';
 import type { EvacuationCenter, Household, Resident, VulnerabilityFlags } from '@/lib/db/schema';
 
 interface ResidentEvacScannerModalProps {
@@ -44,6 +45,8 @@ export default function ResidentEvacScannerModal({
   household,
   onCheckInSuccess,
 }: ResidentEvacScannerModalProps) {
+  const { lang } = useResidentLanguage();
+  const isCeb = lang === 'ceb';
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [stream, setStream] = useState<MediaStream | null>(null);
@@ -102,7 +105,7 @@ export default function ResidentEvacScannerModal({
       setCameraError('');
       try {
         if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-          throw new Error('Walay camera support kini nga browser.');
+          throw new Error(isCeb ? 'Walay camera support kini nga browser.' : 'This browser does not support camera access.');
         }
 
         const mediaStream = await navigator.mediaDevices.getUserMedia({
@@ -130,7 +133,9 @@ export default function ResidentEvacScannerModal({
         console.warn('Resident camera access issue:', err);
         if (active) {
           setCameraError(
-            'Dili ma-access ang camera (kinahanglan ang camera permission o HTTPS). Pwede usab nimong gamiton ang mga Demo Centers sa ubos.',
+            isCeb
+              ? 'Dili ma-access ang camera (kinahanglan ang camera permission o HTTPS). Pwede usab nimong gamiton ang mga Demo Centers sa ubos.'
+              : 'Unable to access camera (camera permission or HTTPS required).',
           );
         }
       } finally {
@@ -230,7 +235,11 @@ export default function ResidentEvacScannerModal({
 
       setDetectedCenter(matched);
     } else {
-      alert(`Dili kini opisyal nga Evacuation Center QR Code: "${raw}"`);
+      alert(
+        isCeb
+          ? `Dili kini opisyal nga Evacuation Center QR Code: "${raw}"`
+          : `This is not an official Evacuation Center QR Code: "${raw}"`,
+      );
     }
   }
 
@@ -276,7 +285,11 @@ export default function ResidentEvacScannerModal({
         notes: checkInNotes,
       });
 
-      setSuccessMessage(`Malampusong naka-check-in sa ${detectedCenter.name}!`);
+      setSuccessMessage(
+        isCeb
+          ? `Malampusong naka-check-in sa ${detectedCenter.name}!`
+          : `Successfully checked in to ${detectedCenter.name}!`,
+      );
       if (onCheckInSuccess) onCheckInSuccess(rec);
 
       setTimeout(() => {
@@ -284,7 +297,11 @@ export default function ResidentEvacScannerModal({
       }, 2500);
     } catch (err) {
       console.error('Failed to submit resident self check-in:', err);
-      alert('Adunay problema sa pag-check-in. Palihog sulayi pag-usab.');
+      alert(
+        isCeb
+          ? 'Adunay problema sa pag-check-in. Palihog sulayi pag-usab.'
+          : 'There was a problem checking in. Please try again.',
+      );
     } finally {
       setIsSubmitting(false);
     }
@@ -307,10 +324,12 @@ export default function ResidentEvacScannerModal({
             </div>
             <div>
               <DialogTitle className="text-sm font-black text-white">
-                I-scan ang Evac Center QR Poster
+                {isCeb ? 'I-scan ang Evac Center QR Poster' : 'Scan Evac Center QR Poster'}
               </DialogTitle>
               <DialogDescription className="text-[11px] text-slate-400">
-                Itumbok ang camera sa QR Poster sa entrance sa Gym / Center
+                {isCeb
+                  ? 'Itumbok ang camera sa QR Poster sa entrance sa Gym / Center'
+                  : 'Point camera at the QR Poster at the Gym / Center entrance'}
               </DialogDescription>
             </div>
           </div>
@@ -358,7 +377,9 @@ export default function ResidentEvacScannerModal({
               {isInitializing && (
                 <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/80 text-white">
                   <Loader2 className="h-8 w-8 animate-spin text-emerald-400" />
-                  <p className="mt-3 text-xs font-bold text-slate-300">Gipaandar ang Camera...</p>
+                  <p className="mt-3 text-xs font-bold text-slate-300">
+                    {isCeb ? 'Gipaandar ang Camera...' : 'Starting Camera...'}
+                  </p>
                 </div>
               )}
 
@@ -378,7 +399,7 @@ export default function ResidentEvacScannerModal({
                   type="button"
                   onClick={handleSwitchCamera}
                   className="absolute bottom-4 right-4 flex h-10 w-10 items-center justify-center rounded-full bg-black/60 text-white backdrop-blur-md transition hover:bg-black/80 active:scale-95"
-                  title="I-balhin ang camera (Front / Back)"
+                  title={isCeb ? 'I-balhin ang camera (Front / Back)' : 'Switch camera (Front / Back)'}
                 >
                   <SwitchCamera className="h-5 w-5" />
                 </button>
@@ -390,11 +411,11 @@ export default function ResidentEvacScannerModal({
               <div className="flex items-center gap-2">
                 <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
                 <span className="text-[11px] font-bold text-slate-300">
-                  Aktibo ang Live Camera Scanner
+                  {isCeb ? 'Aktibo ang Live Camera Scanner' : 'Live Camera Scanner Active'}
                 </span>
               </div>
               <span className="text-[10px] font-semibold text-slate-500">
-                Itumbok sa Opisyal nga QR Poster
+                {isCeb ? 'Itumbok sa Opisyal nga QR Poster' : 'Point at Official QR Poster'}
               </span>
             </div>
           </div>
@@ -406,7 +427,9 @@ export default function ResidentEvacScannerModal({
                 <CheckCircle2 className="mx-auto h-12 w-12 text-emerald-400 animate-bounce" />
                 <h3 className="text-lg font-black text-white">{successMessage}</h3>
                 <p className="text-xs text-emerald-200 font-medium">
-                  Nakatala na kamo isip luwas ug nagpasilong sa opisyal nga roster sa Munisipyo.
+                  {isCeb
+                    ? 'Nakatala na kamo isip luwas ug nagpasilong sa opisyal nga roster sa Munisipyo.'
+                    : 'You are now recorded as safe and sheltered in the official Municipal roster.'}
                 </p>
               </div>
             ) : (
@@ -414,7 +437,7 @@ export default function ResidentEvacScannerModal({
                 <div className="rounded-2xl border-2 border-emerald-500/50 bg-emerald-950/40 p-4 space-y-3">
                   <div className="flex items-center gap-2 text-emerald-400 text-xs font-black uppercase tracking-wider">
                     <CheckCircle2 className="h-4 w-4" />
-                    <span>Na-detect ang Evacuation Center:</span>
+                    <span>{isCeb ? 'Na-detect ang Evacuation Center:' : 'Evacuation Center Detected:'}</span>
                   </div>
 
                   <div>
@@ -426,7 +449,9 @@ export default function ResidentEvacScannerModal({
 
                   <div className="flex items-center gap-2 text-xs text-emerald-300 font-bold">
                     <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
-                    <span>Status: Open · Kapasidad: {detectedCenter.capacity || 50} ka Pamilya</span>
+                    <span>
+                      Status: Open · {isCeb ? `Kapasidad: ${detectedCenter.capacity || 50} ka Pamilya` : `Capacity: ${detectedCenter.capacity || 50} Families`}
+                    </span>
                   </div>
                 </div>
 
@@ -434,13 +459,13 @@ export default function ResidentEvacScannerModal({
                 {household && (
                   <div className="rounded-2xl border border-white/10 bg-white/5 p-4 space-y-2 text-xs">
                     <p className="text-[10px] font-black uppercase tracking-wider text-slate-400">
-                      Panimalay nga I-check-in:
+                      {isCeb ? 'Panimalay nga I-check-in:' : 'Household to Check-in:'}
                     </p>
                     <div className="flex items-center justify-between">
                       <p className="text-base font-black text-white">{household.head_name}</p>
                       <span className="inline-flex items-center gap-1 rounded-full bg-emerald-600 px-2.5 py-0.5 text-xs font-black text-white">
                         <Users className="h-3 w-3" />
-                        {members.length || 1} katawo
+                        {members.length || 1} {isCeb ? 'katawo' : 'members'}
                       </span>
                     </div>
                     <p className="text-slate-400 text-[11px]">
@@ -466,7 +491,7 @@ export default function ResidentEvacScannerModal({
                       ) : null}
                       {vulns.pregnant > 0 ? (
                         <span className="rounded bg-rose-400/20 text-rose-300 px-2 py-0.5 text-[10px] font-bold">
-                          🤰 {vulns.pregnant} Mabdos
+                          🤰 {vulns.pregnant} {isCeb ? 'Mabdos' : 'Pregnant'}
                         </span>
                       ) : null}
                     </div>
@@ -476,13 +501,19 @@ export default function ResidentEvacScannerModal({
                 {/* Optional Notes */}
                 <div>
                   <label className="text-xs font-bold text-slate-300">
-                    Espesyal nga Panginahanglan / Medikal nga Pahibalo (Optional):
+                    {isCeb
+                      ? 'Espesyal nga Panginahanglan / Medikal nga Pahibalo (Optional):'
+                      : 'Special Needs / Medical Notes (Optional):'}
                   </label>
                   <input
                     type="text"
                     value={checkInNotes}
                     onChange={(e) => setCheckInNotes(e.target.value)}
-                    placeholder="e.g. Adunay maintenance medicine si lolo, infant milk..."
+                    placeholder={
+                      isCeb
+                        ? 'e.g. Adunay maintenance medicine si lolo, infant milk...'
+                        : 'e.g. Maintenance medicines, infant milk required...'
+                    }
                     className="mt-1 w-full rounded-xl border border-white/20 bg-white/10 p-2.5 text-xs text-white placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-400"
                   />
                 </div>
@@ -494,7 +525,7 @@ export default function ResidentEvacScannerModal({
                     onClick={() => setDetectedCenter(null)}
                     className="w-full sm:w-1/3 rounded-xl border border-white/20 bg-white/10 px-4 py-3 text-xs font-bold text-slate-300 hover:bg-white/20"
                   >
-                    I-scan Pag-usab
+                    {isCeb ? 'I-scan Pag-usab' : 'Scan Again'}
                   </button>
                   <button
                     type="button"
@@ -502,7 +533,9 @@ export default function ResidentEvacScannerModal({
                     disabled={isSubmitting}
                     className="w-full sm:w-2/3 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 px-5 py-3 text-xs font-black text-white shadow-lg transition hover:from-emerald-500 hover:to-teal-500 active:scale-95 disabled:opacity-50"
                   >
-                    {isSubmitting ? 'Gisave ang Check-in...' : 'Kumpirmaha ang Pag-Check-in'}
+                    {isSubmitting
+                      ? (isCeb ? 'Gisave ang Check-in...' : 'Saving Check-in...')
+                      : (isCeb ? 'Kumpirmaha ang Pag-Check-in' : 'Confirm Check-in')}
                   </button>
                 </div>
               </>

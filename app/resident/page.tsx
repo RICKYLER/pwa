@@ -101,9 +101,9 @@ declare global {
   }
 }
 
-function formatDate(value?: Date): string {
+function formatDate(value?: Date | string | null, isCeb: boolean = true): string {
   if (!value) {
-    return 'Waiting for review';
+    return isCeb ? 'Naghulat og pagsusi' : 'Waiting for review';
   }
 
   return new Intl.DateTimeFormat('en-PH', {
@@ -112,10 +112,10 @@ function formatDate(value?: Date): string {
   }).format(new Date(value));
 }
 
-function formatScheduleDate(value: string): string {
+function formatScheduleDate(value: string, isCeb: boolean = true): string {
   const parsed = new Date(`${value}T00:00:00.000Z`);
   if (Number.isNaN(parsed.getTime())) {
-    return value;
+    return value || (isCeb ? 'I-anunsyo pa' : 'TBA');
   }
 
   return new Intl.DateTimeFormat('en-PH', {
@@ -142,7 +142,9 @@ interface EmergencyHotline {
   id: string;
   name: string;
   agency: string;
+  agencyEn: string;
   description: string;
+  descriptionEn: string;
   phone: string;
   altPhone?: string;
   tag: string;
@@ -153,7 +155,9 @@ const EMERGENCY_HOTLINES: EmergencyHotline[] = [
     id: 'mdrrmo',
     name: 'MDRRMO Rescue Mabini',
     agency: 'Disaster Risk Reduction Office',
+    agencyEn: 'Disaster Risk Reduction Office',
     description: 'Disaster rescue, baha, emergency ambulance, ug kalamidad.',
+    descriptionEn: 'Disaster rescue, flood, emergency ambulance, and calamity assistance.',
     phone: '09123456789',
     altPhone: '(084) 817-0000',
     tag: '24/7 Hotline',
@@ -162,7 +166,9 @@ const EMERGENCY_HOTLINES: EmergencyHotline[] = [
     id: 'barangay',
     name: 'Barangay Hall',
     agency: 'Lokal nga Barangay Desk',
+    agencyEn: 'Local Barangay Desk',
     description: 'Tanod quick response, kapitan desk, ug lokal nga evacuation assistance.',
+    descriptionEn: 'Tanod quick response, Barangay Captain desk, and local evacuation assistance.',
     phone: '09491112233',
     tag: 'Barangay Desk',
   },
@@ -170,7 +176,9 @@ const EMERGENCY_HOTLINES: EmergencyHotline[] = [
     id: 'police',
     name: 'Mabini Municipal Police Station (MPS)',
     agency: 'Philippine National Police',
+    agencyEn: 'Philippine National Police',
     description: 'Kaluwasan, kahapsay ug kalinaw, ug emergency dispatch.',
+    descriptionEn: 'Public safety, peace and order, and emergency dispatch.',
     phone: '09985987254',
     altPhone: '(084) 817-0123',
     tag: 'PNP Mabini',
@@ -179,7 +187,9 @@ const EMERGENCY_HOTLINES: EmergencyHotline[] = [
     id: 'bfp',
     name: 'Bureau of Fire Protection (BFP Mabini)',
     agency: 'Fire & Rescue Station',
+    agencyEn: 'Fire & Rescue Station',
     description: 'Sunog, search and rescue, ug hazardous area assessment.',
+    descriptionEn: 'Fire emergency, search and rescue, and hazardous area assessment.',
     phone: '09304129988',
     altPhone: '(084) 817-0111',
     tag: 'BFP Station',
@@ -188,7 +198,9 @@ const EMERGENCY_HOTLINES: EmergencyHotline[] = [
     id: 'rhu',
     name: 'Mabini Rural Health Unit (RHU Clinic)',
     agency: 'Municipal Health Office',
+    agencyEn: 'Municipal Health Office',
     description: 'First aid, emerhensya medikal, ug medikasyon sa evacuation.',
+    descriptionEn: 'First aid, medical emergency, and evacuation medication.',
     phone: '09276543210',
     tag: 'Health Clinic',
   },
@@ -568,11 +580,15 @@ export default function ResidentPortalPage() {
 
   return (
     <ResidentShell
-      title="Portal sa Residente"
+      title={isCeb ? 'Portal sa Residente' : 'Resident Portal'}
       subtitle={
         activeHousehold
-          ? `Maayong adlaw! Naka-link ang inyong aktibong panimalay sa ${formattedPurokName}, Mabini.`
-          : 'Paghimo og rehistrasyon sa panimalay aron masubay ang inyong mga serbisyo ug ayuda gikan sa MSWDO.'
+          ? isCeb
+            ? `Maayong adlaw! Naka-link ang inyong aktibong panimalay sa ${formattedPurokName}, Mabini.`
+            : `Good day! Your active household is linked to ${formattedPurokName}, Mabini.`
+          : isCeb
+            ? 'Paghimo og rehistrasyon sa panimalay aron masubay ang inyong mga serbisyo ug ayuda gikan sa MSWDO.'
+            : 'Register your household to track your services and assistance from MSWDO.'
       }
     >
       {/* Onboarding Banner for first-time unverified residents */}
@@ -584,23 +600,26 @@ export default function ResidentPortalPage() {
                 <FilePlus2 className="h-8 w-8 text-cyan-300" />
               </div>
               <div>
-                <p className="text-xs font-bold uppercase tracking-[0.2em] text-cyan-800">Unang Lakang Alang sa Pamilya</p>
+                <p className="text-xs font-bold uppercase tracking-[0.2em] text-cyan-800">
+                  {isCeb ? 'Unang Lakang Alang sa Pamilya' : 'First Step for Your Family'}
+                </p>
                 <h2 className="mt-2 text-2xl font-black tracking-tight text-slate-950 sm:text-3xl">
-                  Irehistro ang Inyong Panimalay Karon
+                  {isCeb ? 'Irehistro ang Inyong Panimalay Karon' : 'Register Your Household Now'}
                 </h2>
                 <p className="mt-2 max-w-2xl text-base leading-relaxed text-slate-600">
-                  Wala pa kay narehistrong panimalay sa Mabini. Irehistro ang inyong pamilya aron maapil sa opisyal nga
-                  listahan sa MSWDO alang sa ayuda, relief goods, ug disaster response.
+                  {isCeb
+                    ? 'Wala pa kay narehistrong panimalay sa Mabini. Irehistro ang inyong pamilya aron maapil sa opisyal nga listahan sa MSWDO alang sa ayuda, relief goods, ug disaster response.'
+                    : 'You do not have a registered household in Mabini yet. Register your family to be included in MSWDO\'s official roster for assistance, relief goods, and disaster response.'}
                 </p>
                 <div className="mt-4 flex flex-wrap gap-2 text-xs font-bold text-slate-700">
                   <span className="rounded-full border border-cyan-200 bg-white px-3 py-1.5 shadow-sm">
-                    1. Isulat ang mga sakop sa pamilya
+                    {isCeb ? '1. Isulat ang mga sakop sa pamilya' : '1. List household members'}
                   </span>
                   <span className="rounded-full border border-cyan-200 bg-white px-3 py-1.5 shadow-sm">
-                    2. Isumite alang sa review
+                    {isCeb ? '2. Isumite alang sa review' : '2. Submit for review'}
                   </span>
                   <span className="rounded-full border border-cyan-200 bg-white px-3 py-1.5 shadow-sm">
-                    3. Makadawat og pahibalo sa food pack release
+                    {isCeb ? '3. Makadawat og pahibalo sa food pack release' : '3. Receive food pack release notices'}
                   </span>
                 </div>
               </div>
@@ -609,7 +628,7 @@ export default function ResidentPortalPage() {
               href="/households/register"
               className="inline-flex h-14 items-center justify-center gap-2 rounded-full bg-cyan-950 px-8 text-base font-bold text-white shadow-lg transition hover:bg-cyan-900"
             >
-              Irehistro Na Karon
+              {isCeb ? 'Irehistro Na Karon' : 'Register Now'}
               <ArrowRight className="h-5 w-5 text-cyan-300" />
             </Link>
           </div>
@@ -629,25 +648,29 @@ export default function ResidentPortalPage() {
               <div className="flex items-center gap-2.5">
                 <span className="flex h-3 w-3 rounded-full bg-emerald-500 animate-pulse" />
                 <p className="text-xs font-black uppercase tracking-[0.2em] text-emerald-800">
-                  Republika sa Pilipinas · Munisipyo sa Mabini · DSWD / MSWDO
+                  {isCeb
+                    ? 'Republika sa Pilipinas · Munisipyo sa Mabini · DSWD / MSWDO'
+                    : 'Republic of the Philippines · Municipality of Mabini · DSWD / MSWDO'}
                 </p>
               </div>
               <div className="inline-flex items-center gap-1.5 rounded-full border border-emerald-300 bg-emerald-100/80 px-3.5 py-1 text-xs font-bold text-emerald-900 shadow-sm">
                 <CheckCircle2 className="h-4 w-4 text-emerald-700" />
-                Opisyal nga Rehistrado (Active Household)
+                {isCeb ? 'Opisyal nga Rehistrado (Active Household)' : 'Officially Registered (Active Household)'}
               </div>
             </div>
 
             {/* Head Name & Address */}
             <div className="mt-5 flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
               <div>
-                <p className="text-sm font-semibold text-emerald-700">Maayong adlaw sa inyong pamilya,</p>
+                <p className="text-sm font-semibold text-emerald-700">
+                  {isCeb ? 'Maayong adlaw sa inyong pamilya,' : 'Good day to your family,'}
+                </p>
                 <div className="mt-1 flex flex-wrap items-center gap-3">
                   <button
                     type="button"
                     onClick={() => setShowProfileModal(true)}
                     className="group flex items-center gap-2.5 text-left transition hover:opacity-95 active:scale-[0.99]"
-                    title="Pislita aron ablihan ang Imong Opisyal nga Profile ug Digital ID Pass"
+                    title={isCeb ? 'Pislita aron ablihan ang Imong Opisyal nga Profile ug Digital ID Pass' : 'Click to open your Official Profile and Digital ID Pass'}
                   >
                     <h1 className="text-3xl font-black tracking-tight text-slate-950 sm:text-4xl group-hover:text-emerald-950 group-hover:underline underline-offset-4 decoration-emerald-500/50">
                       {activeHousehold.head_name}
@@ -657,19 +680,19 @@ export default function ResidentPortalPage() {
                     type="button"
                     onClick={() => setShowProfileModal(true)}
                     className="inline-flex items-center gap-1.5 rounded-full border border-emerald-300 bg-white/95 px-3 py-1 text-xs font-bold text-emerald-900 shadow-sm transition hover:border-emerald-400 hover:bg-emerald-50 active:scale-95"
-                    title="Tan-awa ang Profile & Digital ID Pass"
+                    title={isCeb ? 'Tan-awa ang Profile & Digital ID Pass' : 'View Profile & Digital ID Pass'}
                   >
                     <IdCard className="h-3.5 w-3.5 text-emerald-600" />
-                    <span>Tan-awa ang Profile & ID</span>
+                    <span>{isCeb ? 'Tan-awa ang Profile & ID' : 'View Profile & ID'}</span>
                   </button>
                   <button
                     type="button"
                     onClick={() => setShowMasterQrModal(true)}
                     className="inline-flex items-center gap-1.5 rounded-full border border-teal-400 bg-teal-50 px-3 py-1 text-xs font-bold text-teal-900 shadow-sm transition hover:border-teal-500 hover:bg-teal-100 active:scale-95"
-                    title="Ablihi ang Master Evac QR Pass (Offline-ready)"
+                    title={isCeb ? 'Ablihi ang Master Evac QR Pass (Offline-ready)' : 'Open Master Evac QR Pass (Offline-ready)'}
                   >
                     <QrCode className="h-3.5 w-3.5 text-teal-700" />
-                    <span>Akong Evac QR Pass (Offline)</span>
+                    <span>{isCeb ? 'Akong Evac QR Pass (Offline)' : 'My Evac QR Pass (Offline)'}</span>
                   </button>
                 </div>
                 <div className="mt-2.5 flex flex-wrap items-center gap-3 text-sm font-semibold text-slate-600">
@@ -682,13 +705,13 @@ export default function ResidentPortalPage() {
                     className="inline-flex items-center gap-1.5 rounded-lg bg-white/80 px-3 py-1 text-slate-800 shadow-sm transition hover:text-emerald-900 hover:bg-emerald-50"
                   >
                     <Users className="h-4 w-4 text-cyan-700" />
-                    {activeHouseholdResidents.length || 1} ka Miyembro sa Balay
+                    {activeHouseholdResidents.length || 1} {isCeb ? 'ka Miyembro sa Balay' : ((activeHouseholdResidents.length || 1) === 1 ? 'Household Member' : 'Household Members')}
                   </Link>
                   <button
                     type="button"
                     onClick={() => setShowProfileModal(true)}
                     className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-50 px-3 py-1 text-xs font-mono font-bold text-emerald-800 shadow-sm transition hover:bg-emerald-100 active:scale-95"
-                    title="Pislita aron ablihan ang Household Profile"
+                    title={isCeb ? 'Pislita aron ablihan ang Household Profile' : 'Click to open Household Profile'}
                   >
                     ID: HH-{activeHousehold.id.slice(0, 8).toUpperCase()}
                   </button>
@@ -736,14 +759,14 @@ export default function ResidentPortalPage() {
                       <div className="flex flex-wrap items-center gap-2">
                         <span className="inline-flex items-center gap-1 rounded-full bg-amber-400 px-2.5 py-0.5 text-[10px] font-black uppercase tracking-wider text-slate-950 shadow-sm">
                           <Package className="h-3 w-3" />
-                          {unclaimedEligibleCount} Food Pack Release
+                          {unclaimedEligibleCount} {isCeb ? 'Food Pack Release' : (unclaimedEligibleCount === 1 ? 'Food Pack Release' : 'Food Pack Releases')}
                         </span>
                         <span className="text-[11px] font-extrabold uppercase tracking-wide text-emerald-200">
-                          Apil Ka!
+                          {isCeb ? 'Apil Ka!' : 'Eligible!'}
                         </span>
                       </div>
                       <div className="mt-1 text-sm font-extrabold leading-snug text-white">
-                        Pislita aron ablihan ang Event QR Code
+                        {isCeb ? 'Pislita aron ablihan ang Event QR Code' : 'Click to open Event QR Code'}
                       </div>
                     </div>
                     <div className="ml-auto hidden pl-2 sm:block">
@@ -753,7 +776,7 @@ export default function ResidentPortalPage() {
                 ) : (
                   <div className="inline-flex items-center gap-2 rounded-2xl border border-emerald-300/80 bg-white/90 px-4 py-3 text-xs font-semibold text-emerald-800 shadow-sm">
                     <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
-                    <span>Walay pending nga food pack release karong adlawa</span>
+                    <span>{isCeb ? 'Walay pending nga food pack release karong adlawa' : 'No pending food pack releases today'}</span>
                   </div>
                 )}
 
@@ -762,7 +785,7 @@ export default function ResidentPortalPage() {
                   className="inline-flex w-full sm:w-auto items-center justify-center gap-2.5 rounded-2xl border-2 border-slate-200 bg-white px-5 py-3 text-sm font-bold text-slate-800 shadow-sm transition hover:border-emerald-300 hover:bg-emerald-50/50 hover:text-emerald-950 active:scale-[0.99]"
                 >
                   <Users className="h-5 w-5 text-emerald-600 shrink-0" />
-                  <span>Tan-awa ang Pamilya</span>
+                  <span>{isCeb ? 'Tan-awa ang Pamilya' : 'View Household'}</span>
                 </Link>
               </div>
             </div>
@@ -784,13 +807,15 @@ export default function ResidentPortalPage() {
                   <div>
                     <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2.5 py-0.5 text-[10px] font-black uppercase tracking-wider text-emerald-800">
                       <CheckCircle2 className="h-3 w-3 text-emerald-600" />
-                      Naka-check-in sa Evacuation Center
+                      {isCeb ? 'Naka-check-in sa Evacuation Center' : 'Checked in at Evacuation Center'}
                     </span>
                     <h3 className="text-base font-black text-slate-950 mt-0.5">
                       {activeEvacRecord.evacuation_center_name}
                     </h3>
                     <p className="text-xs text-slate-600">
-                      Luwas nga nagpasilong ang inyong panimalay ({activeEvacRecord.family_members_count} ka sakop).
+                      {isCeb
+                        ? `Luwas nga nagpasilong ang inyong panimalay (${activeEvacRecord.family_members_count} ka sakop).`
+                        : `Your household is safely sheltered (${activeEvacRecord.family_members_count} member${activeEvacRecord.family_members_count === 1 ? '' : 's'}).`}
                     </p>
                   </div>
                 </div>
@@ -802,7 +827,7 @@ export default function ResidentPortalPage() {
                     className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-emerald-300 bg-white px-3.5 py-2.5 text-xs font-bold text-emerald-900 shadow-sm transition hover:bg-emerald-50 active:scale-95"
                   >
                     <QrCode className="h-4 w-4 text-emerald-700" />
-                    <span>Akong Evac QR Pass</span>
+                    <span>{isCeb ? 'Akong Evac QR Pass' : 'My Evac QR Pass'}</span>
                   </button>
                   <button
                     type="button"
@@ -810,7 +835,7 @@ export default function ResidentPortalPage() {
                     className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-xs font-bold text-slate-700 shadow-sm transition hover:border-rose-300 hover:bg-rose-50 hover:text-rose-700 active:scale-95"
                   >
                     <LogOut className="h-4 w-4 text-slate-500" />
-                    <span>I-check Out (Nakapauli na)</span>
+                    <span>{isCeb ? 'I-check Out (Nakapauli na)' : 'Check Out (Returned Home)'}</span>
                   </button>
                 </div>
               </div>
@@ -824,13 +849,19 @@ export default function ResidentPortalPage() {
                 </div>
                 <div>
                   <div className="flex items-center gap-2">
-                    <p className="text-xs font-black text-slate-950">Naa ba kamo karon sa Evacuation Center?</p>
+                    <p className="text-xs font-black text-slate-950">
+                      {isCeb ? 'Naa ba kamo karon sa Evacuation Center?' : 'Are you currently at an Evacuation Center?'}
+                    </p>
                     <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[9px] font-black uppercase tracking-wider text-emerald-800">
-                      Offline Ready
+                      {isCeb ? 'Offline Ready' : 'Offline Ready'}
                     </span>
                   </div>
                   <p className="text-[11px] text-slate-600 mt-0.5">
-                    Ipakita ang inyong <strong>Master QR Pass</strong> bisan walay internet, o i-scan ang <strong>QR Poster sa Entrance</strong>.
+                    {isCeb ? (
+                      <>Ipakita ang inyong <strong>Master QR Pass</strong> bisan walay internet, o i-scan ang <strong>QR Poster sa Entrance</strong>.</>
+                    ) : (
+                      <>Show your <strong>Master QR Pass</strong> even without internet, or scan the <strong>QR Poster at the Entrance</strong>.</>
+                    )}
                   </p>
                 </div>
               </div>
@@ -840,10 +871,10 @@ export default function ResidentPortalPage() {
                   type="button"
                   onClick={() => setShowMasterQrModal(true)}
                   className="inline-flex items-center gap-2 rounded-xl border-2 border-emerald-600 bg-white px-4 py-2.5 text-xs font-black text-emerald-900 shadow-sm transition hover:bg-emerald-50 active:scale-95"
-                  title="Ablihi ang QR code nga pwede i-screenshot o i-save sa gallery bisan walay signal"
+                  title={isCeb ? 'Ablihi ang QR code nga pwede i-screenshot o i-save sa gallery bisan walay signal' : 'Open QR code that can be saved or screenshotted even without cell signal'}
                 >
                   <QrCode className="h-4 w-4 text-emerald-700" />
-                  <span>Akong Evac QR Pass (Offline)</span>
+                  <span>{isCeb ? 'Akong Evac QR Pass (Offline)' : 'My Evac QR Pass (Offline)'}</span>
                 </button>
 
                 <button
@@ -852,7 +883,7 @@ export default function ResidentPortalPage() {
                   className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-700 px-4 py-2.5 text-xs font-black text-white shadow-md transition hover:from-emerald-700 hover:to-teal-800 active:scale-95"
                 >
                   <Camera className="h-4 w-4 text-emerald-200" />
-                  <span>I-scan ang Evac Center QR</span>
+                  <span>{isCeb ? 'I-scan ang Evac Center QR' : 'Scan Evac Center QR'}</span>
                 </button>
               </div>
             </div>
@@ -874,25 +905,28 @@ export default function ResidentPortalPage() {
                   <div>
                     <div className="inline-flex items-center gap-2 rounded-full bg-rose-600 px-3.5 py-1 text-xs font-black uppercase tracking-wider text-white">
                       <Siren className="h-3.5 w-3.5" />
-                      Pahimangno sa Baha / Kusog nga Ulan!
+                      {isCeb ? 'Pahimangno sa Baha / Kusog nga Ulan!' : 'Flood / Heavy Rain Advisory!'}
                     </div>
                     <h2 className="mt-2 text-2xl font-black text-rose-950 sm:text-3xl">
-                      Mag-amping ang {formattedPurokName}!
+                      {isCeb ? `Mag-amping ang ${formattedPurokName}!` : `Stay safe, ${formattedPurokName}!`}
                     </h2>
                     <p className="mt-1.5 text-base font-semibold leading-relaxed text-rose-900">
-                      Adunay detected nga kusog nga ulan o peligro sa pagbaha sa inyong lugar. Palihog mag-andam sa
-                      inyong pamilya ug bantayi ang palibot.
+                      {isCeb
+                        ? 'Adunay detected nga kusog nga ulan o peligro sa pagbaha sa inyong lugar. Palihog mag-andam sa inyong pamilya ug bantayi ang palibot.'
+                        : 'Heavy rain or flood risk detected in your area. Please prepare your family and stay alert.'}
                     </p>
 
                     <div className="mt-3.5 flex flex-wrap gap-2.5">
                       <div className="inline-flex items-center gap-2 rounded-xl border border-rose-300 bg-white/90 px-3.5 py-2 text-sm font-bold text-rose-950 shadow-sm">
-                        <span>🏃 Inyong Dangpanan (Evacuation Site):</span>
+                        <span>{isCeb ? '🏃 Inyong Dangpanan (Evacuation Site):' : '🏃 Evacuation Shelter Site:'}</span>
                         <span className="rounded-md bg-rose-100 px-2 py-0.5 text-rose-800">
                           {resolvedPurokRiskProfile?.default_evacuation_site || 'San Roque Barangay Gym'}
                         </span>
                       </div>
                       <div className="inline-flex items-center gap-2 rounded-xl border border-rose-300 bg-white/90 px-3.5 py-2 text-sm font-medium text-rose-900 shadow-sm">
-                        🎒 I-andam ang emergency go-bag (tubig, suga, tambal, importanteng dokumento)
+                        {isCeb
+                          ? '🎒 I-andam ang emergency go-bag (tubig, suga, tambal, importanteng dokumento)'
+                          : '🎒 Prepare your emergency go-bag (water, light, medicine, important documents)'}
                       </div>
                     </div>
                   </div>
@@ -905,7 +939,7 @@ export default function ResidentPortalPage() {
                     className="inline-flex h-14 items-center justify-center gap-2 rounded-2xl bg-rose-600 px-6 text-sm font-black text-white shadow-lg transition hover:bg-rose-700"
                   >
                     <PhoneCall className="h-5 w-5" />
-                    Tawag sa Rescue (MDRRMO)
+                    {isCeb ? 'Tawag sa Rescue (MDRRMO)' : 'Call Rescue (MDRRMO)'}
                   </button>
                   <button
                     type="button"
@@ -913,7 +947,9 @@ export default function ResidentPortalPage() {
                     className="inline-flex h-11 items-center justify-center gap-2 rounded-2xl border border-rose-300 bg-white/80 px-4 text-xs font-bold text-rose-900 transition hover:bg-white"
                   >
                     <CloudRain className="h-4 w-4 text-rose-600" />
-                    {showWeatherDetails ? 'Tagoa ang Weather' : 'Tan-awa ang Weather Report'}
+                    {showWeatherDetails
+                      ? (isCeb ? 'Tagoa ang Weather' : 'Hide Weather')
+                      : (isCeb ? 'Tan-awa ang Weather Report' : 'View Weather Report')}
                   </button>
                 </div>
               </div>
@@ -940,18 +976,19 @@ export default function ResidentPortalPage() {
                   <div>
                     <div className="inline-flex items-center gap-1.5 rounded-full bg-emerald-100 px-3 py-0.5 text-xs font-bold text-emerald-800">
                       <Sparkles className="h-3 w-3 text-emerald-600" />
-                      Kalinaw sa Hunahuna · Status sa Komunidad
+                      {isCeb ? 'Kalinaw sa Hunahuna · Status sa Komunidad' : 'Peace of Mind · Community Status'}
                     </div>
                     <h2 className="mt-1.5 text-2xl font-black text-slate-950 sm:text-3xl">
-                      Luwas ug Kalma ang {formattedPurokName}
+                      {isCeb ? `Luwas ug Kalma ang ${formattedPurokName}` : `Safe and Calm in ${formattedPurokName}`}
                     </h2>
                     <p className="mt-1 text-base leading-relaxed text-slate-600">
-                      Walay aktibong advisory sa baha o kusog nga ulan karong orasa sa inyong barangay. Luwas ang inyong
-                      panimalay ug kasilinganan.
+                      {isCeb
+                        ? 'Walay aktibong advisory sa baha o kusog nga ulan karong orasa sa inyong barangay. Luwas ang inyong panimalay ug kasilinganan.'
+                        : 'No active flood or heavy rain advisory for your barangay right now. Your household and neighborhood are safe.'}
                     </p>
                     <div className="mt-3 flex flex-wrap items-center gap-3 text-xs sm:text-sm">
                       <span className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-200 bg-white px-3 py-1.5 font-semibold text-slate-700 shadow-sm">
-                        📍 Dangpanan kon magkinahanglan:
+                        {isCeb ? '📍 Dangpanan kon magkinahanglan:' : '📍 Evacuation shelter if needed:'}{' '}
                         <strong className="text-emerald-900">
                           {resolvedPurokRiskProfile?.default_evacuation_site || 'San Roque Barangay Gym'}
                         </strong>
@@ -960,7 +997,7 @@ export default function ResidentPortalPage() {
                         <span className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-200 bg-white px-3 py-1.5 font-semibold text-slate-700 shadow-sm">
                           <SunMedium className="h-4 w-4 text-amber-500" />
                           {Math.round(liveWeather.current.temperature ?? 28)}°C ·{' '}
-                          {liveWeather.current.weatherLabel || 'Hayag ang panahon'}
+                          {liveWeather.current.weatherLabel || (isCeb ? 'Hayag ang panahon' : 'Fair weather')}
                         </span>
                       ) : null}
                     </div>
@@ -974,7 +1011,9 @@ export default function ResidentPortalPage() {
                     className="inline-flex h-12 items-center justify-center gap-2 rounded-2xl border border-emerald-300 bg-white px-5 text-sm font-bold text-emerald-900 shadow-sm transition hover:bg-emerald-50"
                   >
                     <SunMedium className="h-4 w-4 text-amber-500" />
-                    {showWeatherDetails ? 'Tagoa ang Panahon' : 'Tan-awa ang Panahon'}
+                    {showWeatherDetails
+                      ? (isCeb ? 'Tagoa ang Panahon' : 'Hide Weather')
+                      : (isCeb ? 'Tan-awa ang Panahon' : 'View Weather')}
                     {showWeatherDetails ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
                   </button>
                 </div>
@@ -997,7 +1036,9 @@ export default function ResidentPortalPage() {
 
       {/* 3. 4 KA DAGKO UG SAYON PISLITON NGA TOUCH TILES (SENIOR TOUCH TARGETS) */}
       <div className="mt-6">
-        <h3 className="text-sm font-bold uppercase tracking-[0.2em] text-slate-500">Mga Pangunang Serbisyo</h3>
+        <h3 className="text-sm font-bold uppercase tracking-[0.2em] text-slate-500">
+          {isCeb ? 'Mga Pangunang Serbisyo' : 'Key Services'}
+        </h3>
         <div className="mt-3 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           {/* Tile 1: Akong Pamilya */}
           <Link
@@ -1010,16 +1051,20 @@ export default function ResidentPortalPage() {
                   <Users className="h-7 w-7" />
                 </div>
                 <span className="rounded-full bg-indigo-50 px-3 py-1 text-xs font-black text-indigo-700">
-                  {activeHouseholdResidents.length || 1} Miyembro
+                  {activeHouseholdResidents.length || 1} {isCeb ? 'Miyembro' : ((activeHouseholdResidents.length || 1) === 1 ? 'Member' : 'Members')}
                 </span>
               </div>
-              <h4 className="mt-4 text-xl font-black tracking-tight text-slate-950">Akong Pamilya</h4>
+              <h4 className="mt-4 text-xl font-black tracking-tight text-slate-950">
+                {isCeb ? 'Akong Pamilya' : 'My Household'}
+              </h4>
               <p className="mt-1 text-xs font-medium leading-5 text-slate-500">
-                Tan-awa ang mga rehistradong sakop sa panimalay (Seniors, Kabataan, PWD).
+                {isCeb
+                  ? 'Tan-awa ang mga rehistradong sakop sa panimalay (Seniors, Kabataan, PWD).'
+                  : 'View registered household members (Seniors, Children, PWD).'}
               </p>
             </div>
             <div className="mt-4 inline-flex items-center gap-1 text-xs font-bold text-indigo-600 group-hover:text-indigo-700">
-              Bukasang talaan <ArrowRight className="h-3.5 w-3.5 transition group-hover:translate-x-1" />
+              {isCeb ? 'Bukasang talaan' : 'View roster'} <ArrowRight className="h-3.5 w-3.5 transition group-hover:translate-x-1" />
             </div>
           </Link>
 
@@ -1037,16 +1082,20 @@ export default function ResidentPortalPage() {
                   <Package className="h-7 w-7" />
                 </div>
                 <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-black text-emerald-700">
-                  {unclaimedEligibleCount > 0 ? `${unclaimedEligibleCount} Kuhaonon` : 'Updated'}
+                  {unclaimedEligibleCount > 0 ? (isCeb ? `${unclaimedEligibleCount} Kuhaonon` : `${unclaimedEligibleCount} Pending`) : 'Updated'}
                 </span>
               </div>
-              <h4 className="mt-4 text-xl font-black tracking-tight text-slate-950">Ayuda & Relief</h4>
+              <h4 className="mt-4 text-xl font-black tracking-tight text-slate-950">
+                {isCeb ? 'Ayuda & Relief' : 'Aid & Relief'}
+              </h4>
               <p className="mt-1 text-xs font-medium leading-5 text-slate-500">
-                Iskedyul sa pag-apod-apod og bugas, food packs, ug hinabang sa inyong purok.
+                {isCeb
+                  ? 'Iskedyul sa pag-apod-apod og bugas, food packs, ug hinabang sa inyong purok.'
+                  : 'Schedule for rice, food packs, and relief aid in your purok.'}
               </p>
             </div>
             <div className="mt-4 inline-flex items-center gap-1 text-xs font-bold text-emerald-600 group-hover:text-emerald-700">
-              Tan-awa ang ayuda <ArrowRight className="h-3.5 w-3.5 transition group-hover:translate-x-1" />
+              {isCeb ? 'Tan-awa ang ayuda' : 'View assistance'} <ArrowRight className="h-3.5 w-3.5 transition group-hover:translate-x-1" />
             </div>
           </button>
 
@@ -1065,13 +1114,17 @@ export default function ResidentPortalPage() {
                   24/7 Hotline
                 </span>
               </div>
-              <h4 className="mt-4 text-xl font-black tracking-tight text-slate-950">Tawag sa Emergency</h4>
+              <h4 className="mt-4 text-xl font-black tracking-tight text-slate-950">
+                {isCeb ? 'Tawag sa Emergency' : 'Emergency Call'}
+              </h4>
               <p className="mt-1 text-xs font-medium leading-5 text-slate-500">
-                Direktang tawag sa MDRRMO Rescue, Barangay Hall, Pulis, ug Bombero.
+                {isCeb
+                  ? 'Direktang tawag sa MDRRMO Rescue, Barangay Hall, Pulis, ug Bombero.'
+                  : 'Direct call to MDRRMO Rescue, Barangay Hall, Police, and Fire Station.'}
               </p>
             </div>
             <div className="mt-4 inline-flex items-center gap-1 text-xs font-bold text-rose-600 group-hover:text-rose-700">
-              Buksan ang mga numero <ArrowRight className="h-3.5 w-3.5 transition group-hover:translate-x-1" />
+              {isCeb ? 'Buksan ang mga numero' : 'Open hotline numbers'} <ArrowRight className="h-3.5 w-3.5 transition group-hover:translate-x-1" />
             </div>
           </button>
 
@@ -1089,16 +1142,22 @@ export default function ResidentPortalPage() {
                   className={`rounded-full px-3 py-1 text-xs font-black ${unreadNotificationCount > 0 ? 'bg-amber-100 text-amber-800' : 'bg-slate-100 text-slate-700'
                     }`}
                 >
-                  {unreadNotificationCount > 0 ? `${unreadNotificationCount} Bag-o` : `${visibleNotifications.length} Total`}
+                  {unreadNotificationCount > 0
+                    ? `${unreadNotificationCount} ${isCeb ? 'Bag-o' : 'New'}`
+                    : `${visibleNotifications.length} Total`}
                 </span>
               </div>
-              <h4 className="mt-4 text-xl font-black tracking-tight text-slate-950">Mga Pahibalo</h4>
+              <h4 className="mt-4 text-xl font-black tracking-tight text-slate-950">
+                {isCeb ? 'Mga Pahibalo' : 'Notifications'}
+              </h4>
               <p className="mt-1 text-xs font-medium leading-5 text-slate-500">
-                Opisyal nga mga anunsyo ug abiso gikan sa MSWDO ug LGU Mabini.
+                {isCeb
+                  ? 'Opisyal nga mga anunsyo ug abiso gikan sa MSWDO ug LGU Mabini.'
+                  : 'Official announcements and advisories from MSWDO and LGU Mabini.'}
               </p>
             </div>
             <div className="mt-4 inline-flex items-center gap-1 text-xs font-bold text-cyan-800 group-hover:text-cyan-950">
-              Basaha ang inbox <ArrowRight className="h-3.5 w-3.5 transition group-hover:translate-x-1" />
+              {isCeb ? 'Basaha ang inbox' : 'Read inbox'} <ArrowRight className="h-3.5 w-3.5 transition group-hover:translate-x-1" />
             </div>
           </Link>
         </div>
@@ -1114,9 +1173,13 @@ export default function ResidentPortalPage() {
                   <Package className="h-5 w-5" />
                 </div>
                 <div>
-                  <h3 className="text-xl font-black text-slate-950">Ayuda & Food Pack Releases sa Inyong Purok</h3>
+                  <h3 className="text-xl font-black text-slate-950">
+                    {isCeb ? 'Ayuda & Food Pack Releases sa Inyong Purok' : 'Aid & Food Pack Releases in Your Purok'}
+                  </h3>
                   <p className="text-xs text-slate-500">
-                    Mo-generate lamang og talagsaong (unique) QR code kon opisyal nga naapil ang inyong panimalay.
+                    {isCeb
+                      ? 'Mo-generate lamang og talagsaong (unique) QR code kon opisyal nga naapil ang inyong panimalay.'
+                      : 'Only generates a unique QR code if your household is officially included.'}
                   </p>
                 </div>
               </div>
@@ -1126,7 +1189,7 @@ export default function ResidentPortalPage() {
                 href="/resident/notifications"
                 className="inline-flex items-center gap-2 rounded-full border border-slate-300 bg-white px-4 py-2 text-xs font-bold text-slate-700 shadow-sm hover:bg-slate-50"
               >
-                Tan-awa ang Inbox ({visibleNotifications.length})
+                {isCeb ? 'Tan-awa ang Inbox' : 'View Inbox'} ({visibleNotifications.length})
                 <ArrowRight className="h-3.5 w-3.5" />
               </Link>
             </div>
@@ -1191,7 +1254,13 @@ export default function ResidentPortalPage() {
                           {isDistribution && distributionPayload ? (
                             <>
                               <CivicBadge
-                                label={DISTRIBUTION_NOTIFICATION_STATUS_LABELS[distributionPayload.status]}
+                                label={
+                                  isCeb
+                                    ? (distributionPayload.status === 'planned' ? 'Giplano'
+                                      : distributionPayload.status === 'ongoing' ? 'Nagpadayon'
+                                      : 'Nahuman Na')
+                                    : DISTRIBUTION_NOTIFICATION_STATUS_LABELS[distributionPayload.status]
+                                }
                                 tone={claimedRecord ? 'emerald' : STATUS_BADGE_TONES[distributionPayload.status]}
                               />
                               {claimedRecord ? (
@@ -1210,9 +1279,25 @@ export default function ResidentPortalPage() {
 
                           {disasterPayload ? (
                             <>
-                              <CivicBadge label={HAZARD_LABELS[disasterPayload.hazard]} tone="teal" />
                               <CivicBadge
-                                label={DISASTER_ALERT_SEVERITY_LABELS[disasterPayload.severity]}
+                                label={
+                                  isCeb
+                                    ? (disasterPayload.hazard === 'flood' ? 'Baha'
+                                      : disasterPayload.hazard === 'typhoon' ? 'Bagyo'
+                                      : disasterPayload.hazard === 'landslide' ? 'Landslide'
+                                      : disasterPayload.hazard === 'fire' ? 'Sunog'
+                                      : disasterPayload.hazard === 'earthquake' ? 'Linog'
+                                      : HAZARD_LABELS[disasterPayload.hazard])
+                                    : HAZARD_LABELS[disasterPayload.hazard]
+                                }
+                                tone="teal"
+                              />
+                              <CivicBadge
+                                label={
+                                  isCeb
+                                    ? (disasterPayload.severity === 'warning' ? 'Pahimangno' : 'Bantayi')
+                                    : DISASTER_ALERT_SEVERITY_LABELS[disasterPayload.severity]
+                                }
                                 tone={disasterPayload.severity === 'warning' ? 'rose' : 'amber'}
                               />
                             </>
@@ -1223,7 +1308,7 @@ export default function ResidentPortalPage() {
 
                         {isDistribution && distributionPayload ? (
                           <div className="mt-3 flex flex-wrap items-center gap-3 text-xs text-slate-600">
-                            <span>📅 {isCeb ? 'Petsa:' : 'Date:'} <strong>{formatScheduleDate(distributionPayload.scheduled_date)}</strong></span>
+                            <span>📅 {isCeb ? 'Petsa:' : 'Date:'} <strong>{formatScheduleDate(distributionPayload.scheduled_date, isCeb)}</strong></span>
                             <span>📍 {isCeb ? 'Lugar:' : 'Location:'} <strong>{distributionPayload.location}</strong></span>
                             <span>👥 {isCeb ? 'Puntarya:' : 'Target:'} <strong>{audienceLabel}</strong></span>
                           </div>
@@ -1281,9 +1366,13 @@ export default function ResidentPortalPage() {
           ) : (
             <div className="mt-6 rounded-[24px] border-2 border-dashed border-slate-200 bg-slate-50/50 px-6 py-10 text-center">
               <Package className="mx-auto h-8 w-8 text-slate-300" />
-              <p className="mt-3 text-base font-bold text-slate-700">Walay bag-ong food pack release o pahibalo</p>
+              <p className="mt-3 text-base font-bold text-slate-700">
+                {isCeb ? 'Walay bag-ong food pack release o pahibalo' : 'No new food pack releases or announcements'}
+              </p>
               <p className="mt-1 text-xs text-slate-500">
-                Mo-update kini kung magpagula ang MSWDO og bag-ong hinabang o ayuda alang sa inyong purok.
+                {isCeb
+                  ? 'Mo-update kini kung magpagula ang MSWDO og bag-ong hinabang o ayuda alang sa inyong purok.'
+                  : 'This will update when MSWDO issues new assistance or relief for your purok.'}
               </p>
             </div>
           )}
@@ -1295,11 +1384,17 @@ export default function ResidentPortalPage() {
         <CivicPanel className="p-6 sm:p-8">
           <div className="flex flex-wrap items-center justify-between gap-4">
             <div>
-              <h3 className="text-xl font-black text-slate-950">Opisyal nga Talaan sa Panimalay</h3>
+              <h3 className="text-xl font-black text-slate-950">
+                {isCeb ? 'Opisyal nga Talaan sa Panimalay' : 'Official Household Record'}
+              </h3>
               <p className="text-xs text-slate-500">
                 {activeHousehold
-                  ? 'Aprobado ug aktibo ang inyong rekord sa panimalay. Makita diri ang kasaysayan sa rehistrasyon.'
-                  : 'Masubay dinhi ang status sa inyong gisumite nga rehistrasyon sa panimalay.'}
+                  ? isCeb
+                    ? 'Aprobado ug aktibo ang inyong rekord sa panimalay. Makita diri ang kasaysayan sa rehistrasyon.'
+                    : 'Your household record is approved and active. Registration history is available here.'
+                  : isCeb
+                    ? 'Masubay dinhi ang status sa inyong gisumite nga rehistrasyon sa panimalay.'
+                    : 'Track the status of your submitted household registration here.'}
               </p>
             </div>
 
@@ -1310,7 +1405,9 @@ export default function ResidentPortalPage() {
                   onClick={() => setShowRegistrationHistory(!showRegistrationHistory)}
                   className="inline-flex items-center gap-2 rounded-full border border-slate-300 bg-white px-4 py-2 text-xs font-bold text-slate-700 shadow-sm hover:bg-slate-50"
                 >
-                  {showRegistrationHistory ? 'Tagoa ang Kasaysayan' : 'Tan-awa ang Kasaysayan'}
+                  {showRegistrationHistory
+                    ? (isCeb ? 'Tagoa ang Kasaysayan' : 'Hide History')
+                    : (isCeb ? 'Tan-awa ang Kasaysayan' : 'View History')}
                   {showRegistrationHistory ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
                 </button>
               ) : (
@@ -1319,7 +1416,7 @@ export default function ResidentPortalPage() {
                   className="inline-flex items-center gap-2 rounded-full bg-cyan-950 px-5 py-2 text-xs font-bold text-white shadow-sm hover:bg-cyan-900"
                 >
                   <FilePlus2 className="h-4 w-4 text-cyan-300" />
-                  Bag-ong Rehistro
+                  {isCeb ? 'Bag-ong Rehistro' : 'New Registration'}
                 </Link>
               )}
             </div>
@@ -1337,7 +1434,15 @@ export default function ResidentPortalPage() {
                         <div className="flex items-center gap-2">
                           <h4 className="text-lg font-bold text-slate-950">{record.head_name}</h4>
                           <CivicBadge
-                            label={formatRegistrationStatusLabel(getHouseholdRegistrationStatus(record))}
+                            label={
+                              isCeb
+                                ? (getHouseholdRegistrationStatus(record) === 'pending'
+                                  ? 'Ginasusi pa'
+                                  : getHouseholdRegistrationStatus(record) === 'needs_correction'
+                                    ? 'Kinahanglan Usbon'
+                                    : 'Wala Naaprobahan')
+                                : formatRegistrationStatusLabel(getHouseholdRegistrationStatus(record))
+                            }
                             tone="amber"
                           />
                         </div>
@@ -1345,36 +1450,54 @@ export default function ResidentPortalPage() {
                           {record.street_address}, {formatPurok(record.purok_sitio)}, {record.barangay_name}, {record.municipality}
                         </p>
                         <p className="mt-1 text-xs text-slate-500">
-                          Gisumite kaniadtong {formatDate(record.registration_submitted_at || record.createdAt)}
+                          {isCeb ? 'Gisumite kaniadtong' : 'Submitted on'} {formatDate(record.registration_submitted_at || record.createdAt, isCeb)}
                         </p>
                       </div>
                       <Link
                         href={`/households/register/status?id=${record.id}`}
                         className="inline-flex items-center gap-2 rounded-full bg-cyan-950 px-4 py-2 text-xs font-bold text-white hover:bg-cyan-900"
                       >
-                        Tan-awa ang Status
+                        {isCeb ? 'Tan-awa ang Status' : 'View Status'}
                       </Link>
                     </div>
 
                     <div className="mt-5 grid gap-2.5 sm:grid-cols-4">
-                      {timeline.map((step) => (
-                        <div
-                          key={step.key}
-                          className={`rounded-xl border px-3 py-2 text-xs font-semibold ${step.state === 'done'
-                              ? 'border-emerald-300 bg-emerald-50 text-emerald-900'
-                              : step.state === 'current'
-                                ? 'border-indigo-300 bg-indigo-50 text-indigo-900'
-                                : 'border-slate-200 bg-white text-slate-500'
-                            }`}
-                        >
-                          {step.label}
-                        </div>
-                      ))}
+                      {timeline.map((step) => {
+                        const stepLabel = isCeb
+                          ? step.key === 'submitted'
+                            ? 'Gisumite'
+                            : step.key === 'location_review'
+                              ? 'Pagsusi sa Lokasyon'
+                              : step.key === 'admin_approval'
+                                ? 'Pag-aproba sa Admin'
+                                : step.label === 'Approved'
+                                  ? 'Naaprobahan'
+                                  : step.label === 'Needs Correction'
+                                    ? 'Kinahanglan Usbon'
+                                    : step.label === 'Rejected'
+                                      ? 'Wala Naaprobahan'
+                                      : step.label
+                          : step.label;
+
+                        return (
+                          <div
+                            key={step.key}
+                            className={`rounded-xl border px-3 py-2 text-xs font-semibold ${step.state === 'done'
+                                ? 'border-emerald-300 bg-emerald-50 text-emerald-900'
+                                : step.state === 'current'
+                                  ? 'border-indigo-300 bg-indigo-50 text-indigo-900'
+                                  : 'border-slate-200 bg-white text-slate-500'
+                              }`}
+                          >
+                            {stepLabel}
+                          </div>
+                        );
+                      })}
                     </div>
 
                     {record.registration_review_notes?.trim() && (
                       <div className="mt-4 rounded-xl border border-amber-300 bg-white p-3.5 text-xs text-amber-900">
-                        <strong>Mubo nga Pahibalo gikan sa Reviewer:</strong> {record.registration_review_notes.trim()}
+                        <strong>{isCeb ? 'Mubo nga Pahibalo gikan sa Reviewer:' : 'Note from Reviewer:'}</strong> {record.registration_review_notes.trim()}
                       </div>
                     )}
                   </div>
@@ -1393,7 +1516,9 @@ export default function ResidentPortalPage() {
                       <CheckCircle2 className="h-6 w-6" />
                     </div>
                     <div>
-                      <h4 className="text-base font-bold text-emerald-950">{activeHousehold.head_name} (Aktibo)</h4>
+                      <h4 className="text-base font-bold text-emerald-950">
+                        {activeHousehold.head_name} ({isCeb ? 'Aktibo' : 'Active'})
+                      </h4>
                       <p className="text-xs text-emerald-800">
                         {formattedPurokName}, {activeHousehold.barangay_name || 'Cuambog'}, {activeHousehold.municipality}
                       </p>
@@ -1404,25 +1529,37 @@ export default function ResidentPortalPage() {
                     className="inline-flex items-center gap-2 rounded-full border border-emerald-300 bg-white px-4 py-2 text-xs font-bold text-emerald-900 hover:bg-emerald-50"
                   >
                     <Users className="h-3.5 w-3.5 text-emerald-600" />
-                    Bukasang Talaan sa Pamilya
+                    {isCeb ? 'Bukasang Talaan sa Pamilya' : 'Open Household Roster'}
                   </Link>
                 </div>
               </div>
 
               {showRegistrationHistory && records.length > 0 && (
                 <div className="mt-4 space-y-3">
-                  <p className="text-xs font-bold uppercase tracking-wider text-slate-500">Mga miaging submisyon:</p>
+                  <p className="text-xs font-bold uppercase tracking-wider text-slate-500">
+                    {isCeb ? 'Mga miaging submisyon:' : 'Previous submissions:'}
+                  </p>
                   {records.map((record) => (
                     <div key={record.id} className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-xs">
                       <div className="flex items-center justify-between">
                         <span className="font-bold text-slate-800">{record.head_name}</span>
                         <CivicBadge
-                          label={formatRegistrationStatusLabel(getHouseholdRegistrationStatus(record))}
+                          label={
+                            isCeb
+                              ? (getHouseholdRegistrationStatus(record) === 'approved'
+                                ? 'Naaprobahan'
+                                : getHouseholdRegistrationStatus(record) === 'pending'
+                                  ? 'Ginasusi'
+                                  : getHouseholdRegistrationStatus(record) === 'needs_correction'
+                                    ? 'Kinahanglan Usbon'
+                                    : 'Wala Naaprobahan')
+                              : formatRegistrationStatusLabel(getHouseholdRegistrationStatus(record))
+                          }
                           tone={getHouseholdRegistrationStatus(record) === 'approved' ? 'emerald' : 'amber'}
                         />
                       </div>
                       <p className="mt-1 text-slate-500">
-                        {record.street_address}, {formatPurok(record.purok_sitio)} · Submitted {formatDate(record.createdAt)}
+                        {record.street_address}, {formatPurok(record.purok_sitio)} · {isCeb ? 'Gisumite' : 'Submitted'} {formatDate(record.createdAt, isCeb)}
                       </p>
                     </div>
                   ))}
@@ -1478,7 +1615,7 @@ export default function ResidentPortalPage() {
                   </p>
                   <p>
                     <span className="text-slate-500">{isCeb ? 'Iskedyul:' : 'Schedule:'}</span>{' '}
-                    <strong className="text-slate-900">{formatScheduleDate(selectedDistributionEvent.schedule)}</strong>
+                    <strong className="text-slate-900">{formatScheduleDate(selectedDistributionEvent.schedule, isCeb)}</strong>
                   </p>
                 </div>
 
@@ -1525,14 +1662,20 @@ export default function ResidentPortalPage() {
                 <PhoneCall className="h-6 w-6" />
               </div>
               <div>
-                <p className="text-xs font-black uppercase tracking-widest text-rose-200">24/7 Libreng Tawag</p>
+                <p className="text-xs font-black uppercase tracking-widest text-rose-200">
+                  {isCeb ? '24/7 Libreng Tawag' : '24/7 Free Hotlines'}
+                </p>
                 <DialogTitle className="text-xl font-black text-white">
                   Mabini Emergency Hotlines
                 </DialogTitle>
               </div>
             </div>
             <DialogDescription className="mt-2 text-xs text-rose-100">
-              Pislita ang berdeng buton nga <strong>&quot;Tawag Karon&quot;</strong> aron direktang motawag gikan sa inyong cellphone.
+              {isCeb ? (
+                <>Pislita ang berdeng buton nga <strong>&quot;Tawag Karon&quot;</strong> aron direktang motawag gikan sa inyong cellphone.</>
+              ) : (
+                <>Tap the green <strong>&quot;Call Now&quot;</strong> button to call directly from your mobile phone.</>
+              )}
             </DialogDescription>
           </div>
 
@@ -1550,7 +1693,9 @@ export default function ResidentPortalPage() {
                       {hotline.tag}
                     </span>
                   </div>
-                  <p className="mt-0.5 text-xs text-slate-500">{hotline.description}</p>
+                  <p className="mt-0.5 text-xs text-slate-500">
+                    {isCeb ? hotline.description : (hotline.descriptionEn || hotline.description)}
+                  </p>
                   <p className="mt-1 text-sm font-mono font-bold text-slate-800">
                     {hotline.phone} {hotline.altPhone ? `· ${hotline.altPhone}` : ''}
                   </p>
@@ -1561,7 +1706,7 @@ export default function ResidentPortalPage() {
                   className="inline-flex h-11 shrink-0 items-center justify-center gap-2 rounded-xl bg-emerald-600 px-5 text-sm font-black text-white shadow-md transition hover:bg-emerald-700 active:scale-95"
                 >
                   <Phone className="h-4 w-4" />
-                  Tawag Karon
+                  {isCeb ? 'Tawag Karon' : 'Call Now'}
                 </a>
               </div>
             ))}
@@ -1573,7 +1718,7 @@ export default function ResidentPortalPage() {
               onClick={() => setShowHotlinesModal(false)}
               className="inline-flex h-11 w-full items-center justify-center rounded-xl border border-slate-300 bg-white text-xs font-bold text-slate-700 hover:bg-slate-100 sm:w-auto sm:px-6"
             >
-              Isira / Close
+              {isCeb ? 'Isira' : 'Close'}
             </button>
           </DialogFooter>
         </DialogContent>
