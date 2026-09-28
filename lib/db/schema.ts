@@ -657,11 +657,27 @@ export interface SoloParentDependent {
   is_pwd: boolean;
 }
 
+export interface SoloParentRequirementDocument {
+  id: string;
+  name: string;
+  document_type?: string;
+  file_url: string; // Base64 data URI of compressed document photo
+  file_size?: number; // compressed bytes
+  original_size?: number;
+  uploaded_at: string;
+}
+
 export interface SoloParentRequirements {
   barangay_cert: boolean;
   birth_certificates: boolean;
   justification_proof: boolean;
   income_proof: boolean;
+  documents?: SoloParentRequirementDocument[];
+  _revocation?: {
+    reason?: string;
+    date?: string;
+  };
+  [key: string]: unknown;
 }
 
 export interface SoloParentRecord {

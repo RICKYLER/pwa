@@ -27,7 +27,26 @@ export async function GET(request: NextRequest) {
     const supabase = getSupabaseAdminClient();
     const normalized = id.toLowerCase();
 
-    // Query solo_parents table by id_number (case-insensitive) or id
+    // 1. Try secure RPC verification function if migrated
+    const { data: rpcData, error: rpcError } = await supabase.rpc('verify_solo_parent_id', {
+      p_id_number: id,
+    });
+
+    if (!rpcError && rpcData && typeof rpcData === 'object' && 'found' in rpcData) {
+      if (rpcData.found) {
+        return NextResponse.json({
+          success: true,
+          found: true,
+          data: rpcData,
+        });
+      }
+      return NextResponse.json({
+        success: true,
+        found: false,
+      });
+    }
+
+    // 2. Direct fallback query if RPC is not yet executed
     const { data, error } = await supabase
       .from('solo_parents')
       .select('id, id_number, full_name, barangay_id, purok_sitio, category, is_minimum_wage_or_below, dependents, requirements, issued_at, expires_at, status')

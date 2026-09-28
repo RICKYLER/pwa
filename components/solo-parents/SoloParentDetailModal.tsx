@@ -22,8 +22,14 @@ import {
   Ban,
   AlertTriangle,
   Lock,
+  Camera,
+  Upload,
+  Eye,
+  Maximize2,
+  Loader2,
+  Image as ImageIcon,
 } from 'lucide-react';
-import type { SoloParentRecord } from '@/lib/db/schema';
+import type { SoloParentRecord, SoloParentRequirementDocument } from '@/lib/db/schema';
 import { SOLO_PARENT_CATEGORY_LABELS } from '@/lib/solo-parents/rosp-exporter';
 import { getBarangayName } from '@/lib/mabini-barangays';
 import { getCurrentUser, hasPermission } from '@/lib/auth';
@@ -32,7 +38,12 @@ import {
   deleteSoloParent,
   revokeSoloParent,
   reactivateSoloParent,
+  updateSoloParent,
 } from '@/lib/db/solo-parents';
+import {
+  compressDocumentPhoto,
+  formatDocumentSize,
+} from '@/lib/solo-parents/document-compressor';
 
 interface SoloParentDetailModalProps {
   isOpen: boolean;
@@ -102,6 +113,13 @@ export default function SoloParentDetailModal({
   const [revocationDate, setRevocationDate] = useState(new Date().toISOString().slice(0, 10));
   const [isRevoking, setIsRevoking] = useState(false);
   const [isReactivating, setIsReactivating] = useState(false);
+
+  // Document photo upload & lightbox state
+  const [isUploadingDoc, setIsUploadingDoc] = useState(false);
+  const [docTypeToUpload, setDocTypeToUpload] = useState<string>('barangay_cert');
+  const [previewDoc, setPreviewDoc] = useState<SoloParentRequirementDocument | null>(null);
+  const [compressionNotice, setCompressionNotice] = useState<string | null>(null);
+  const [isDraggingDoc, setIsDraggingDoc] = useState(false);
 
   // Role permissions:
   // Admin: full access (delete, revoke, reactivate, renew, print)
@@ -183,6 +201,109 @@ export default function SoloParentDetailModal({
       setActionMessage('Failed to reactivate record.');
     } finally {
       setIsReactivating(false);
+    }
+  }
+
+  // Handle adding physical document photos (compressed) from PC upload, drag-and-drop, or camera
+  async function processDocFiles(files: File[]) {
+    if (files.length === 0 || !record) return;
+
+    setIsUploadingDoc(true);
+    setCompressionNotice(null);
+
+    try {
+      const newDocs: SoloParentRequirementDocument[] = [];
+      let totalOrig = 0;
+      let totalComp = 0;
+
+      for (const file of files) {
+        const result = await compressDocumentPhoto(file, {
+          documentType: docTypeToUpload,
+          maxWidth: 1200,
+          maxHeight: 1200,
+          quality: 0.7,
+        });
+
+        newDocs.push({
+          id: result.id,
+          name: result.name,
+          document_type: result.document_type,
+          file_url: result.file_url,
+          file_size: result.file_size,
+          original_size: result.original_size,
+          uploaded_at: result.uploaded_at,
+        });
+
+        totalOrig += result.original_size || 0;
+        totalComp += result.file_size || 0;
+      }
+
+      const existingDocs = record.requirements?.documents || [];
+      const updatedDocs = [...existingDocs, ...newDocs];
+
+      const updatedReqs = {
+        ...record.requirements,
+        documents: updatedDocs,
+        ...(docTypeToUpload === 'barangay_cert' ? { barangay_cert: true } : {}),
+        ...(docTypeToUpload === 'birth_certificates' ? { birth_certificates: true } : {}),
+        ...(docTypeToUpload === 'justification_proof' ? { justification_proof: true } : {}),
+        ...(docTypeToUpload === 'income_proof' ? { income_proof: true } : {}),
+      };
+
+      const updatedRecord = await updateSoloParent(record.id, {
+        requirements: updatedReqs,
+      });
+
+      setCurrentRecord(updatedRecord);
+
+      const savedPct =
+        totalOrig > 0 ? Math.round(((totalOrig - totalComp) / totalOrig) * 100) : 0;
+
+      setCompressionNotice(
+        `⚡ Compressed: ${formatDocumentSize(totalOrig)} ➔ ${formatDocumentSize(
+          totalComp
+        )} (${savedPct}% saved). Stored in database.`
+      );
+
+      onRecordUpdated();
+    } catch (err) {
+      console.error('Failed to attach document photo:', err);
+    } finally {
+      setIsUploadingDoc(false);
+    }
+  }
+
+  function handleAddDocumentPhoto(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(e.target.files || []);
+    processDocFiles(files);
+    if (e.target) e.target.value = '';
+  }
+
+  function handleDocDrop(e: React.DragEvent) {
+    e.preventDefault();
+    setIsDraggingDoc(false);
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      processDocFiles(Array.from(e.dataTransfer.files));
+    }
+  }
+
+  async function handleDeleteDocument(docId: string) {
+    if (!record || !confirm('Are you sure you want to remove this attached document scan?')) return;
+    try {
+      const existingDocs = record.requirements?.documents || [];
+      const updatedDocs = existingDocs.filter((d) => d.id !== docId);
+
+      const updatedRecord = await updateSoloParent(record.id, {
+        requirements: {
+          ...record.requirements,
+          documents: updatedDocs,
+        },
+      });
+
+      setCurrentRecord(updatedRecord);
+      onRecordUpdated();
+    } catch (err) {
+      console.error('Failed to remove document:', err);
     }
   }
 
@@ -430,11 +551,18 @@ export default function SoloParentDetailModal({
             </div>
           </div>
 
-          {/* Requirements Checklist */}
-          <div className="rounded-xl border border-slate-200 p-4 space-y-2">
-            <h3 className="text-xs font-bold uppercase tracking-wider text-slate-800">
-              Submitted Physical Requirements
-            </h3>
+          {/* Requirements Checklist & Scanned Physical Documents */}
+          <div className="rounded-xl border border-slate-200 p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <h3 className="text-xs font-bold uppercase tracking-wider text-slate-800 flex items-center gap-1.5">
+                <FileCheck2 className="h-4 w-4 text-teal-700" />
+                Submitted Physical Requirements
+              </h3>
+              <span className="text-[10px] text-slate-500 font-medium">
+                {record.requirements?.documents?.length || 0} attached scan(s)
+              </span>
+            </div>
+
             <div className="grid grid-cols-2 gap-2 text-xs">
               <div className="flex items-center gap-2 text-slate-700">
                 <CheckCircle2
@@ -472,6 +600,157 @@ export default function SoloParentDetailModal({
                 />
                 <span>Proof of Income / Indigency</span>
               </div>
+            </div>
+
+            {/* Attached Scanned Document Photos */}
+            {record.requirements?.documents && record.requirements.documents.length > 0 && (
+              <div className="pt-2 border-t border-slate-100 space-y-2">
+                <span className="text-[10px] font-bold text-slate-600 uppercase tracking-wider block">
+                  Scanned Physical Documents ({record.requirements.documents.length})
+                </span>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+                  {record.requirements.documents.map((doc) => (
+                    <div
+                      key={doc.id}
+                      className="group relative rounded-xl border border-slate-200 bg-white overflow-hidden shadow-2xs hover:shadow-sm transition-all"
+                    >
+                      <div className="h-24 w-full bg-slate-100 relative overflow-hidden flex items-center justify-center">
+                        <img
+                          src={doc.file_url}
+                          alt={doc.name}
+                          className="w-full h-full object-cover"
+                        />
+                        <div className="absolute inset-0 bg-slate-900/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setPreviewDoc(doc)}
+                            className="p-1.5 bg-white text-slate-900 rounded-lg shadow-sm hover:bg-slate-100 cursor-pointer"
+                            title="Preview Full Size"
+                          >
+                            <Maximize2 className="w-3.5 h-3.5" />
+                          </button>
+                          {canDelete && (
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteDocument(doc.id)}
+                              className="p-1.5 bg-rose-600 text-white rounded-lg shadow-sm hover:bg-rose-700 cursor-pointer"
+                              title="Delete"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="p-2">
+                        <p className="text-[10px] font-bold text-slate-800 truncate" title={doc.name}>
+                          {doc.name}
+                        </p>
+                        <div className="flex items-center justify-between text-[9px] text-slate-500 mt-0.5">
+                          <span className="uppercase font-semibold text-teal-700">
+                            {doc.document_type?.replace('_', ' ') || 'Document'}
+                          </span>
+                          <span className="font-mono">{formatDocumentSize(doc.file_size)}</span>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Upload Additional Scanned Photos (Dual PC / Mobile options) */}
+            <div className="pt-2 border-t border-slate-100 space-y-2">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="text-[10px] font-bold text-slate-700 uppercase tracking-wider flex items-center gap-1">
+                  <Camera className="w-3.5 h-3.5 text-teal-600" />
+                  Attach Scanned Document Photo
+                </span>
+                <span className="text-[9px] text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
+                  ⚡ Auto-Compressed
+                </span>
+              </div>
+
+              <div
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  setIsDraggingDoc(true);
+                }}
+                onDragLeave={() => setIsDraggingDoc(false)}
+                onDrop={handleDocDrop}
+                className={`flex flex-col gap-2 p-2.5 rounded-xl border transition-all ${
+                  isDraggingDoc
+                    ? 'border-teal-500 bg-teal-50/80 ring-2 ring-teal-400'
+                    : 'border-slate-200 bg-slate-50'
+                }`}
+              >
+                <div className="flex flex-wrap items-center gap-2">
+                  <select
+                    value={docTypeToUpload}
+                    onChange={(e) => setDocTypeToUpload(e.target.value)}
+                    className="text-xs rounded-lg border border-slate-300 bg-white px-2 py-1.5 font-medium text-slate-700 focus:border-teal-500 focus:outline-none"
+                  >
+                    <option value="barangay_cert">📄 Barangay Certificate</option>
+                    <option value="birth_certificates">👶 PSA Birth Certificate</option>
+                    <option value="justification_proof">⚖️ Death / Blotter / Court Order</option>
+                    <option value="income_proof">💵 Proof of Income / Indigency</option>
+                    <option value="other">📎 Other Supporting Document</option>
+                  </select>
+
+                  {/* Option 1: Upload from PC / Scanner */}
+                  <label className="inline-flex items-center gap-1.5 bg-slate-800 hover:bg-slate-900 active:bg-slate-950 text-white text-xs font-bold px-3 py-1.5 rounded-lg cursor-pointer transition-colors shadow-2xs">
+                    <Upload className="w-3.5 h-3.5 text-teal-400" />
+                    <span>Upload from PC / File</span>
+                    <input
+                      type="file"
+                      accept="image/*,application/pdf"
+                      multiple
+                      disabled={isUploadingDoc}
+                      onChange={handleAddDocumentPhoto}
+                      className="hidden"
+                    />
+                  </label>
+
+                  {/* Option 2: Mobile Camera */}
+                  <label className="inline-flex items-center gap-1.5 bg-teal-600 hover:bg-teal-700 active:bg-teal-800 text-white text-xs font-bold px-3 py-1.5 rounded-lg cursor-pointer transition-colors shadow-2xs">
+                    <Camera className="w-3.5 h-3.5" />
+                    <span>Take Camera Photo</span>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      capture="environment"
+                      multiple
+                      disabled={isUploadingDoc}
+                      onChange={handleAddDocumentPhoto}
+                      className="hidden"
+                    />
+                  </label>
+
+                  {isUploadingDoc && (
+                    <span className="text-xs text-teal-700 font-semibold flex items-center gap-1 animate-pulse ml-1">
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      Compressing & saving...
+                    </span>
+                  )}
+                </div>
+
+                <div className="text-[10px] text-slate-500 flex items-center gap-1.5 pt-0.5 border-t border-slate-200">
+                  <span>💻 <strong>PC Users:</strong> Click <em>&ldquo;Upload from PC / File&rdquo;</em> to browse files or drop scanned documents directly here.</span>
+                </div>
+              </div>
+
+              {compressionNotice && (
+                <div className="text-[10px] text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-lg px-2.5 py-1.5 flex items-center justify-between gap-2">
+                  <span>{compressionNotice}</span>
+                  <button
+                    type="button"
+                    onClick={() => setCompressionNotice(null)}
+                    className="text-emerald-600 hover:text-emerald-900 text-xs font-bold"
+                  >
+                    ×
+                  </button>
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -668,6 +947,36 @@ export default function SoloParentDetailModal({
                   </button>
                 </div>
               </form>
+            </div>
+          </div>
+        )}
+
+        {/* Lightbox for Document Scan Full Screen Preview */}
+        {previewDoc && (
+          <div className="fixed inset-0 z-60 flex items-center justify-center bg-slate-950/85 p-3 sm:p-5 backdrop-blur-sm">
+            <div className="relative max-w-3xl w-full max-h-[92vh] bg-white rounded-2xl overflow-hidden flex flex-col shadow-2xl">
+              <div className="p-3 bg-slate-900 text-white flex items-center justify-between">
+                <div>
+                  <p className="text-xs font-bold truncate max-w-md">{previewDoc.name}</p>
+                  <p className="text-[10px] text-slate-400 font-mono">
+                    {formatDocumentSize(previewDoc.file_size)} · Compressed Photo Scan ({previewDoc.document_type?.replace('_', ' ')})
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setPreviewDoc(null)}
+                  className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 cursor-pointer"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+              <div className="flex-1 overflow-auto p-4 flex items-center justify-center bg-slate-100 min-h-[300px]">
+                <img
+                  src={previewDoc.file_url}
+                  alt={previewDoc.name}
+                  className="max-w-full max-h-[75vh] object-contain rounded-lg shadow-sm"
+                />
+              </div>
             </div>
           </div>
         )}

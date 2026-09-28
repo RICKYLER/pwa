@@ -17,6 +17,11 @@ import {
   DollarSign,
   Plus,
   Trash2,
+  Camera,
+  Upload,
+  Eye,
+  Maximize2,
+  Image as ImageIcon,
 } from 'lucide-react';
 import type {
   Resident,
@@ -24,7 +29,12 @@ import type {
   SoloParentRecord,
   SoloParentCategory,
   SoloParentDependent,
+  SoloParentRequirementDocument,
 } from '@/lib/db/schema';
+import {
+  compressDocumentPhoto,
+  formatDocumentSize,
+} from '@/lib/solo-parents/document-compressor';
 import { getResidents } from '@/lib/db/residents';
 import { getHouseholds } from '@/lib/db/households';
 import {
@@ -124,6 +134,14 @@ export default function WalkInSoloParentModal({
     income_proof: true,
   });
 
+  // Attached Scanned Physical Document Photos (Compressed for lightweight Supabase storage)
+  const [attachedDocs, setAttachedDocs] = useState<SoloParentRequirementDocument[]>([]);
+  const [isCompressingDoc, setIsCompressingDoc] = useState(false);
+  const [docTypeToUpload, setDocTypeToUpload] = useState<string>('barangay_cert');
+  const [compressionNotice, setCompressionNotice] = useState<string | null>(null);
+  const [previewDoc, setPreviewDoc] = useState<SoloParentRequirementDocument | null>(null);
+  const [isDraggingFile, setIsDraggingFile] = useState(false);
+
   const [notes, setNotes] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -140,6 +158,9 @@ export default function WalkInSoloParentModal({
     if (isOpen) {
       loadCensusData();
       autoGenerateId();
+      setAttachedDocs([]);
+      setCompressionNotice(null);
+      setPreviewDoc(null);
     }
   }, [isOpen]);
 
@@ -327,6 +348,88 @@ export default function WalkInSoloParentModal({
     }
   }
 
+  // Process and compress files from either PC upload, drag-and-drop, or mobile camera
+  async function processFiles(files: File[]) {
+    if (files.length === 0) return;
+
+    setIsCompressingDoc(true);
+    setCompressionNotice(null);
+
+    try {
+      const compressedList: SoloParentRequirementDocument[] = [];
+      let totalOriginal = 0;
+      let totalCompressed = 0;
+
+      for (const file of files) {
+        const result = await compressDocumentPhoto(file, {
+          documentType: docTypeToUpload,
+          maxWidth: 1200,
+          maxHeight: 1200,
+          quality: 0.7,
+        });
+
+        compressedList.push({
+          id: result.id,
+          name: result.name,
+          document_type: result.document_type,
+          file_url: result.file_url,
+          file_size: result.file_size,
+          original_size: result.original_size,
+          uploaded_at: result.uploaded_at,
+        });
+
+        totalOriginal += result.original_size || 0;
+        totalCompressed += result.file_size || 0;
+      }
+
+      setAttachedDocs((prev) => [...prev, ...compressedList]);
+
+      // Auto-check corresponding physical checklist box
+      if (docTypeToUpload === 'barangay_cert') {
+        setRequirements((prev) => ({ ...prev, barangay_cert: true }));
+      } else if (docTypeToUpload === 'birth_certificates') {
+        setRequirements((prev) => ({ ...prev, birth_certificates: true }));
+      } else if (docTypeToUpload === 'justification_proof') {
+        setRequirements((prev) => ({ ...prev, justification_proof: true }));
+      } else if (docTypeToUpload === 'income_proof') {
+        setRequirements((prev) => ({ ...prev, income_proof: true }));
+      }
+
+      const savedPct =
+        totalOriginal > 0
+          ? Math.round(((totalOriginal - totalCompressed) / totalOriginal) * 100)
+          : 0;
+
+      setCompressionNotice(
+        `⚡ Compressed: ${formatDocumentSize(totalOriginal)} ➔ ${formatDocumentSize(
+          totalCompressed
+        )} (${savedPct}% space saved). Stored cleanly without database bloat.`
+      );
+    } catch (err) {
+      console.error('Failed to compress document photo:', err);
+    } finally {
+      setIsCompressingDoc(false);
+    }
+  }
+
+  function handleDocPhotoUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(e.target.files || []);
+    processFiles(files);
+    if (e.target) e.target.value = '';
+  }
+
+  function handleFileDrop(e: React.DragEvent) {
+    e.preventDefault();
+    setIsDraggingFile(false);
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      processFiles(Array.from(e.dataTransfer.files));
+    }
+  }
+
+  function handleRemoveDoc(docId: string) {
+    setAttachedDocs((prev) => prev.filter((d) => d.id !== docId));
+  }
+
   // RA 11861 Subsidy Eligibility: <= ₱15,000 monthly income or minimum wage
   const isSubsidyEligible = monthlyIncome <= 15000;
 
@@ -419,7 +522,10 @@ export default function WalkInSoloParentModal({
         employment_status: employmentStatus,
 
         dependents,
-        requirements,
+        requirements: {
+          ...requirements,
+          documents: attachedDocs,
+        },
 
         issued_at: now.toISOString().slice(0, 10),
         expires_at: oneYearLater.toISOString().slice(0, 10),
@@ -972,6 +1078,153 @@ export default function WalkInSoloParentModal({
               </label>
             </div>
 
+            {/* Scanned Document Photos / Camera Upload (Auto-Compressed) */}
+            <div className="pt-2 border-t border-slate-200 space-y-2.5">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="text-[11px] font-bold text-slate-800 uppercase tracking-wide flex items-center gap-1.5">
+                  <Camera className="w-3.5 h-3.5 text-teal-700" />
+                  Attach Scanned Photo of Physical Documents
+                </span>
+                <span className="text-[10px] text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200 font-medium">
+                  ⚡ Auto-Compressed for Database Efficiency
+                </span>
+              </div>
+
+              {/* Upload bar with Document Type selector & Dual PC/Mobile actions */}
+              <div
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  setIsDraggingFile(true);
+                }}
+                onDragLeave={() => setIsDraggingFile(false)}
+                onDrop={handleFileDrop}
+                className={cn(
+                  'flex flex-col gap-2 p-3 rounded-xl border transition-all',
+                  isDraggingFile
+                    ? 'border-teal-500 bg-teal-50/80 ring-2 ring-teal-400'
+                    : 'border-slate-200 bg-white shadow-2xs'
+                )}
+              >
+                <div className="flex flex-wrap items-center gap-2">
+                  <select
+                    value={docTypeToUpload}
+                    onChange={(e) => setDocTypeToUpload(e.target.value)}
+                    className="text-xs rounded-lg border border-slate-300 bg-slate-50 px-2.5 py-1.5 font-medium text-slate-700 focus:border-teal-500 focus:outline-none"
+                  >
+                    <option value="barangay_cert">📄 Barangay Certificate</option>
+                    <option value="birth_certificates">👶 PSA Birth Certificate</option>
+                    <option value="justification_proof">⚖️ Death / Blotter / Court Order</option>
+                    <option value="income_proof">💵 Proof of Income / Indigency</option>
+                    <option value="other">📎 Other Supporting Document</option>
+                  </select>
+
+                  {/* Option 1: Upload from PC / Scanner file */}
+                  <label className="inline-flex items-center gap-1.5 bg-slate-800 hover:bg-slate-900 active:bg-slate-950 text-white text-xs font-bold px-3 py-1.5 rounded-lg cursor-pointer transition-colors shadow-xs">
+                    <Upload className="w-3.5 h-3.5 text-teal-400" />
+                    <span>Upload from PC / File</span>
+                    <input
+                      type="file"
+                      accept="image/*,application/pdf"
+                      multiple
+                      disabled={isCompressingDoc}
+                      onChange={handleDocPhotoUpload}
+                      className="hidden"
+                    />
+                  </label>
+
+                  {/* Option 2: Mobile / Tablet Camera Capture */}
+                  <label className="inline-flex items-center gap-1.5 bg-teal-600 hover:bg-teal-700 active:bg-teal-800 text-white text-xs font-bold px-3 py-1.5 rounded-lg cursor-pointer transition-colors shadow-xs">
+                    <Camera className="w-3.5 h-3.5" />
+                    <span>Take Camera Photo</span>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      capture="environment"
+                      multiple
+                      disabled={isCompressingDoc}
+                      onChange={handleDocPhotoUpload}
+                      className="hidden"
+                    />
+                  </label>
+
+                  {isCompressingDoc && (
+                    <span className="text-xs text-teal-700 font-semibold flex items-center gap-1 animate-pulse ml-1">
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      Compressing file...
+                    </span>
+                  )}
+                </div>
+
+                <div className="text-[10px] text-slate-500 flex items-center gap-1.5 pt-0.5 border-t border-slate-100">
+                  <span>💻 <strong>PC Users:</strong> Click <em>&ldquo;Upload from PC / File&rdquo;</em> to pick files, or drag &amp; drop document scans directly into this box.</span>
+                </div>
+              </div>
+
+              {/* Compression Success Notice */}
+              {compressionNotice && (
+                <div className="text-[10px] text-emerald-800 bg-emerald-50/90 border border-emerald-200 rounded-lg px-2.5 py-1.5 flex items-center justify-between gap-2">
+                  <span>{compressionNotice}</span>
+                  <button
+                    type="button"
+                    onClick={() => setCompressionNotice(null)}
+                    className="text-emerald-600 hover:text-emerald-900 text-xs font-bold"
+                  >
+                    ×
+                  </button>
+                </div>
+              )}
+
+              {/* Uploaded Documents Grid */}
+              {attachedDocs.length > 0 && (
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 pt-1">
+                  {attachedDocs.map((doc) => (
+                    <div
+                      key={doc.id}
+                      className="group relative rounded-xl border border-slate-200 bg-white overflow-hidden shadow-2xs hover:shadow-sm transition-all"
+                    >
+                      <div className="h-24 w-full bg-slate-100 relative overflow-hidden flex items-center justify-center">
+                        <img
+                          src={doc.file_url}
+                          alt={doc.name}
+                          className="w-full h-full object-cover"
+                        />
+                        <div className="absolute inset-0 bg-slate-900/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setPreviewDoc(doc)}
+                            className="p-1.5 bg-white text-slate-900 rounded-lg shadow-sm hover:bg-slate-100 cursor-pointer"
+                            title="Preview Full Size"
+                          >
+                            <Maximize2 className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveDoc(doc.id)}
+                            className="p-1.5 bg-rose-600 text-white rounded-lg shadow-sm hover:bg-rose-700 cursor-pointer"
+                            title="Remove"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="p-2">
+                        <p className="text-[10px] font-bold text-slate-800 truncate" title={doc.name}>
+                          {doc.name}
+                        </p>
+                        <div className="flex items-center justify-between text-[9px] text-slate-500 mt-0.5">
+                          <span className="uppercase font-semibold text-teal-700">
+                            {doc.document_type?.replace('_', ' ') || 'Document'}
+                          </span>
+                          <span className="font-mono">{formatDocumentSize(doc.file_size)}</span>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
             <div>
               <label className="text-[11px] font-semibold text-slate-600">Casework Notes / Observations</label>
               <textarea
@@ -1013,6 +1266,36 @@ export default function WalkInSoloParentModal({
           </div>
         </form>
       </div>
+
+      {/* Lightbox for Document Scan Full Screen Preview */}
+      {previewDoc && (
+        <div className="fixed inset-0 z-60 flex items-center justify-center bg-slate-950/85 p-3 sm:p-5 backdrop-blur-sm">
+          <div className="relative max-w-3xl w-full max-h-[92vh] bg-white rounded-2xl overflow-hidden flex flex-col shadow-2xl">
+            <div className="p-3 bg-slate-900 text-white flex items-center justify-between">
+              <div>
+                <p className="text-xs font-bold truncate max-w-md">{previewDoc.name}</p>
+                <p className="text-[10px] text-slate-400 font-mono">
+                  {formatDocumentSize(previewDoc.file_size)} · Compressed Photo Scan ({previewDoc.document_type?.replace('_', ' ')})
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setPreviewDoc(null)}
+                className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="flex-1 overflow-auto p-4 flex items-center justify-center bg-slate-100 min-h-[300px]">
+              <img
+                src={previewDoc.file_url}
+                alt={previewDoc.name}
+                className="max-w-full max-h-[75vh] object-contain rounded-lg shadow-sm"
+              />
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
