@@ -48,6 +48,9 @@ const SYNC_TRACKED_STORES = new Set<string>([
   STORE_NAMES.evacuee_records,
   STORE_NAMES.audit_logs,
   STORE_NAMES.solo_parents,
+  STORE_NAMES.cases,
+  STORE_NAMES.case_attachments,
+  STORE_NAMES.case_notes,
 ]);
 
 const ALL_STORE_NAMES = Object.values(STORE_NAMES);

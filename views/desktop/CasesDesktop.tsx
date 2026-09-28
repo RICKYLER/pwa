@@ -22,18 +22,29 @@ import {
   MapPin,
   Calendar,
   Printer,
+  Trash2,
+  RotateCcw,
+  AlertOctagon,
 } from 'lucide-react';
 import type {
   CaseRecord,
   CaseClassification,
   CaseStatus,
 } from '@/lib/db/schema';
-import { getCases } from '@/lib/db/cases';
+import {
+  getCases,
+  getTrashCases,
+  moveCaseToTrash,
+  restoreCaseFromTrash,
+  permanentlyDeleteCase,
+  emptyTrashCases,
+} from '@/lib/db/cases';
 import { BARANGAY_REGISTRY } from '@/lib/mabini-barangays';
 import {
   downloadCaseExcelTemplate,
   downloadCaseCsvTemplate,
 } from '@/lib/cases/case-excel-importer';
+import * as XLSX from 'xlsx';
 import { printGeneralIntakeSheet } from '@/lib/cases/gis-printer';
 import CaseExcelUploadModal from '@/components/cases/CaseExcelUploadModal';
 import CaseDetailModal from '@/components/cases/CaseDetailModal';
@@ -138,6 +149,8 @@ export const CATEGORY_TABS: {
 
 export default function CasesDesktop() {
   const [cases, setCases] = useState<CaseRecord[]>([]);
+  const [trashCases, setTrashCases] = useState<CaseRecord[]>([]);
+  const [viewMode, setViewMode] = useState<'active' | 'trash'>('active');
   const [isLoading, setIsLoading] = useState(true);
 
   // Search & Filters
@@ -153,18 +166,48 @@ export default function CasesDesktop() {
   const [newCaseModalOpen, setNewCaseModalOpen] = useState(false);
   const [selectedCaseId, setSelectedCaseId] = useState<string | null>(null);
 
+  // Trash & Permanent Delete Confirmation Modals
+  const [caseToTrash, setCaseToTrash] = useState<CaseRecord | null>(null);
+  const [caseToPermanentDelete, setCaseToPermanentDelete] = useState<CaseRecord | null>(null);
+  const [confirmEmptyTrash, setConfirmEmptyTrash] = useState(false);
+  const [isActionPending, setIsActionPending] = useState(false);
+
   // Success Toast
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   useEffect(() => {
     loadCases();
+
+    function handleDataChanged(e: any) {
+      if (
+        !e.detail?.table ||
+        e.detail.table === 'cases' ||
+        e.detail.table === 'case_attachments' ||
+        e.detail.table === 'case_notes'
+      ) {
+        void loadCases();
+      }
+    }
+
+    window.addEventListener('mswdo-data-changed', handleDataChanged);
+    return () => {
+      window.removeEventListener('mswdo-data-changed', handleDataChanged);
+    };
   }, []);
 
-  async function loadCases() {
+  async function loadCases(force = false) {
     setIsLoading(true);
     try {
-      const data = await getCases();
+      if (force) {
+        const { bootstrapPathnameData } = await import('@/lib/supabase/route-bootstrap');
+        await bootstrapPathnameData('/cases', true);
+      }
+      const [data, trashed] = await Promise.all([
+        getCases(),
+        getTrashCases(),
+      ]);
       setCases(data);
+      setTrashCases(trashed);
     } catch (err) {
       console.error('Failed to load cases:', err);
     } finally {
@@ -172,9 +215,116 @@ export default function CasesDesktop() {
     }
   }
 
+  async function handleMoveToTrash(c: CaseRecord) {
+    setIsActionPending(true);
+    try {
+      await moveCaseToTrash(c.id);
+      showToast(`Case ${c.case_number} moved to Trash.`);
+      setCaseToTrash(null);
+      await loadCases();
+    } catch (err) {
+      console.error('Error moving case to trash:', err);
+      showToast('Failed to move case to trash.');
+    } finally {
+      setIsActionPending(false);
+    }
+  }
+
+  async function handleRestoreFromTrash(c: CaseRecord) {
+    setIsActionPending(true);
+    try {
+      await restoreCaseFromTrash(c.id);
+      showToast(`Case ${c.case_number} restored to active directory.`);
+      await loadCases();
+    } catch (err) {
+      console.error('Error restoring case:', err);
+      showToast('Failed to restore case.');
+    } finally {
+      setIsActionPending(false);
+    }
+  }
+
+  async function handlePermanentDelete(c: CaseRecord) {
+    setIsActionPending(true);
+    try {
+      await permanentlyDeleteCase(c.id);
+      showToast(`Case ${c.case_number} permanently deleted.`);
+      setCaseToPermanentDelete(null);
+      await loadCases();
+    } catch (err) {
+      console.error('Error permanently deleting case:', err);
+      showToast('Failed to permanently delete case.');
+    } finally {
+      setIsActionPending(false);
+    }
+  }
+
+  async function handleEmptyTrash() {
+    setIsActionPending(true);
+    try {
+      const { deletedCount } = await emptyTrashCases();
+      showToast(`Emptied ${deletedCount} case${deletedCount !== 1 ? 's' : ''} from Trash.`);
+      setConfirmEmptyTrash(false);
+      await loadCases();
+    } catch (err) {
+      console.error('Error emptying trash:', err);
+      showToast('Failed to empty trash.');
+    } finally {
+      setIsActionPending(false);
+    }
+  }
+
   function showToast(msg: string) {
     setToastMessage(msg);
     setTimeout(() => setToastMessage(null), 4000);
+  }
+
+  function handleExportCurrentView() {
+    if (filteredCases.length === 0) {
+      showToast('No cases to export.');
+      return;
+    }
+    try {
+      const rows = filteredCases.map((c, i) => ({
+        'No.': i + 1,
+        'Case Number': c.case_number,
+        'Classification': c.case_type.replace(/_/g, ' ').toUpperCase(),
+        'Victim / Client': c.victim_name,
+        'Age': c.victim_age ?? '',
+        'Gender': c.victim_gender ?? '',
+        'Contact': c.victim_contact ?? '',
+        'Purok / Address': c.victim_address ?? '',
+        'Barangay': c.barangay_id,
+        'Alleged Perpetrator': c.perpetrator_name ?? '',
+        'Relationship to Victim': c.perpetrator_relationship ?? '',
+        'Status': c.status.replace(/_/g, ' ').toUpperCase(),
+        'Date Reported': c.reported_at ? new Date(c.reported_at).toLocaleDateString('en-PH') : '',
+        'Date of Incident': c.incident_date ? new Date(c.incident_date).toLocaleDateString('en-PH') : '',
+        'Assigned Social Worker': c.assigned_worker_name ?? '',
+        'Case Summary': c.case_summary ?? '',
+        'Intake Notes / Actions Taken': c.intake_notes ?? '',
+      }));
+
+      const ws = XLSX.utils.json_to_sheet(rows);
+      ws['!cols'] = [
+        { wch: 5 }, { wch: 18 }, { wch: 22 }, { wch: 24 }, { wch: 6 }, { wch: 8 },
+        { wch: 14 }, { wch: 20 }, { wch: 14 }, { wch: 24 }, { wch: 20 },
+        { wch: 18 }, { wch: 14 }, { wch: 14 }, { wch: 22 }, { wch: 45 }, { wch: 45 },
+      ];
+
+      const wb = XLSX.utils.book_new();
+      const label = categoryFilter === 'all'
+        ? 'All Cases'
+        : CATEGORY_TABS.find((t) => t.id === categoryFilter)?.shortLabel ?? 'Cases';
+      XLSX.utils.book_append_sheet(wb, ws, label.substring(0, 31));
+
+      const dateStr = new Date().toISOString().slice(0, 10);
+      XLSX.writeFile(wb, `MSWDO_Cases_${label.replace(/[^a-zA-Z0-9]/g, '_')}_${dateStr}.xlsx`);
+      showToast(`Downloaded ${filteredCases.length} case${filteredCases.length !== 1 ? 's' : ''} to Excel.`);
+    } catch (err) {
+      console.error('Export error:', err);
+      showToast('Export failed. Please try again.');
+    }
   }
 
   // Category counts
@@ -284,6 +434,18 @@ export default function CasesDesktop() {
     return result;
   }, [cases, searchQuery, categoryFilter, categorySearchQuery, statusFilter, typeFilter, barangayFilter]);
 
+  // Filtered trash cases calculation
+  const filteredTrashCases = useMemo(() => {
+    if (!searchQuery.trim()) return trashCases;
+    const q = searchQuery.toLowerCase().trim();
+    return trashCases.filter((c) =>
+      c.case_number.toLowerCase().includes(q) ||
+      c.victim_name.toLowerCase().includes(q) ||
+      (c.perpetrator_name && c.perpetrator_name.toLowerCase().includes(q)) ||
+      (c.case_summary && c.case_summary.toLowerCase().includes(q))
+    );
+  }, [trashCases, searchQuery]);
+
   // Statistics
   const stats = useMemo(() => {
     const total = cases.length;
@@ -311,7 +473,6 @@ export default function CasesDesktop() {
         totalCases={cases.length}
         onNewCase={() => setNewCaseModalOpen(true)}
         onUploadExcel={() => setUploadModalOpen(true)}
-        onDownloadTemplate={downloadCaseExcelTemplate}
       />
 
       {/* Statistics Ribbon */}
@@ -415,7 +576,7 @@ export default function CasesDesktop() {
           </select>
 
           <button
-            onClick={loadCases}
+            onClick={() => void loadCases(true)}
             className="p-2.5 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50 transition"
             title="Refresh List"
           >
@@ -532,204 +693,404 @@ export default function CasesDesktop() {
         </div>
       </div>
 
-      {/* Cases Table */}
+      {/* Cases Table Container */}
       <div className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
-        <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <span className="text-sm font-bold text-slate-900">
-              {categorySearchQuery.trim()
-                ? `Category Search: "${categorySearchQuery}"`
-                : categoryFilter === 'all'
-                  ? 'All Case Records Directory'
-                  : `${CATEGORY_TABS.find((t) => t.id === categoryFilter)?.label || 'Case'} Directory`}
-            </span>
-            <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-slate-100 text-slate-700">
-              {filteredCases.length} {filteredCases.length === 1 ? 'case' : 'cases'}
-            </span>
+        {/* Table Card Header with Active / Trash Switcher */}
+        <div className="px-6 py-4 border-b border-slate-100 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            {/* View Mode Switcher */}
+            <div className="flex items-center rounded-xl bg-slate-100 p-1 border border-slate-200/80">
+              <button
+                type="button"
+                onClick={() => setViewMode('active')}
+                className={cn(
+                  'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer',
+                  viewMode === 'active'
+                    ? 'bg-white text-slate-900 shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900',
+                )}
+              >
+                <FolderLock className="h-3.5 w-3.5 text-amber-600" />
+                <span>Active Cases</span>
+                <span className="ml-1 px-1.5 py-0.2 rounded-full text-[10px] bg-slate-200 text-slate-700">
+                  {cases.length}
+                </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setViewMode('trash')}
+                className={cn(
+                  'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer',
+                  viewMode === 'trash'
+                    ? 'bg-rose-600 text-white shadow-xs'
+                    : 'text-slate-600 hover:text-rose-600',
+                )}
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                <span>Trash Bin</span>
+                {trashCases.length > 0 && (
+                  <span
+                    className={cn(
+                      'ml-1 px-1.5 py-0.2 rounded-full text-[10px] font-bold',
+                      viewMode === 'trash'
+                        ? 'bg-white text-rose-700'
+                        : 'bg-rose-100 text-rose-700',
+                    )}
+                  >
+                    {trashCases.length}
+                  </span>
+                )}
+              </button>
+            </div>
+
+            {viewMode === 'trash' ? (
+              <span className="text-xs text-rose-700 font-semibold flex items-center gap-1 bg-rose-50 px-2.5 py-1 rounded-lg border border-rose-200">
+                <AlertOctagon className="h-3.5 w-3.5" />
+                Deleted cases can be restored or permanently removed
+              </span>
+            ) : (
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-bold text-slate-900">
+                  {categorySearchQuery.trim()
+                    ? `Category Search: "${categorySearchQuery}"`
+                    : categoryFilter === 'all'
+                      ? 'All Case Records Directory'
+                      : `${CATEGORY_TABS.find((t) => t.id === categoryFilter)?.label || 'Case'} Directory`}
+                </span>
+                <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-slate-100 text-slate-700">
+                  {filteredCases.length} {filteredCases.length === 1 ? 'case' : 'cases'}
+                </span>
+              </div>
+            )}
           </div>
-          {searchQuery && (
-            <p className="text-xs text-slate-500">
-              Filtered by: &ldquo;<strong className="text-slate-800">{searchQuery}</strong>&rdquo;
-            </p>
-          )}
+
+          <div className="flex items-center gap-3">
+            {searchQuery && (
+              <p className="text-xs text-slate-500">
+                Filtered by: &ldquo;<strong className="text-slate-800">{searchQuery}</strong>&rdquo;
+              </p>
+            )}
+
+            {viewMode === 'active' && filteredCases.length > 0 && (
+              <button
+                type="button"
+                onClick={handleExportCurrentView}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-emerald-50 hover:bg-emerald-600 hover:text-white text-emerald-700 border border-emerald-200 transition shadow-xs cursor-pointer"
+                title={`Export ${filteredCases.length} currently visible case${filteredCases.length !== 1 ? 's' : ''} to Excel`}
+              >
+                <Download className="h-3.5 w-3.5" />
+                Export to Excel ({filteredCases.length})
+              </button>
+            )}
+
+            {viewMode === 'trash' && trashCases.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setConfirmEmptyTrash(true)}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-rose-50 hover:bg-rose-600 hover:text-white text-rose-700 border border-rose-200 transition shadow-xs cursor-pointer"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                Empty Trash ({trashCases.length})
+              </button>
+            )}
+          </div>
         </div>
 
-        {filteredCases.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-16 px-4 text-center">
-            <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-amber-50 text-amber-600 mb-3">
-              <FolderLock className="h-7 w-7" />
-            </div>
-            <h3 className="text-sm font-bold text-slate-900">
-              {categoryFilter !== 'all'
-                ? `No ${CATEGORY_TABS.find((t) => t.id === categoryFilter)?.shortLabel} cases found`
-                : 'No cases found'}
-            </h3>
-            <p className="text-xs text-slate-500 max-w-sm mt-1">
-              {categoryFilter !== 'all'
-                ? `There are currently 0 cases recorded under ${CATEGORY_TABS.find((t) => t.id === categoryFilter)?.label}. Select another category or click "New Case Intake".`
-                : searchQuery || statusFilter !== 'all' || barangayFilter !== 'all'
-                  ? 'No matching cases for the active filter. Try resetting search parameters.'
-                  : 'Your case registry is empty. Upload your existing MSWDO Excel logbook or create a new case intake.'}
-            </p>
-            <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
-              {categoryFilter !== 'all' && (
-                <button
-                  type="button"
-                  onClick={() => setCategoryFilter('all')}
-                  className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold rounded-xl border border-slate-300 text-slate-700 hover:bg-slate-50 transition cursor-pointer"
-                >
-                  View All Categories ({cases.length})
-                </button>
-              )}
-              <button
-                onClick={() => setUploadModalOpen(true)}
-                className="flex items-center gap-1.5 px-4 py-2 text-xs font-bold rounded-xl bg-amber-600 text-white hover:bg-amber-700 transition"
-              >
-                <Upload className="h-3.5 w-3.5" />
-                Upload Excel Sheet
-              </button>
-              <button
-                onClick={() => setNewCaseModalOpen(true)}
-                className="flex items-center gap-1.5 px-4 py-2 text-xs font-bold rounded-xl border border-slate-300 text-slate-700 hover:bg-slate-50 transition"
-              >
-                <Plus className="h-3.5 w-3.5" />
-                New Intake
-              </button>
-            </div>
-          </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs">
-              <thead className="bg-slate-50 border-b border-slate-200 text-slate-600 uppercase font-semibold">
-                <tr>
-                  <th className="py-3 px-4">Case Number</th>
-                  <th className="py-3 px-4">Classification</th>
-                  <th className="py-3 px-4">Victim / Client</th>
-                  <th className="py-3 px-4">Barangay</th>
-                  <th className="py-3 px-4">Alleged Perpetrator</th>
-                  <th className="py-3 px-4">Status</th>
-                  <th className="py-3 px-4">Reported</th>
-                  <th className="py-3 px-4">Assigned Worker</th>
-                  <th className="py-3 px-4 text-right">Folder</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 text-slate-800">
-                {filteredCases.map((c) => (
-                  <tr
-                    key={c.id}
-                    onClick={() => setSelectedCaseId(c.id)}
-                    className="hover:bg-amber-50/40 transition cursor-pointer group"
+        {/* ACTIVE CASES VIEW */}
+        {viewMode === 'active' && (
+          filteredCases.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-16 px-4 text-center">
+              <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-amber-50 text-amber-600 mb-3">
+                <FolderLock className="h-7 w-7" />
+              </div>
+              <h3 className="text-sm font-bold text-slate-900">
+                {categoryFilter !== 'all'
+                  ? `No ${CATEGORY_TABS.find((t) => t.id === categoryFilter)?.shortLabel} cases found`
+                  : 'No cases found'}
+              </h3>
+              <p className="text-xs text-slate-500 max-w-sm mt-1">
+                {categoryFilter !== 'all'
+                  ? `There are currently 0 cases recorded under ${CATEGORY_TABS.find((t) => t.id === categoryFilter)?.label}. Select another category or click "New Case Intake".`
+                  : searchQuery || statusFilter !== 'all' || barangayFilter !== 'all'
+                    ? 'No matching cases for the active filter. Try resetting search parameters.'
+                    : 'Your case registry is empty. Upload your existing MSWDO Excel logbook or create a new case intake.'}
+              </p>
+              <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
+                {categoryFilter !== 'all' && (
+                  <button
+                    type="button"
+                    onClick={() => setCategoryFilter('all')}
+                    className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold rounded-xl border border-slate-300 text-slate-700 hover:bg-slate-50 transition cursor-pointer"
                   >
-                    <td className="py-3.5 px-4 font-mono font-bold text-amber-900 flex items-center gap-2">
-                      <Lock className="h-3.5 w-3.5 text-amber-600 flex-shrink-0" />
-                      <span>{c.case_number}</span>
-                    </td>
-                    <td className="py-3.5 px-4">
-                      {(() => {
-                        const catGroup = getCaseCategoryGroup(c);
-                        const label =
-                          c.case_type === 'rape' || c.intake_sheet?.case_category_type === 'rape'
-                            ? 'Rape'
-                            : c.case_type === 'acts_of_lasciviousness' || c.intake_sheet?.case_category_type === 'acts_of_lasciviousness'
-                              ? 'Acts of Lasciviousness'
-                              : c.case_type.startsWith('vawc') || c.intake_sheet?.case_category_type === 'vawc'
-                                ? c.case_type.replace(/_/g, ' ')
-                                : c.intake_sheet?.case_category_type
-                                  ? c.intake_sheet.case_category_type.replace(/_/g, ' ')
-                                  : c.case_type.replace(/_/g, ' ');
-
-                        return (
-                          <div className="space-y-0.5">
-                            <span
-                              className={cn(
-                                'inline-flex px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider',
-                                catGroup === 'rape' && 'bg-rose-100 text-rose-800 border border-rose-200',
-                                catGroup === 'acts_of_lasciviousness' && 'bg-amber-100 text-amber-900 border border-amber-200',
-                                catGroup === 'vawc' && 'bg-purple-100 text-purple-800 border border-purple-200',
-                                catGroup === 'child_abuse_vac' && 'bg-blue-100 text-blue-800 border border-blue-200',
-                                catGroup === 'other' && 'bg-slate-100 text-slate-800 border border-slate-200',
-                              )}
-                            >
-                              {label}
-                            </span>
-                            {c.intake_sheet?.case_category_other && (
-                              <p className="text-[10px] text-slate-500 italic max-w-[130px] truncate" title={c.intake_sheet.case_category_other}>
-                                {c.intake_sheet.case_category_other}
-                              </p>
-                            )}
-                          </div>
-                        );
-                      })()}
-                    </td>
-                    <td className="py-3.5 px-4">
-                      <p className="font-bold text-slate-900">{c.victim_name}</p>
-                      {c.victim_age && (
-                        <p className="text-[10px] text-slate-400">
-                          {c.victim_age} yrs • {c.victim_gender === 'F' ? 'Female' : 'Male'}
-                        </p>
-                      )}
-                    </td>
-                    <td className="py-3.5 px-4 capitalize font-medium text-slate-700">
-                      {c.barangay_id}
-                    </td>
-                    <td className="py-3.5 px-4">
-                      <p className="font-medium text-slate-800">{c.perpetrator_name || '—'}</p>
-                      {c.perpetrator_relationship && (
-                        <p className="text-[10px] text-slate-400">({c.perpetrator_relationship})</p>
-                      )}
-                    </td>
-                    <td className="py-3.5 px-4">
-                      <span
-                        className={cn(
-                          'inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold capitalize',
-                          c.status === 'active' && 'bg-amber-100 text-amber-800',
-                          c.status === 'under_bpo_tpo' && 'bg-indigo-100 text-indigo-800',
-                          c.status === 'referred_pnp_wcpd' && 'bg-sky-100 text-sky-800',
-                          c.status === 'filed_in_court' && 'bg-violet-100 text-violet-800',
-                          c.status === 'resolved_closed' && 'bg-emerald-100 text-emerald-800',
-                          c.status === 'monitoring' && 'bg-teal-100 text-teal-800',
-                        )}
-                      >
-                        {c.status.replace(/_/g, ' ')}
-                      </span>
-                    </td>
-                    <td className="py-3.5 px-4 text-slate-500 whitespace-nowrap">
-                      {c.reported_at}
-                    </td>
-                    <td className="py-3.5 px-4 text-slate-600 truncate max-w-[120px]">
-                      {c.assigned_worker_name || 'MSWDO'}
-                    </td>
-                    <td className="py-3.5 px-4 text-right">
-                      <div className="flex items-center justify-end gap-1.5">
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            printGeneralIntakeSheet(c);
-                          }}
-                          className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-amber-50 hover:bg-amber-600 hover:text-white text-amber-800 font-bold transition shadow-sm border border-amber-200"
-                          title="Print 2-Page General Intake Sheet (GIS)"
-                        >
-                          <Printer className="h-3.5 w-3.5" />
-                          <span className="hidden lg:inline">Print GIS</span>
-                        </button>
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setSelectedCaseId(c.id);
-                          }}
-                          className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-slate-100 group-hover:bg-amber-600 group-hover:text-white text-slate-700 font-bold transition shadow-sm"
-                        >
-                          <Eye className="h-3.5 w-3.5" />
-                          Open Folder
-                        </button>
-                      </div>
-                    </td>
+                    View All Categories ({cases.length})
+                  </button>
+                )}
+                <button
+                  onClick={() => setUploadModalOpen(true)}
+                  className="flex items-center gap-1.5 px-4 py-2 text-xs font-bold rounded-xl bg-amber-600 text-white hover:bg-amber-700 transition cursor-pointer"
+                >
+                  <Upload className="h-3.5 w-3.5" />
+                  Upload Excel Sheet
+                </button>
+                <button
+                  onClick={() => setNewCaseModalOpen(true)}
+                  className="flex items-center gap-1.5 px-4 py-2 text-xs font-bold rounded-xl border border-slate-300 text-slate-700 hover:bg-slate-50 transition cursor-pointer"
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  New Intake
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-slate-50 border-b border-slate-200 text-slate-600 uppercase font-semibold">
+                  <tr>
+                    <th className="py-3 px-4">Case Number</th>
+                    <th className="py-3 px-4">Classification</th>
+                    <th className="py-3 px-4">Victim / Client</th>
+                    <th className="py-3 px-4">Barangay</th>
+                    <th className="py-3 px-4">Alleged Perpetrator</th>
+                    <th className="py-3 px-4">Status</th>
+                    <th className="py-3 px-4">Reported</th>
+                    <th className="py-3 px-4">Assigned Worker</th>
+                    <th className="py-3 px-4 text-right">Folder & Actions</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody className="divide-y divide-slate-100 text-slate-800">
+                  {filteredCases.map((c) => (
+                    <tr
+                      key={c.id}
+                      onClick={() => setSelectedCaseId(c.id)}
+                      className="hover:bg-amber-50/40 transition cursor-pointer group"
+                    >
+                      <td className="py-3.5 px-4 font-mono font-bold text-amber-900 flex items-center gap-2">
+                        <Lock className="h-3.5 w-3.5 text-amber-600 flex-shrink-0" />
+                        <span>{c.case_number}</span>
+                      </td>
+                      <td className="py-3.5 px-4">
+                        {(() => {
+                          const catGroup = getCaseCategoryGroup(c);
+                          const label =
+                            c.case_type === 'rape' || c.intake_sheet?.case_category_type === 'rape'
+                              ? 'Rape'
+                              : c.case_type === 'acts_of_lasciviousness' || c.intake_sheet?.case_category_type === 'acts_of_lasciviousness'
+                                ? 'Acts of Lasciviousness'
+                                : c.case_type.startsWith('vawc') || c.intake_sheet?.case_category_type === 'vawc'
+                                  ? c.case_type.replace(/_/g, ' ')
+                                  : c.intake_sheet?.case_category_type
+                                    ? c.intake_sheet.case_category_type.replace(/_/g, ' ')
+                                    : c.case_type.replace(/_/g, ' ');
+
+                          return (
+                            <div className="space-y-0.5">
+                              <span
+                                className={cn(
+                                  'inline-flex px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider',
+                                  catGroup === 'rape' && 'bg-rose-100 text-rose-800 border border-rose-200',
+                                  catGroup === 'acts_of_lasciviousness' && 'bg-amber-100 text-amber-900 border border-amber-200',
+                                  catGroup === 'vawc' && 'bg-purple-100 text-purple-800 border border-purple-200',
+                                  catGroup === 'child_abuse_vac' && 'bg-blue-100 text-blue-800 border border-blue-200',
+                                  catGroup === 'other' && 'bg-slate-100 text-slate-800 border border-slate-200',
+                                )}
+                              >
+                                {label}
+                              </span>
+                              {c.intake_sheet?.case_category_other && (
+                                <p className="text-[10px] text-slate-500 italic max-w-[130px] truncate" title={c.intake_sheet.case_category_other}>
+                                  {c.intake_sheet.case_category_other}
+                                </p>
+                              )}
+                            </div>
+                          );
+                        })()}
+                      </td>
+                      <td className="py-3.5 px-4">
+                        <p className="font-bold text-slate-900">{c.victim_name}</p>
+                        {c.victim_age && (
+                          <p className="text-[10px] text-slate-400">
+                            {c.victim_age} yrs • {c.victim_gender === 'F' ? 'Female' : 'Male'}
+                          </p>
+                        )}
+                      </td>
+                      <td className="py-3.5 px-4 capitalize font-medium text-slate-700">
+                        {c.barangay_id}
+                      </td>
+                      <td className="py-3.5 px-4">
+                        <p className="font-medium text-slate-800">{c.perpetrator_name || '—'}</p>
+                        {c.perpetrator_relationship && (
+                          <p className="text-[10px] text-slate-400">({c.perpetrator_relationship})</p>
+                        )}
+                      </td>
+                      <td className="py-3.5 px-4">
+                        <span
+                          className={cn(
+                            'inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold capitalize',
+                            c.status === 'active' && 'bg-amber-100 text-amber-800',
+                            c.status === 'under_bpo_tpo' && 'bg-indigo-100 text-indigo-800',
+                            c.status === 'referred_pnp_wcpd' && 'bg-sky-100 text-sky-800',
+                            c.status === 'filed_in_court' && 'bg-violet-100 text-violet-800',
+                            c.status === 'resolved_closed' && 'bg-emerald-100 text-emerald-800',
+                            c.status === 'monitoring' && 'bg-teal-100 text-teal-800',
+                          )}
+                        >
+                          {c.status.replace(/_/g, ' ')}
+                        </span>
+                      </td>
+                      <td className="py-3.5 px-4 text-slate-500 whitespace-nowrap">
+                        {c.reported_at}
+                      </td>
+                      <td className="py-3.5 px-4 text-slate-600 truncate max-w-[120px]">
+                        {c.assigned_worker_name || 'MSWDO'}
+                      </td>
+                      <td className="py-3.5 px-4 text-right">
+                        <div className="flex items-center justify-end gap-1.5">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              printGeneralIntakeSheet(c);
+                            }}
+                            className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-amber-50 hover:bg-amber-600 hover:text-white text-amber-800 font-bold transition shadow-xs border border-amber-200 cursor-pointer"
+                            title="Print 2-Page General Intake Sheet (GIS)"
+                          >
+                            <Printer className="h-3.5 w-3.5" />
+                            <span className="hidden lg:inline">Print GIS</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSelectedCaseId(c.id);
+                            }}
+                            className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-slate-100 group-hover:bg-amber-600 group-hover:text-white text-slate-700 font-bold transition shadow-xs cursor-pointer"
+                          >
+                            <Eye className="h-3.5 w-3.5" />
+                            Open Folder
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setCaseToTrash(c);
+                            }}
+                            className="inline-flex items-center p-1.5 rounded-lg bg-slate-100 hover:bg-rose-100 text-slate-400 hover:text-rose-700 transition shadow-xs border border-slate-200 cursor-pointer"
+                            title="Move this case to Trash"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )
+        )}
+
+        {/* TRASH BIN VIEW */}
+        {viewMode === 'trash' && (
+          filteredTrashCases.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-16 px-4 text-center">
+              <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-slate-100 text-slate-500 mb-3">
+                <Trash2 className="h-7 w-7" />
+              </div>
+              <h3 className="text-sm font-bold text-slate-900">Trash Bin is Empty</h3>
+              <p className="text-xs text-slate-500 max-w-sm mt-1">
+                No deleted cases in Trash. When you delete a case from the active directory, it will appear here where you can restore it or permanently delete it.
+              </p>
+              <button
+                type="button"
+                onClick={() => setViewMode('active')}
+                className="mt-4 flex items-center gap-1.5 px-4 py-2 text-xs font-bold rounded-xl bg-slate-900 text-white hover:bg-slate-800 transition cursor-pointer"
+              >
+                Back to Active Cases ({cases.length})
+              </button>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-rose-50/50 border-b border-rose-100 text-slate-600 uppercase font-semibold">
+                  <tr>
+                    <th className="py-3 px-4">Case Number</th>
+                    <th className="py-3 px-4">Classification</th>
+                    <th className="py-3 px-4">Victim / Client</th>
+                    <th className="py-3 px-4">Barangay</th>
+                    <th className="py-3 px-4">Deleted When</th>
+                    <th className="py-3 px-4">Previous Status</th>
+                    <th className="py-3 px-4 text-right">Trash Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 text-slate-800">
+                  {filteredTrashCases.map((c) => (
+                    <tr
+                      key={c.id}
+                      onClick={() => setSelectedCaseId(c.id)}
+                      className="hover:bg-rose-50/30 transition cursor-pointer group"
+                    >
+                      <td className="py-3.5 px-4 font-mono font-bold text-rose-900 flex items-center gap-2">
+                        <Trash2 className="h-3.5 w-3.5 text-rose-500 flex-shrink-0" />
+                        <span className="line-through opacity-80">{c.case_number}</span>
+                      </td>
+                      <td className="py-3.5 px-4 capitalize font-medium text-slate-700">
+                        {c.case_type.replace(/_/g, ' ')}
+                      </td>
+                      <td className="py-3.5 px-4">
+                        <p className="font-bold text-slate-900">{c.victim_name}</p>
+                        {c.victim_age && (
+                          <p className="text-[10px] text-slate-400">
+                            {c.victim_age} yrs • {c.victim_gender === 'F' ? 'Female' : 'Male'}
+                          </p>
+                        )}
+                      </td>
+                      <td className="py-3.5 px-4 capitalize font-medium text-slate-700">
+                        {c.barangay_id}
+                      </td>
+                      <td className="py-3.5 px-4 text-slate-500 whitespace-nowrap">
+                        <p>{c.deleted_at ? new Date(c.deleted_at).toLocaleDateString() : 'Archived'}</p>
+                        <p className="text-[10px] text-slate-400">by {c.deleted_by || 'MSWDO'}</p>
+                      </td>
+                      <td className="py-3.5 px-4">
+                        <span className="inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold capitalize bg-slate-100 text-slate-600">
+                          {c.status.replace(/_/g, ' ')}
+                        </span>
+                      </td>
+                      <td className="py-3.5 px-4 text-right">
+                        <div className="flex items-center justify-end gap-2">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              void handleRestoreFromTrash(c);
+                            }}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-50 hover:bg-emerald-600 hover:text-white text-emerald-800 font-bold transition shadow-xs border border-emerald-200 cursor-pointer"
+                            title="Restore case to active directory"
+                          >
+                            <RotateCcw className="h-3.5 w-3.5" />
+                            <span>Restore</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setCaseToPermanentDelete(c);
+                            }}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-700 text-white font-bold transition shadow-xs cursor-pointer"
+                            title="Permanently purge this record forever"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                            <span>Permanent Delete</span>
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )
         )}
       </div>
 
@@ -738,7 +1099,7 @@ export default function CasesDesktop() {
         isOpen={uploadModalOpen}
         onClose={() => setUploadModalOpen(false)}
         onSuccess={(count) => {
-          loadCases();
+          void loadCases(true);
           showToast(`Successfully imported ${count} cases into MSWDO Case Directory!`);
         }}
       />
@@ -747,7 +1108,7 @@ export default function CasesDesktop() {
         isOpen={newCaseModalOpen}
         onClose={() => setNewCaseModalOpen(false)}
         onSuccess={(newCase) => {
-          loadCases();
+          void loadCases(true);
           showToast(`New case ${newCase.case_number} recorded successfully!`);
           setSelectedCaseId(newCase.id);
         }}
@@ -757,8 +1118,147 @@ export default function CasesDesktop() {
         isOpen={Boolean(selectedCaseId)}
         caseId={selectedCaseId}
         onClose={() => setSelectedCaseId(null)}
-        onCaseUpdated={loadCases}
+        onCaseUpdated={() => void loadCases(true)}
       />
+
+      {/* Move to Trash Modal */}
+      {caseToTrash && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-xs animate-in fade-in">
+          <div className="w-full max-w-md bg-white rounded-2xl p-6 shadow-2xl border border-slate-200 space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-amber-100 text-amber-800 flex-shrink-0">
+                <Trash2 className="h-6 w-6" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-slate-900">Move Case to Trash?</h3>
+                <p className="text-xs text-slate-500 font-mono">{caseToTrash.case_number}</p>
+              </div>
+            </div>
+
+            <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-100 text-xs text-slate-700 space-y-1.5">
+              <p>
+                <span className="font-semibold text-slate-500">Client / Victim:</span>{' '}
+                <strong className="text-slate-900">{caseToTrash.victim_name}</strong>
+              </p>
+              <p>
+                <span className="font-semibold text-slate-500">Classification:</span>{' '}
+                <span className="capitalize">{caseToTrash.case_type.replace(/_/g, ' ')}</span>
+              </p>
+              <p className="text-[11px] text-amber-800 mt-2 bg-amber-50 p-2.5 rounded-lg border border-amber-200 leading-relaxed">
+                ℹ️ This case will be hidden from the active directory. You can restore it anytime from the Trash Bin.
+              </p>
+            </div>
+
+            <div className="flex items-center justify-end gap-2.5 pt-2">
+              <button
+                type="button"
+                disabled={isActionPending}
+                onClick={() => setCaseToTrash(null)}
+                className="px-4 py-2 text-xs font-bold rounded-xl border border-slate-300 text-slate-700 hover:bg-slate-100 transition cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={isActionPending}
+                onClick={() => handleMoveToTrash(caseToTrash)}
+                className="flex items-center gap-1.5 px-4 py-2 text-xs font-bold rounded-xl bg-amber-600 hover:bg-amber-700 text-white transition shadow-xs cursor-pointer"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                {isActionPending ? 'Moving...' : 'Move to Trash'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Permanent Delete Modal */}
+      {caseToPermanentDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-xs animate-in fade-in">
+          <div className="w-full max-w-md bg-white rounded-2xl p-6 shadow-2xl border border-rose-200 space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-rose-100 text-rose-700 flex-shrink-0">
+                <AlertOctagon className="h-6 w-6" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-slate-900">Permanently Delete Case?</h3>
+                <p className="text-xs text-rose-600 font-mono font-bold">{caseToPermanentDelete.case_number}</p>
+              </div>
+            </div>
+
+            <div className="bg-rose-50 p-3.5 rounded-xl border border-rose-200 text-xs text-rose-950 space-y-2">
+              <p>
+                <span className="font-semibold text-rose-700">Client / Victim:</span>{' '}
+                <strong className="text-rose-950">{caseToPermanentDelete.victim_name}</strong>
+              </p>
+              <p className="text-[11px] font-semibold text-rose-800 leading-relaxed bg-white/90 p-2.5 rounded-lg border border-rose-200">
+                ⚠️ <strong>WARNING:</strong> This action cannot be undone. All confidential records, notes, attachments, and the General Intake Sheet (GIS) will be permanently erased from both local storage and the database.
+              </p>
+            </div>
+
+            <div className="flex items-center justify-end gap-2.5 pt-2">
+              <button
+                type="button"
+                disabled={isActionPending}
+                onClick={() => setCaseToPermanentDelete(null)}
+                className="px-4 py-2 text-xs font-bold rounded-xl border border-slate-300 text-slate-700 hover:bg-slate-100 transition cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={isActionPending}
+                onClick={() => handlePermanentDelete(caseToPermanentDelete)}
+                className="flex items-center gap-1.5 px-4 py-2 text-xs font-bold rounded-xl bg-rose-600 hover:bg-rose-700 text-white transition shadow-xs cursor-pointer"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                {isActionPending ? 'Deleting...' : 'Delete Permanently'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Empty Trash Confirmation Modal */}
+      {confirmEmptyTrash && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-xs animate-in fade-in">
+          <div className="w-full max-w-md bg-white rounded-2xl p-6 shadow-2xl border border-rose-200 space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-rose-100 text-rose-700 flex-shrink-0">
+                <Trash2 className="h-6 w-6" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-slate-900">Empty Trash Bin?</h3>
+                <p className="text-xs text-rose-600 font-bold">{trashCases.length} cases will be deleted</p>
+              </div>
+            </div>
+
+            <p className="text-xs text-rose-800 bg-rose-50 p-3 rounded-xl border border-rose-200 leading-relaxed">
+              ⚠️ Are you sure you want to permanently delete all <strong>{trashCases.length}</strong> cases currently in Trash? This will purge all associated files, notes, and records forever.
+            </p>
+
+            <div className="flex items-center justify-end gap-2.5 pt-2">
+              <button
+                type="button"
+                disabled={isActionPending}
+                onClick={() => setConfirmEmptyTrash(false)}
+                className="px-4 py-2 text-xs font-bold rounded-xl border border-slate-300 text-slate-700 hover:bg-slate-100 transition cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={isActionPending}
+                onClick={handleEmptyTrash}
+                className="flex items-center gap-1.5 px-4 py-2 text-xs font-bold rounded-xl bg-rose-600 hover:bg-rose-700 text-white transition shadow-xs cursor-pointer"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                {isActionPending ? 'Purging...' : 'Empty All Trash'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

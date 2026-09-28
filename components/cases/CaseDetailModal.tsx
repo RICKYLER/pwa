@@ -23,6 +23,8 @@ import {
   Users,
   Search,
   Printer,
+  RotateCcw,
+  AlertOctagon,
 } from 'lucide-react';
 import type {
   CaseRecord,
@@ -40,6 +42,9 @@ import {
   deleteCaseAttachment,
   getCaseNotes,
   addCaseNote,
+  moveCaseToTrash,
+  restoreCaseFromTrash,
+  permanentlyDeleteCase,
 } from '@/lib/db/cases';
 import { db, STORE_NAMES } from '@/lib/db/indexeddb';
 import { getCurrentUser } from '@/lib/auth';
@@ -84,6 +89,11 @@ export default function CaseDetailModal({
   const [censusSearchResults, setCensusSearchResults] = useState<Resident[]>([]);
   const [isSearchingCensus, setIsSearchingCensus] = useState(false);
 
+  // Trash & Permanent Delete Dialogs
+  const [confirmMoveToTrash, setConfirmMoveToTrash] = useState(false);
+  const [confirmPermanentDelete, setConfirmPermanentDelete] = useState(false);
+  const [isTrashActionPending, setIsTrashActionPending] = useState(false);
+
   const currentUser = getCurrentUser();
 
   useEffect(() => {
@@ -100,7 +110,7 @@ export default function CaseDetailModal({
   async function loadCaseData(id: string) {
     setIsLoading(true);
     try {
-      const record = await getCase(id);
+      const record = await getCase(id, { includeDeleted: true });
       if (record) {
         setCaseRecord(record);
         const [atts, nts] = await Promise.all([
@@ -259,6 +269,50 @@ export default function CaseDetailModal({
     }
   }
 
+  async function handleMoveToTrashInsideModal() {
+    if (!caseRecord) return;
+    setIsTrashActionPending(true);
+    try {
+      await moveCaseToTrash(caseRecord.id);
+      setConfirmMoveToTrash(false);
+      onCaseUpdated?.();
+      onClose();
+    } catch (err) {
+      console.error('Failed to move case to trash:', err);
+    } finally {
+      setIsTrashActionPending(false);
+    }
+  }
+
+  async function handleRestoreInsideModal() {
+    if (!caseRecord) return;
+    setIsTrashActionPending(true);
+    try {
+      const restored = await restoreCaseFromTrash(caseRecord.id);
+      setCaseRecord(restored);
+      onCaseUpdated?.();
+    } catch (err) {
+      console.error('Failed to restore case:', err);
+    } finally {
+      setIsTrashActionPending(false);
+    }
+  }
+
+  async function handlePermanentDeleteInsideModal() {
+    if (!caseRecord) return;
+    setIsTrashActionPending(true);
+    try {
+      await permanentlyDeleteCase(caseRecord.id);
+      setConfirmPermanentDelete(false);
+      onCaseUpdated?.();
+      onClose();
+    } catch (err) {
+      console.error('Failed to permanently delete case:', err);
+    } finally {
+      setIsTrashActionPending(false);
+    }
+  }
+
   if (!isOpen) return null;
 
   return (
@@ -338,14 +392,57 @@ export default function CaseDetailModal({
                 </select>
               )}
 
+              {caseRecord && !caseRecord.is_deleted && (
+                <button
+                  type="button"
+                  onClick={() => setConfirmMoveToTrash(true)}
+                  className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:bg-rose-50 hover:text-rose-600 transition cursor-pointer"
+                  title="Move case to Trash"
+                >
+                  <Trash2 className="h-4 w-4" />
+                </button>
+              )}
+
               <button
                 onClick={onClose}
-                className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-200 hover:text-slate-700 transition"
+                className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-200 hover:text-slate-700 transition cursor-pointer"
               >
                 <X className="h-4 w-4" />
               </button>
             </div>
           </div>
+
+          {/* Trashed Case Alert Banner */}
+          {caseRecord?.is_deleted && (
+            <div className="mt-3 bg-rose-100/80 border border-rose-300 rounded-xl px-4 py-2.5 flex flex-wrap items-center justify-between gap-2 text-xs">
+              <div className="flex items-center gap-2 text-rose-900 font-semibold">
+                <AlertOctagon className="h-4 w-4 text-rose-700 flex-shrink-0" />
+                <span>
+                  This case is currently in the Trash Bin (deleted {caseRecord.deleted_at ? new Date(caseRecord.deleted_at).toLocaleDateString() : 'recently'} by {caseRecord.deleted_by || 'MSWDO Staff'}).
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  disabled={isTrashActionPending}
+                  onClick={handleRestoreInsideModal}
+                  className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold transition shadow-xs cursor-pointer"
+                >
+                  <RotateCcw className="h-3.5 w-3.5" />
+                  {isTrashActionPending ? 'Restoring...' : 'Restore Case'}
+                </button>
+                <button
+                  type="button"
+                  disabled={isTrashActionPending}
+                  onClick={() => setConfirmPermanentDelete(true)}
+                  className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-rose-600 hover:bg-rose-700 text-white font-bold transition shadow-xs cursor-pointer"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                  Permanent Delete
+                </button>
+              </div>
+            </div>
+          )}
 
           {/* Confidentiality Alert Ribbon */}
           <div className="mt-3 flex items-center gap-2 px-3 py-1.5 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-900 text-[11px] font-semibold">
@@ -808,12 +905,94 @@ export default function CaseDetailModal({
           <span>Confidentiality Protected under RA 9262 / RA 7610</span>
           <button
             onClick={onClose}
-            className="px-4 py-2 text-xs font-semibold rounded-xl border border-slate-300 bg-white hover:bg-slate-100 transition"
+            className="px-4 py-2 text-xs font-semibold rounded-xl border border-slate-300 bg-white hover:bg-slate-100 transition cursor-pointer"
           >
             Close Folder
           </button>
         </div>
       </div>
+
+      {/* Move to Trash Modal inside Case Detail */}
+      {confirmMoveToTrash && caseRecord && (
+        <div className="fixed inset-0 z-60 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-xs animate-in fade-in">
+          <div className="w-full max-w-md bg-white rounded-2xl p-6 shadow-2xl border border-slate-200 space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-amber-100 text-amber-800 flex-shrink-0">
+                <Trash2 className="h-6 w-6" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-slate-900">Move Case to Trash?</h3>
+                <p className="text-xs text-slate-500 font-mono">{caseRecord.case_number}</p>
+              </div>
+            </div>
+
+            <p className="text-xs text-slate-600 leading-relaxed bg-slate-50 p-3 rounded-xl border border-slate-200">
+              This case will be removed from the active directory and placed in the Trash bin. You can restore it anytime.
+            </p>
+
+            <div className="flex items-center justify-end gap-2.5 pt-2">
+              <button
+                type="button"
+                disabled={isTrashActionPending}
+                onClick={() => setConfirmMoveToTrash(false)}
+                className="px-4 py-2 text-xs font-bold rounded-xl border border-slate-300 text-slate-700 hover:bg-slate-100 transition cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={isTrashActionPending}
+                onClick={handleMoveToTrashInsideModal}
+                className="flex items-center gap-1.5 px-4 py-2 text-xs font-bold rounded-xl bg-amber-600 hover:bg-amber-700 text-white transition shadow-xs cursor-pointer"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                {isTrashActionPending ? 'Moving...' : 'Move to Trash'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Permanent Delete Modal inside Case Detail */}
+      {confirmPermanentDelete && caseRecord && (
+        <div className="fixed inset-0 z-60 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-xs animate-in fade-in">
+          <div className="w-full max-w-md bg-white rounded-2xl p-6 shadow-2xl border border-rose-200 space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-rose-100 text-rose-700 flex-shrink-0">
+                <AlertOctagon className="h-6 w-6" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-slate-900">Permanently Delete Case?</h3>
+                <p className="text-xs text-rose-600 font-mono font-bold">{caseRecord.case_number}</p>
+              </div>
+            </div>
+
+            <p className="text-xs font-semibold text-rose-800 leading-relaxed bg-rose-50 p-3 rounded-xl border border-rose-200">
+              ⚠️ <strong>WARNING:</strong> This action cannot be undone. All confidential records, notes, and attachments for this case will be permanently erased.
+            </p>
+
+            <div className="flex items-center justify-end gap-2.5 pt-2">
+              <button
+                type="button"
+                disabled={isTrashActionPending}
+                onClick={() => setConfirmPermanentDelete(false)}
+                className="px-4 py-2 text-xs font-bold rounded-xl border border-slate-300 text-slate-700 hover:bg-slate-100 transition cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={isTrashActionPending}
+                onClick={handlePermanentDeleteInsideModal}
+                className="flex items-center gap-1.5 px-4 py-2 text-xs font-bold rounded-xl bg-rose-600 hover:bg-rose-700 text-white transition shadow-xs cursor-pointer"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                {isTrashActionPending ? 'Deleting...' : 'Delete Permanently'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -64,6 +64,14 @@ const ROUTE_TABLES: Array<{
     tables: ['solo_parents', 'residents', 'households', 'vulnerability_flags'],
   },
   {
+    prefix: '/cases',
+    tables: ['cases', 'case_notes', 'case_attachments'],
+  },
+  {
+    prefix: '/case-analytics',
+    tables: ['cases', 'case_notes', 'case_attachments'],
+  },
+  {
     prefix: '/resident/household',
     tables: ['households', 'residents', 'vulnerability_flags', 'user_notifications', 'distribution_records', 'purok_risk_profiles'],
   },

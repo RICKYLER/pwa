@@ -571,6 +571,12 @@ export interface GeneralIntakeSheetData {
   client_signature_name?: string;
   mswdo_worker_name?: string;
   noted_by_name?: string;
+  _trash?: {
+    is_deleted?: boolean;
+    deleted_at?: string;
+    deleted_by?: string;
+    previous_status?: CaseStatus;
+  };
 }
 
 export interface CaseRecord {
@@ -598,6 +604,9 @@ export interface CaseRecord {
   household_id?: string;
   source: 'excel_import' | 'manual_intake';
   intake_sheet?: GeneralIntakeSheetData;
+  is_deleted?: boolean;
+  deleted_at?: string;
+  deleted_by?: string;
   createdAt: Date | string;
   updatedAt: Date | string;
   syncStatus?: SyncStatus;

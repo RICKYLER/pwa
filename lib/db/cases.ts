@@ -1,10 +1,12 @@
 import { db, STORE_NAMES } from './indexeddb';
+import { runServerMutation } from '@/lib/mutations';
 import type {
   CaseRecord,
   CaseStatus,
   CaseClassification,
   CaseAttachment,
   CaseNote,
+  GeneralIntakeSheetData,
 } from './schema';
 
 function generateCaseId(): string {
@@ -24,6 +26,8 @@ export interface CaseQueryFilters {
   status?: CaseStatus;
   case_type?: CaseClassification;
   barangay_id?: string;
+  trashOnly?: boolean;
+  includeDeleted?: boolean;
 }
 
 /**
@@ -32,9 +36,27 @@ export interface CaseQueryFilters {
  */
 export async function getCases(filters?: CaseQueryFilters): Promise<CaseRecord[]> {
   try {
-    const allCases = await db.getAll<CaseRecord>(STORE_NAMES.cases);
+    let allCases = await db.getAll<CaseRecord>(STORE_NAMES.cases);
+
+    if (allCases.length === 0 && typeof window !== 'undefined') {
+      try {
+        const { bootstrapPathnameData } = await import('@/lib/supabase/route-bootstrap');
+        await bootstrapPathnameData('/cases', true);
+        allCases = await db.getAll<CaseRecord>(STORE_NAMES.cases);
+      } catch (err) {
+        console.warn('Failed to auto-bootstrap cases from Supabase:', err);
+      }
+    }
 
     let filtered = allCases;
+
+    if (!filters?.includeDeleted) {
+      if (filters?.trashOnly) {
+        filtered = filtered.filter((c) => Boolean(c.is_deleted));
+      } else {
+        filtered = filtered.filter((c) => !c.is_deleted);
+      }
+    }
 
     if (filters?.status) {
       filtered = filtered.filter((c) => c.status === filters.status);
@@ -78,9 +100,15 @@ export async function getCases(filters?: CaseQueryFilters): Promise<CaseRecord[]
 /**
  * Fetch a single case by ID
  */
-export async function getCase(id: string): Promise<CaseRecord | undefined> {
+export async function getCase(
+  id: string,
+  options?: { includeDeleted?: boolean },
+): Promise<CaseRecord | undefined> {
   try {
-    return await db.get<CaseRecord>(STORE_NAMES.cases, id);
+    const record = await db.get<CaseRecord>(STORE_NAMES.cases, id);
+    if (!record) return undefined;
+    if (record.is_deleted && !options?.includeDeleted) return undefined;
+    return record;
   } catch (error) {
     console.error(`Error fetching case ${id}:`, error);
     return undefined;
@@ -90,14 +118,30 @@ export async function getCase(id: string): Promise<CaseRecord | undefined> {
 /**
  * Fetch a case by exact or case-insensitive case_number
  */
-export async function getCaseByNumber(caseNumber: string): Promise<CaseRecord | undefined> {
+export async function getCaseByNumber(
+  caseNumber: string,
+  options?: { includeDeleted?: boolean },
+): Promise<CaseRecord | undefined> {
   try {
     const all = await db.getAll<CaseRecord>(STORE_NAMES.cases);
     const normalized = caseNumber.trim().toLowerCase();
-    return all.find((c) => c.case_number.trim().toLowerCase() === normalized);
+    const found = all.find((c) => c.case_number.trim().toLowerCase() === normalized);
+    if (!found) return undefined;
+    if (found.is_deleted && !options?.includeDeleted) return undefined;
+    return found;
   } catch (error) {
     console.error(`Error fetching case by number ${caseNumber}:`, error);
     return undefined;
+  }
+}
+
+function notifyCasesChanged() {
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(
+      new CustomEvent('mswdo-data-changed', {
+        detail: { source: 'supabase', table: 'cases', mode: 'change' },
+      }),
+    );
   }
 }
 
@@ -117,6 +161,7 @@ export async function createCase(
   };
 
   await db.put(STORE_NAMES.cases, newCase);
+  notifyCasesChanged();
   return newCase;
 }
 
@@ -140,13 +185,102 @@ export async function updateCase(
   };
 
   await db.put(STORE_NAMES.cases, updated);
+  notifyCasesChanged();
   return updated;
 }
 
 /**
- * Delete a case and its associated attachments & notes
+ * Fetch all cases currently residing in Trash
  */
-export async function deleteCase(id: string): Promise<void> {
+export async function getTrashCases(): Promise<CaseRecord[]> {
+  return getCases({ trashOnly: true });
+}
+
+/**
+ * Move a case to Trash (soft delete)
+ */
+export async function moveCaseToTrash(id: string, deletedBy?: string): Promise<CaseRecord> {
+  const existing = await db.get<CaseRecord>(STORE_NAMES.cases, id);
+  if (!existing) {
+    throw new Error(`Case with ID ${id} not found`);
+  }
+
+  const nowIso = new Date().toISOString();
+  const updatedSheet: GeneralIntakeSheetData | undefined = existing.intake_sheet
+    ? {
+        ...existing.intake_sheet,
+        _trash: {
+          is_deleted: true,
+          deleted_at: nowIso,
+          deleted_by: deletedBy || 'MSWDO Staff',
+          previous_status: existing.status,
+        },
+      }
+    : undefined;
+
+  const updated: CaseRecord = {
+    ...existing,
+    is_deleted: true,
+    deleted_at: nowIso,
+    deleted_by: deletedBy || 'MSWDO Staff',
+    intake_sheet: updatedSheet,
+    updatedAt: new Date(),
+    syncStatus: 'pending',
+  };
+
+  await db.put(STORE_NAMES.cases, updated);
+  notifyCasesChanged();
+  return updated;
+}
+
+/**
+ * Restore a case from Trash back to the active directory
+ */
+export async function restoreCaseFromTrash(id: string): Promise<CaseRecord> {
+  const existing = await db.get<CaseRecord>(STORE_NAMES.cases, id);
+  if (!existing) {
+    throw new Error(`Case with ID ${id} not found`);
+  }
+
+  let restoredSheet: GeneralIntakeSheetData | undefined = undefined;
+  if (existing.intake_sheet) {
+    const copy = { ...existing.intake_sheet };
+    delete copy._trash;
+    restoredSheet = copy;
+  }
+
+  const updated: CaseRecord = {
+    ...existing,
+    is_deleted: false,
+    deleted_at: undefined,
+    deleted_by: undefined,
+    intake_sheet: restoredSheet,
+    updatedAt: new Date(),
+    syncStatus: 'pending',
+  };
+
+  await db.put(STORE_NAMES.cases, updated);
+  notifyCasesChanged();
+  return updated;
+}
+
+/**
+ * Permanently purge a case and its related notes and attachments
+ */
+export async function permanentlyDeleteCase(id: string): Promise<void> {
+  // 1. Attempt server-side permanent deletion
+  if (typeof window !== 'undefined') {
+    try {
+      await runServerMutation({
+        action: 'delete_case_permanently',
+        caseId: id,
+      });
+    } catch (serverErr) {
+      console.warn('Server permanent deletion failed or offline, proceeding with local purge:', serverErr);
+    }
+  }
+
+  // 2. Local database purge
   await db.delete(STORE_NAMES.cases, id);
 
   // Clean up notes
@@ -156,6 +290,26 @@ export async function deleteCase(id: string): Promise<void> {
   // Clean up attachments
   const attachments = await getCaseAttachments(id);
   await Promise.all(attachments.map((a) => db.deleteSilently(STORE_NAMES.case_attachments, a.id)));
+
+  notifyCasesChanged();
+}
+
+/**
+ * Permanently empty all cases in Trash
+ */
+export async function emptyTrashCases(): Promise<{ deletedCount: number }> {
+  const trashed = await getTrashCases();
+  for (const c of trashed) {
+    await permanentlyDeleteCase(c.id);
+  }
+  return { deletedCount: trashed.length };
+}
+
+/**
+ * Delete a case - moves to Trash by default so it can be restored.
+ */
+export async function deleteCase(id: string): Promise<void> {
+  await moveCaseToTrash(id);
 }
 
 /**
@@ -212,6 +366,7 @@ export async function bulkImportCases(
     }
   }
 
+  notifyCasesChanged();
   return { importedCount, updatedCount, skippedCount };
 }
 

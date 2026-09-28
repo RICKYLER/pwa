@@ -3,20 +3,18 @@
 import React from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { BarChart3, FolderLock, Plus, FileSpreadsheet, Download, Shield } from 'lucide-react';
+import { BarChart3, FolderLock, Plus, FileSpreadsheet } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 interface CaseNavigationHeaderProps {
   onNewCase?: () => void;
   onUploadExcel?: () => void;
-  onDownloadTemplate?: () => void;
   totalCases?: number;
 }
 
 export default function CaseNavigationHeader({
   onNewCase,
   onUploadExcel,
-  onDownloadTemplate,
   totalCases,
 }: CaseNavigationHeaderProps) {
   const pathname = usePathname();
@@ -53,18 +51,6 @@ export default function CaseNavigationHeader({
 
           {/* Action Buttons */}
           <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
-            {onDownloadTemplate && (
-              <button
-                type="button"
-                onClick={onDownloadTemplate}
-                className="px-3.5 py-2 text-xs font-bold rounded-xl border border-white/20 text-slate-200 hover:text-white hover:bg-white/10 transition flex items-center gap-1.5 cursor-pointer shadow-sm"
-                title="Download Standard Excel Case Template"
-              >
-                <Download className="h-3.5 w-3.5" />
-                Template
-              </button>
-            )}
-
             {onUploadExcel && (
               <button
                 type="button"

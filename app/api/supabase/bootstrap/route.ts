@@ -121,14 +121,61 @@ async function loadHouseholds(user: User, remoteUserId: string | null) {
   return data ?? [];
 }
 
-async function loadResidentsForHouseholds(householdIds: string[]) {
-  if (!householdIds.length) return [];
-
+async function loadAllResidents() {
   const supabase = getSupabaseAdminClient();
   const { data, error } = await supabase
     .from('residents')
     .select('*')
-    .in('household_id', householdIds)
+    .order('updated_at', { ascending: false });
+
+  if (error) throw new Error(error.message);
+  return data ?? [];
+}
+
+async function loadResidentsForHouseholds(householdIds: string[]) {
+  if (!householdIds.length) return [];
+
+  const supabase = getSupabaseAdminClient();
+  const CHUNK_SIZE = 100;
+  if (householdIds.length <= CHUNK_SIZE) {
+    const { data, error } = await supabase
+      .from('residents')
+      .select('*')
+      .in('household_id', householdIds)
+      .order('updated_at', { ascending: false });
+
+    if (error) throw new Error(error.message);
+    return data ?? [];
+  }
+
+  const chunks: string[][] = [];
+  for (let i = 0; i < householdIds.length; i += CHUNK_SIZE) {
+    chunks.push(householdIds.slice(i, i + CHUNK_SIZE));
+  }
+
+  const results = await Promise.all(
+    chunks.map(async (chunk) => {
+      const { data, error } = await supabase
+        .from('residents')
+        .select('*')
+        .in('household_id', chunk);
+      if (error) throw new Error(error.message);
+      return data ?? [];
+    }),
+  );
+
+  return results.flat().sort((a, b) => {
+    const aTime = new Date((a.updated_at as string) || 0).getTime();
+    const bTime = new Date((b.updated_at as string) || 0).getTime();
+    return bTime - aTime;
+  });
+}
+
+async function loadAllVulnerabilityFlags() {
+  const supabase = getSupabaseAdminClient();
+  const { data, error } = await supabase
+    .from('vulnerability_flags')
+    .select('*')
     .order('updated_at', { ascending: false });
 
   if (error) throw new Error(error.message);
@@ -141,14 +188,39 @@ async function loadVulnerabilityFlags(residentIds: string[]) {
   }
 
   const supabase = getSupabaseAdminClient();
-  const { data, error } = await supabase
-    .from('vulnerability_flags')
-    .select('*')
-    .in('resident_id', residentIds)
-    .order('updated_at', { ascending: false });
+  const CHUNK_SIZE = 100;
+  if (residentIds.length <= CHUNK_SIZE) {
+    const { data, error } = await supabase
+      .from('vulnerability_flags')
+      .select('*')
+      .in('resident_id', residentIds)
+      .order('updated_at', { ascending: false });
 
-  if (error) throw new Error(error.message);
-  return data ?? [];
+    if (error) throw new Error(error.message);
+    return data ?? [];
+  }
+
+  const chunks: string[][] = [];
+  for (let i = 0; i < residentIds.length; i += CHUNK_SIZE) {
+    chunks.push(residentIds.slice(i, i + CHUNK_SIZE));
+  }
+
+  const results = await Promise.all(
+    chunks.map(async (chunk) => {
+      const { data, error } = await supabase
+        .from('vulnerability_flags')
+        .select('*')
+        .in('resident_id', chunk);
+      if (error) throw new Error(error.message);
+      return data ?? [];
+    }),
+  );
+
+  return results.flat().sort((a, b) => {
+    const aTime = new Date((a.updated_at as string) || 0).getTime();
+    const bTime = new Date((b.updated_at as string) || 0).getTime();
+    return bTime - aTime;
+  });
 }
 
 async function loadPrograms() {
@@ -562,6 +634,57 @@ async function loadSoloParents(user: User, residentIds: string[]) {
   return data ?? [];
 }
 
+async function loadCases(user: User) {
+  if (user.role !== 'admin' && user.role !== 'social_worker') {
+    return [];
+  }
+  const supabase = getSupabaseAdminClient();
+  const { data, error } = await supabase
+    .from('cases')
+    .select('*')
+    .order('reported_at', { ascending: false });
+
+  if (error) {
+    if (isMissingTableError(error, 'cases')) return [];
+    throw new Error(error.message);
+  }
+  return data ?? [];
+}
+
+async function loadCaseNotes(user: User) {
+  if (user.role !== 'admin' && user.role !== 'social_worker') {
+    return [];
+  }
+  const supabase = getSupabaseAdminClient();
+  const { data, error } = await supabase
+    .from('case_notes')
+    .select('*')
+    .order('created_at', { ascending: false });
+
+  if (error) {
+    if (isMissingTableError(error, 'case_notes')) return [];
+    throw new Error(error.message);
+  }
+  return data ?? [];
+}
+
+async function loadCaseAttachments(user: User) {
+  if (user.role !== 'admin' && user.role !== 'social_worker') {
+    return [];
+  }
+  const supabase = getSupabaseAdminClient();
+  const { data, error } = await supabase
+    .from('case_attachments')
+    .select('*')
+    .order('uploaded_at', { ascending: false });
+
+  if (error) {
+    if (isMissingTableError(error, 'case_attachments')) return [];
+    throw new Error(error.message);
+  }
+  return data ?? [];
+}
+
 async function buildBootstrapPayload(
   user: User,
   requestedTables?: SupabaseBootstrapTable[],
@@ -569,30 +692,33 @@ async function buildBootstrapPayload(
   const payload: BootstrapPayload = {};
   const requestedTableSet = requestedTables?.length ? new Set(requestedTables) : null;
   const wants = (table: SupabaseBootstrapTable) => !requestedTableSet || requestedTableSet.has(table);
+  const isAdmin = user.role === 'admin';
+  const isResident = user.role === 'resident';
+
   const needsHouseholds = wants('households')
-    || wants('residents')
-    || wants('vulnerability_flags')
-    || wants('beneficiaries')
-    || (wants('solo_parents') && user.role === 'resident');
+    || (!isAdmin && (wants('residents') || wants('vulnerability_flags') || wants('beneficiaries') || (wants('solo_parents') && isResident)));
   const needsResidents = wants('residents')
-    || wants('vulnerability_flags')
-    || wants('beneficiaries')
-    || (wants('solo_parents') && user.role === 'resident');
+    || (!isAdmin && (wants('vulnerability_flags') || wants('beneficiaries') || (wants('solo_parents') && isResident)));
+
   const shouldResolveRemoteUserId = getSupabaseAdminConfig().isConfigured && (
     wants('audit_logs')
     || wants('user_notifications')
-    || (needsHouseholds && user.role === 'resident')
+    || (needsHouseholds && isResident)
   );
-  const canReadInventory = user.role === 'admin' || user.role === 'encoder';
-  const canReadDistributionEvents = user.role === 'admin' || user.role === 'encoder' || user.role === 'responder';
-  const canReadDistributionRecords = user.role === 'admin' || user.role === 'encoder';
+
+  const canReadInventory = isAdmin || user.role === 'encoder';
+  const canReadDistributionEvents = isAdmin || user.role === 'encoder' || user.role === 'responder';
+  const canReadDistributionRecords = isAdmin || user.role === 'encoder';
   const canReadIncidents = ['admin', 'encoder', 'responder'].includes(user.role);
   const canReadDisasterAlertRules = ['admin', 'responder'].includes(user.role);
   const canReadDisasterAlerts = ['admin', 'responder'].includes(user.role);
   const canReadEvacuationCenters = ['admin', 'responder'].includes(user.role);
+
   const remoteUserId = shouldResolveRemoteUserId
     ? await resolveSupabaseUserId(user.id).catch(() => null)
     : null;
+
+  // Independent queries fired concurrently from the start:
   const programsPromise = wants('programs') ? loadPrograms() : null;
   const locationMasterPromise = wants('location_master_lists') ? loadLocationMasters(user) : null;
   const purokRiskProfilesPromise = wants('purok_risk_profiles') ? loadPurokRiskProfiles(user) : null;
@@ -620,111 +746,155 @@ async function buildBootstrapPayload(
   )
     ? loadInventoryBundle()
     : null;
+  const casesPromise = wants('cases') ? loadCases(user) : null;
+  const caseNotesPromise = wants('case_notes') ? loadCaseNotes(user) : null;
+  const caseAttachmentsPromise = wants('case_attachments') ? loadCaseAttachments(user) : null;
 
-  let households: Record<string, unknown>[] = [];
-  let householdIds: string[] = [];
-  if (needsHouseholds) {
-    households = await loadHouseholds(user, remoteUserId);
-    householdIds = households
-      .map((household) => (typeof household.id === 'string' ? household.id : ''))
-      .filter(Boolean);
-  }
-
-  if (wants('households')) {
-    payload.households = households;
-  }
-
-  const userNotificationsPromise = wants('user_notifications')
-    ? loadUserNotifications(user, remoteUserId)
+  // Solo parents for non-residents does not depend on residentIds:
+  const soloParentsNonResidentPromise = wants('solo_parents') && !isResident
+    ? loadSoloParents(user, [])
     : null;
 
-  let residents: Record<string, unknown>[] = [];
-  let residentIds: string[] = [];
-  if (needsResidents) {
-    residents = await loadResidentsForHouseholds(householdIds);
-    residentIds = residents
-      .map((resident) => (typeof resident.id === 'string' ? resident.id : ''))
-      .filter(Boolean);
+  // For Admin: households, residents, vulnerability_flags, beneficiaries run simultaneously:
+  const adminHouseholdsPromise = isAdmin && wants('households')
+    ? loadHouseholds(user, remoteUserId)
+    : null;
+  const adminResidentsPromise = isAdmin && wants('residents')
+    ? loadAllResidents()
+    : null;
+  const adminVulnerabilityFlagsPromise = isAdmin && wants('vulnerability_flags')
+    ? loadAllVulnerabilityFlags()
+    : null;
+  const adminBeneficiariesPromise = isAdmin && wants('beneficiaries')
+    ? loadBeneficiaries(user, [])
+    : null;
+
+  if (isAdmin) {
+    const [
+      adminHouseholds,
+      adminResidents,
+      adminVulnerabilityFlags,
+      adminBeneficiaries,
+    ] = await Promise.all([
+      adminHouseholdsPromise ?? Promise.resolve([]),
+      adminResidentsPromise ?? Promise.resolve([]),
+      adminVulnerabilityFlagsPromise ?? Promise.resolve([]),
+      adminBeneficiariesPromise ?? Promise.resolve([]),
+    ]);
+
+    if (wants('households')) payload.households = adminHouseholds;
+    if (wants('residents')) payload.residents = adminResidents;
+    if (wants('vulnerability_flags')) payload.vulnerability_flags = adminVulnerabilityFlags;
+    if (wants('beneficiaries')) payload.beneficiaries = adminBeneficiaries;
+  } else {
+    let households: Record<string, unknown>[] = [];
+    let householdIds: string[] = [];
+    if (needsHouseholds) {
+      households = await loadHouseholds(user, remoteUserId);
+      householdIds = households
+        .map((household) => (typeof household.id === 'string' ? household.id : ''))
+        .filter(Boolean);
+    }
+
+    if (wants('households')) {
+      payload.households = households;
+    }
+
+    let residents: Record<string, unknown>[] = [];
+    let residentIds: string[] = [];
+    if (needsResidents) {
+      residents = await loadResidentsForHouseholds(householdIds);
+      residentIds = residents
+        .map((resident) => (typeof resident.id === 'string' ? resident.id : ''))
+        .filter(Boolean);
+    }
+
+    if (wants('residents')) {
+      payload.residents = residents;
+    }
+
+    const [
+      vulnerabilityFlags,
+      beneficiaries,
+      residentSoloParents,
+      residentDistributionRecords,
+      userNotifications,
+    ] = await Promise.all([
+      wants('vulnerability_flags') ? loadVulnerabilityFlags(residentIds) : Promise.resolve([]),
+      wants('beneficiaries') ? loadBeneficiaries(user, residentIds) : Promise.resolve([]),
+      wants('solo_parents') && isResident ? loadSoloParents(user, residentIds) : Promise.resolve([]),
+      wants('distribution_records') && isResident
+        ? loadDistributionRecordsForResidentScope(householdIds, residentIds)
+        : Promise.resolve([]),
+      wants('user_notifications') && isResident
+        ? loadUserNotifications(user, remoteUserId)
+        : Promise.resolve([]),
+    ]);
+
+    if (wants('vulnerability_flags')) payload.vulnerability_flags = vulnerabilityFlags;
+    if (wants('beneficiaries')) payload.beneficiaries = beneficiaries;
+    if (wants('solo_parents') && isResident) payload.solo_parents = residentSoloParents;
+    if (wants('distribution_records') && isResident) payload.distribution_records = residentDistributionRecords;
+    if (wants('user_notifications') && isResident) payload.user_notifications = userNotifications;
   }
 
-  if (wants('residents')) {
-    payload.residents = residents;
-  }
-
-  const [vulnerabilityFlags, beneficiaries] = await Promise.all([
-    wants('vulnerability_flags') ? loadVulnerabilityFlags(residentIds) : Promise.resolve([]),
-    wants('beneficiaries') ? loadBeneficiaries(user, residentIds) : Promise.resolve([]),
+  // Resolve all concurrently running promises
+  const [
+    soloParentsNonResident,
+    cases,
+    caseNotes,
+    caseAttachments,
+    programs,
+    locationMasters,
+    purokRiskProfiles,
+    evacuationCenters,
+    auditLogs,
+    inventoryBundle,
+    distributionEvents,
+    distributionRecords,
+    incidents,
+    disasterAlertRules,
+    disasterAlerts,
+  ] = await Promise.all([
+    soloParentsNonResidentPromise ?? Promise.resolve(null),
+    casesPromise ?? Promise.resolve(null),
+    caseNotesPromise ?? Promise.resolve(null),
+    caseAttachmentsPromise ?? Promise.resolve(null),
+    programsPromise ?? Promise.resolve(null),
+    locationMasterPromise ?? Promise.resolve(null),
+    purokRiskProfilesPromise ?? Promise.resolve(null),
+    evacuationCentersPromise ?? Promise.resolve(null),
+    auditLogsPromise ?? Promise.resolve(null),
+    inventoryBundlePromise ?? Promise.resolve(null),
+    distributionEventsPromise ?? Promise.resolve(null),
+    distributionRecordsPromise ?? Promise.resolve(null),
+    incidentsPromise ?? Promise.resolve(null),
+    disasterAlertRulesPromise ?? Promise.resolve(null),
+    disasterAlertsPromise ?? Promise.resolve(null),
   ]);
 
-  if (wants('vulnerability_flags')) {
-    payload.vulnerability_flags = vulnerabilityFlags;
+  if (soloParentsNonResident !== null) payload.solo_parents = soloParentsNonResident;
+  if (cases !== null) payload.cases = cases;
+  if (caseNotes !== null) payload.case_notes = caseNotes;
+  if (caseAttachments !== null) payload.case_attachments = caseAttachments;
+  if (programs !== null) payload.programs = programs;
+  if (locationMasters !== null) payload.location_master_lists = locationMasters;
+  if (purokRiskProfiles !== null) payload.purok_risk_profiles = purokRiskProfiles;
+  if (evacuationCenters !== null) payload.evacuation_centers = evacuationCenters;
+  if (auditLogs !== null) payload.audit_logs = auditLogs;
+  if (inventoryBundle !== null) {
+    if (wants('inventory_items')) payload.inventory_items = inventoryBundle.inventory_items;
+    if (wants('inventory_movements')) payload.inventory_movements = inventoryBundle.inventory_movements;
+    if (wants('package_templates')) payload.package_templates = inventoryBundle.package_templates;
   }
+  if (distributionEvents !== null) payload.distribution_events = distributionEvents;
+  if (distributionRecords !== null) payload.distribution_records = distributionRecords;
+  if (incidents !== null) payload.incidents = incidents;
+  if (disasterAlertRules !== null) payload.disaster_alert_rules = disasterAlertRules;
+  if (disasterAlerts !== null) payload.disaster_alerts = disasterAlerts;
 
-  if (wants('beneficiaries')) {
-    payload.beneficiaries = beneficiaries;
-  }
-
-  if (wants('solo_parents')) {
-    payload.solo_parents = await loadSoloParents(user, residentIds);
-  }
-
-  if (programsPromise) {
-    payload.programs = await programsPromise;
-  }
-
-  if (locationMasterPromise) {
-    payload.location_master_lists = await locationMasterPromise;
-  }
-
-  if (purokRiskProfilesPromise) {
-    payload.purok_risk_profiles = await purokRiskProfilesPromise;
-  }
-
-  if (evacuationCentersPromise) {
-    payload.evacuation_centers = await evacuationCentersPromise;
-  }
-
-  if (auditLogsPromise) {
-    payload.audit_logs = await auditLogsPromise;
-  }
-
-  if (userNotificationsPromise) {
-    payload.user_notifications = await userNotificationsPromise;
-  }
-
-  if (inventoryBundlePromise) {
-    const inventoryBundle = await inventoryBundlePromise;
-    if (wants('inventory_items')) {
-      payload.inventory_items = inventoryBundle.inventory_items;
-    }
-    if (wants('inventory_movements')) {
-      payload.inventory_movements = inventoryBundle.inventory_movements;
-    }
-    if (wants('package_templates')) {
-      payload.package_templates = inventoryBundle.package_templates;
-    }
-  }
-
-  if (distributionEventsPromise) {
-    payload.distribution_events = await distributionEventsPromise;
-  }
-
-  if (distributionRecordsPromise) {
-    payload.distribution_records = await distributionRecordsPromise;
-  } else if (wants('distribution_records') && user.role === 'resident') {
-    payload.distribution_records = await loadDistributionRecordsForResidentScope(householdIds, residentIds);
-  }
-
-  if (incidentsPromise) {
-    payload.incidents = await incidentsPromise;
-  }
-
-  if (disasterAlertRulesPromise) {
-    payload.disaster_alert_rules = await disasterAlertRulesPromise;
-  }
-
-  if (disasterAlertsPromise) {
-    payload.disaster_alerts = await disasterAlertsPromise;
+  if (isAdmin && wants('user_notifications')) {
+    payload.user_notifications = [];
   }
 
   return payload;

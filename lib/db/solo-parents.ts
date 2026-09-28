@@ -142,6 +142,25 @@ export async function getSoloParentByResidentId(residentId: string): Promise<Sol
 }
 
 /**
+ * Get Solo Parent record by official id_number (e.g. SP-2026-0001) or record id
+ */
+export async function getSoloParentByIdNumber(idNumber: string): Promise<SoloParentRecord | undefined> {
+  try {
+    const normalized = idNumber.trim().toLowerCase();
+    const all = await db.getAll<SoloParentRecord>(STORE_NAMES.solo_parents);
+    return all.find(
+      (r) =>
+        r.id_number?.trim().toLowerCase() === normalized ||
+        r.id.trim().toLowerCase() === normalized
+    );
+  } catch (error) {
+    console.error(`Error fetching solo parent by idNumber ${idNumber}:`, error);
+    return undefined;
+  }
+}
+
+
+/**
  * Register a new Walk-In Solo Parent record and auto-update VulnerabilityFlags
  */
 export async function createSoloParent(

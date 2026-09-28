@@ -19,7 +19,10 @@ export type SupabaseBootstrapTable =
   | 'programs'
   | 'beneficiaries'
   | 'audit_logs'
-  | 'solo_parents';
+  | 'solo_parents'
+  | 'cases'
+  | 'case_attachments'
+  | 'case_notes';
 
 export const SUPABASE_BOOTSTRAP_TABLES: Array<{
   table: SupabaseBootstrapTable;
@@ -44,6 +47,9 @@ export const SUPABASE_BOOTSTRAP_TABLES: Array<{
   { table: 'beneficiaries', storeName: STORE_NAMES.beneficiaries },
   { table: 'audit_logs', storeName: STORE_NAMES.audit_logs },
   { table: 'solo_parents', storeName: STORE_NAMES.solo_parents },
+  { table: 'cases', storeName: STORE_NAMES.cases },
+  { table: 'case_attachments', storeName: STORE_NAMES.case_attachments },
+  { table: 'case_notes', storeName: STORE_NAMES.case_notes },
 ];
 
 function toOptionalDate(value: unknown) {
@@ -208,6 +214,50 @@ export function mapSupabaseRow(table: SupabaseBootstrapTable, row: Record<string
         syncStatus: 'synced' as const,
       };
     }
+    case 'cases': {
+      const intakeSheet = base.intake_sheet && typeof base.intake_sheet === 'object'
+        ? (base.intake_sheet as Record<string, unknown>)
+        : undefined;
+      const trashMeta = intakeSheet?._trash && typeof intakeSheet._trash === 'object'
+        ? (intakeSheet._trash as Record<string, unknown>)
+        : undefined;
+      const isDeleted = Boolean(base.is_deleted || trashMeta?.is_deleted);
+      const deletedAt = typeof base.deleted_at === 'string'
+        ? base.deleted_at
+        : typeof trashMeta?.deleted_at === 'string'
+        ? trashMeta.deleted_at
+        : undefined;
+      const deletedBy = typeof base.deleted_by === 'string'
+        ? base.deleted_by
+        : typeof trashMeta?.deleted_by === 'string'
+        ? trashMeta.deleted_by
+        : undefined;
+
+      return {
+        ...base,
+        ...metadata,
+        reported_at: typeof base.reported_at === 'string'
+          ? base.reported_at
+          : (toOptionalDate(base.reported_at)?.toISOString() ?? new Date().toISOString()),
+        incident_date: typeof base.incident_date === 'string' ? base.incident_date : undefined,
+        intake_sheet: intakeSheet,
+        is_deleted: isDeleted,
+        deleted_at: deletedAt,
+        deleted_by: deletedBy,
+        syncStatus: 'synced' as const,
+      };
+    }
+    case 'case_notes':
+      return {
+        ...base,
+        ...metadata,
+        date: typeof base.date === 'string' ? base.date : new Date().toISOString().slice(0, 10),
+      };
+    case 'case_attachments':
+      return {
+        ...base,
+        ...metadata,
+      };
     default:
       return {
         ...base,

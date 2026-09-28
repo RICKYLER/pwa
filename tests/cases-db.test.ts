@@ -7,6 +7,10 @@ import {
   getCaseByNumber,
   updateCase,
   deleteCase,
+  moveCaseToTrash,
+  getTrashCases,
+  restoreCaseFromTrash,
+  permanentlyDeleteCase,
   bulkImportCases,
   addCaseNote,
   getCaseNotes,
@@ -259,4 +263,64 @@ test('6. createCase with acts_of_lasciviousness and full intake_sheet GIS profil
   // Clean up
   await deleteCase(c.id);
 });
+
+test('7. moveCaseToTrash, getTrashCases, restoreCaseFromTrash, and permanentlyDeleteCase', async () => {
+  const c = await createCase({
+    case_number: 'TRASH-TEST-001',
+    case_type: 'vawc_physical',
+    status: 'active',
+    reported_at: '2026-09-28',
+    victim_name: 'Trash Victim',
+    barangay_id: 'cadunan',
+    case_summary: 'Test for trash bin workflow',
+    source: 'manual_intake',
+  });
+
+  // 1. Initially active
+  let activeCases = await getCases();
+  assert.ok(activeCases.some((item) => item.id === c.id));
+  let trashCases = await getTrashCases();
+  assert.ok(!trashCases.some((item) => item.id === c.id));
+
+  // 2. Move to trash
+  await moveCaseToTrash(c.id, 'Officer Jane');
+  activeCases = await getCases();
+  assert.ok(!activeCases.some((item) => item.id === c.id));
+  trashCases = await getTrashCases();
+  const trashedRecord = trashCases.find((item) => item.id === c.id);
+  assert.ok(trashedRecord);
+  assert.equal(trashedRecord?.is_deleted, true);
+  assert.equal(trashedRecord?.deleted_by, 'Officer Jane');
+  assert.ok(trashedRecord?.deleted_at);
+
+  // Normal getCase returns undefined for trashed item
+  const regularFetch = await getCase(c.id);
+  assert.equal(regularFetch, undefined);
+
+  // getCase with includeDeleted returns the trashed record
+  const fetchWithDeleted = await getCase(c.id, { includeDeleted: true });
+  assert.ok(fetchWithDeleted);
+  assert.equal(fetchWithDeleted?.id, c.id);
+
+  // 3. Restore from trash
+  await restoreCaseFromTrash(c.id);
+  activeCases = await getCases();
+  assert.ok(activeCases.some((item) => item.id === c.id));
+  trashCases = await getTrashCases();
+  assert.ok(!trashCases.some((item) => item.id === c.id));
+  const restoredFetch = await getCase(c.id);
+  assert.ok(restoredFetch);
+  assert.equal(restoredFetch?.is_deleted, false);
+
+  // 4. Move to trash and permanently delete
+  await moveCaseToTrash(c.id);
+  await permanentlyDeleteCase(c.id);
+
+  // Permanently removed even with includeDeleted
+  const purgedFetch = await getCase(c.id, { includeDeleted: true });
+  assert.equal(purgedFetch, undefined);
+  const finalTrash = await getTrashCases();
+  assert.ok(!finalTrash.some((item) => item.id === c.id));
+});
+
 

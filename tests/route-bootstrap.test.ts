@@ -51,3 +51,15 @@ test('solo-parents route bootstraps solo_parents, residents, households and vuln
     ['solo_parents', 'residents', 'households', 'vulnerability_flags'],
   );
 });
+
+test('cases and case-analytics routes bootstrap cases, case_notes, and case_attachments', () => {
+  assert.deepEqual(
+    getRouteBootstrapTables('/cases'),
+    ['cases', 'case_notes', 'case_attachments'],
+  );
+  assert.deepEqual(
+    getRouteBootstrapTables('/case-analytics'),
+    ['cases', 'case_notes', 'case_attachments'],
+  );
+});
+

@@ -494,7 +494,8 @@ async function createAuditLogEntry(params: {
     | 'purok_risk_profile'
     | 'disaster_alert'
     | 'disaster_alert_rule'
-    | 'evacuation_center';
+    | 'evacuation_center'
+    | 'case';
   entityId: string;
   changes?: Record<string, unknown>;
 }) {
@@ -3142,4 +3143,51 @@ export async function deleteEvacuationCenterOnServer(
   });
 
   return { id: centerId };
+}
+
+export async function deleteCasePermanentlyOnServer(
+  user: User,
+  caseId: string,
+) {
+  if (!['admin', 'social_worker'].includes(user.role)) {
+    throw new Error('You are not allowed to permanently delete confidential case records.');
+  }
+
+  const supabase = getSupabaseAdminClient();
+  const { data: existingCase, error: fetchError } = await supabase
+    .from('cases')
+    .select('id, case_number, victim_name')
+    .eq('id', caseId)
+    .maybeSingle();
+
+  if (fetchError) {
+    throw new Error(fetchError.message);
+  }
+
+  // Delete child records first
+  await supabase.from('case_attachments').delete().eq('case_id', caseId);
+  await supabase.from('case_notes').delete().eq('case_id', caseId);
+
+  const { error: deleteError } = await supabase
+    .from('cases')
+    .delete()
+    .eq('id', caseId);
+
+  if (deleteError) {
+    throw new Error(deleteError.message);
+  }
+
+  await createAuditLogEntry({
+    user,
+    action: 'DELETE',
+    entityType: 'case',
+    entityId: caseId,
+    changes: {
+      case_number: existingCase?.case_number,
+      victim_name: existingCase?.victim_name,
+      mode: 'permanent',
+    },
+  });
+
+  return { id: caseId, success: true };
 }

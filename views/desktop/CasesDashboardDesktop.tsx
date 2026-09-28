@@ -50,11 +50,31 @@ export default function CasesDashboardDesktop() {
 
   useEffect(() => {
     loadCases();
+
+    function handleDataChanged(e: any) {
+      if (
+        !e.detail?.table ||
+        e.detail.table === 'cases' ||
+        e.detail.table === 'case_attachments' ||
+        e.detail.table === 'case_notes'
+      ) {
+        void loadCases();
+      }
+    }
+
+    window.addEventListener('mswdo-data-changed', handleDataChanged);
+    return () => {
+      window.removeEventListener('mswdo-data-changed', handleDataChanged);
+    };
   }, []);
 
-  async function loadCases() {
+  async function loadCases(force = false) {
     setIsLoading(true);
     try {
+      if (force) {
+        const { bootstrapPathnameData } = await import('@/lib/supabase/route-bootstrap');
+        await bootstrapPathnameData('/case-analytics', true);
+      }
       const data = await getCases();
       setCases(data);
     } catch (err) {
@@ -130,7 +150,6 @@ export default function CasesDashboardDesktop() {
         totalCases={cases.length}
         onNewCase={() => setNewCaseModalOpen(true)}
         onUploadExcel={() => setUploadModalOpen(true)}
-        onDownloadTemplate={downloadCaseExcelTemplate}
       />
 
       {/* Top 5 KPI Summary Cards */}
@@ -410,7 +429,7 @@ export default function CasesDashboardDesktop() {
       <CaseExcelUploadModal
         isOpen={uploadModalOpen}
         onClose={() => setUploadModalOpen(false)}
-        onSuccess={loadCases}
+        onSuccess={() => void loadCases(true)}
       />
 
       <NewCaseModal

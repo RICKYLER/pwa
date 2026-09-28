@@ -25,6 +25,9 @@ const SUPPORTED_ENTITY_TYPES = [
   'purok_risk_profiles',
   'audit_logs',
   'solo_parents',
+  'cases',
+  'case_attachments',
+  'case_notes',
 ] as const;
 
 type SupportedEntityType = (typeof SUPPORTED_ENTITY_TYPES)[number];
@@ -69,6 +72,9 @@ const UPSERT_ORDER: SupportedEntityType[] = [
   'residents',
   'vulnerability_flags',
   'solo_parents',
+  'cases',
+  'case_notes',
+  'case_attachments',
   'beneficiaries',
   'inventory_movements',
   'incidents',
@@ -508,6 +514,76 @@ async function mapQueueItemToSupabaseRow(item: SyncQueueItem, syncActorId: strin
         updated_at: toTimestamp(data.updatedAt ?? data.updated_at),
       };
     }
+    case 'cases': {
+      const existingIntakeSheet = (data.intake_sheet && typeof data.intake_sheet === 'object')
+        ? (data.intake_sheet as Record<string, unknown>)
+        : {};
+      const trashMeta = data.is_deleted ? {
+        _trash: {
+          is_deleted: true,
+          deleted_at: data.deleted_at || new Date().toISOString(),
+          deleted_by: data.deleted_by || null,
+        },
+      } : (existingIntakeSheet._trash ? { _trash: null } : {});
+
+      const mergedIntakeSheet = {
+        ...existingIntakeSheet,
+        ...trashMeta,
+      };
+
+      return {
+        id: toRequiredString(data.id, 'cases.id'),
+        case_number: toRequiredString(data.case_number, 'cases.case_number'),
+        case_type: toRequiredString(data.case_type, 'cases.case_type'),
+        reported_at: toTimestamp(data.reported_at ?? data.createdAt),
+        incident_date: toDateOnly(data.incident_date),
+        victim_name: toRequiredString(data.victim_name, 'cases.victim_name'),
+        victim_age: toOptionalNumber(data.victim_age),
+        victim_gender: toOptionalString(data.victim_gender),
+        victim_contact: toOptionalString(data.victim_contact),
+        victim_address: toOptionalString(data.victim_address),
+        barangay_id: toRequiredString(data.barangay_id ?? 'cadunan', 'cases.barangay_id'),
+        purok_sitio: toOptionalString(data.purok_sitio),
+        perpetrator_name: toOptionalString(data.perpetrator_name),
+        perpetrator_relationship: toOptionalString(data.perpetrator_relationship),
+        perpetrator_address: toOptionalString(data.perpetrator_address),
+        status: toRequiredString(data.status ?? 'active', 'cases.status'),
+        case_summary: toRequiredString(data.case_summary, 'cases.case_summary'),
+        intake_notes: toOptionalString(data.intake_notes),
+        assigned_worker_id: toOptionalString(data.assigned_worker_id),
+        assigned_worker_name: toOptionalString(data.assigned_worker_name),
+        resident_id: toOptionalString(data.resident_id),
+        household_id: toOptionalString(data.household_id),
+        source: toOptionalString(data.source) ?? 'manual_intake',
+        intake_sheet: normalizeJsonValue(mergedIntakeSheet),
+        created_at: toTimestamp(data.createdAt ?? data.created_at),
+        updated_at: toTimestamp(data.updatedAt ?? data.updated_at),
+      };
+    }
+    case 'case_notes':
+      return {
+        id: toRequiredString(data.id, 'case_notes.id'),
+        case_id: toRequiredString(data.case_id, 'case_notes.case_id'),
+        worker_id: toOptionalString(data.worker_id),
+        worker_name: toOptionalString(data.worker_name) ?? 'Social Worker',
+        date: toDateOnly(data.date),
+        note: toRequiredString(data.note, 'case_notes.note'),
+        action_taken: toOptionalString(data.action_taken),
+        next_follow_up: toDateOnly(data.next_follow_up),
+        created_at: toTimestamp(data.createdAt ?? data.created_at),
+      };
+    case 'case_attachments':
+      return {
+        id: toRequiredString(data.id, 'case_attachments.id'),
+        case_id: toRequiredString(data.case_id, 'case_attachments.case_id'),
+        file_name: toRequiredString(data.file_name, 'case_attachments.file_name'),
+        file_type: toOptionalString(data.file_type) ?? 'application/octet-stream',
+        file_size: toOptionalNumber(data.file_size),
+        file_url: toRequiredString(data.file_url, 'case_attachments.file_url'),
+        document_type: toRequiredString(data.document_type, 'case_attachments.document_type'),
+        uploaded_by: toOptionalString(data.uploaded_by) ?? 'Social Worker',
+        uploaded_at: toTimestamp(data.uploaded_at),
+      };
     default:
       throw new Error(`Unsupported sync entity type: ${item.entity_type}`);
   }

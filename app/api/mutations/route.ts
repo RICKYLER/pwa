@@ -40,6 +40,7 @@ import {
   updateResidentOnServer,
   rejectResidentOnServer,
   verifyResidentOnServer,
+  deleteCasePermanentlyOnServer,
 } from '@/lib/server/supabase-mutations';
 import {
   createDisasterAlertRuleOnServer,
@@ -624,6 +625,18 @@ export async function POST(request: NextRequest) {
 
         return NextResponse.json(
           { ok: true },
+          { headers: { 'Cache-Control': 'no-store' } },
+        );
+      }
+      case 'delete_case_permanently': {
+        const caseId = typeof body.caseId === 'string' ? body.caseId.trim() : '';
+        if (!caseId) {
+          return badRequest('Case ID is required.');
+        }
+
+        const result = await deleteCasePermanentlyOnServer(authResult.user, caseId);
+        return NextResponse.json(
+          result,
           { headers: { 'Cache-Control': 'no-store' } },
         );
       }
