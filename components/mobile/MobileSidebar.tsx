@@ -62,7 +62,7 @@ function NavSection({
           const active = isPathActive(pathname, item.href);
           const Icon = item.icon;
           const badge = badges?.[item.href] ?? 0;
-          const isConfidential = item.href === '/cases';
+          const isConfidential = item.href === '/cases' || item.href === '/cases/dashboard';
 
           return (
             <Link

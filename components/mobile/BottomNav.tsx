@@ -1,4 +1,4 @@
-﻿'use client';
+'use client';
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
@@ -21,7 +21,7 @@ export default function BottomNav({ onMoreClick }: BottomNavProps) {
   const moreActive = [...moreItems, ...adminItems].some((item) => isPathActive(pathname, item.href));
 
   return (
-    <nav className="fixed inset-x-0 bottom-0 z-30 px-3 pb-[max(env(safe-area-inset-bottom),0.4rem)] pt-2">
+    <nav className="fixed inset-x-0 bottom-0 z-30 px-3 pb-[max(env(safe-area-inset-bottom),0.4rem)] pt-2 print:hidden">
       <div className="civic-topbar civic-soft-shadow mx-auto flex max-w-lg items-center gap-1 rounded-[28px] border border-white/85 px-2 py-1.5">
         {bottomItems.map((item) => {
           const active = isPathActive(pathname, item.href);

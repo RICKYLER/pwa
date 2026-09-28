@@ -33,13 +33,17 @@ function MobileShell({ children, title }: AppShellProps) {
   const isResponderRoute = pathname.startsWith('/responder');
 
   return (
-    <div className="civic-shell-noise relative flex min-h-screen flex-col overflow-hidden bg-slate-50">
-      <MobileHeader title={pageTitle} onMenuClick={() => setOverflowOpen(true)} />
-      <MobileSidebar isOpen={overflowOpen} onClose={() => setOverflowOpen(false)} />
-      <main className="relative flex-1 pb-32">
+    <div className="civic-shell-noise relative flex min-h-screen flex-col overflow-hidden bg-slate-50 print:min-h-0 print:overflow-visible print:bg-white">
+      <div className="print:hidden">
+        <MobileHeader title={pageTitle} onMenuClick={() => setOverflowOpen(true)} />
+        <MobileSidebar isOpen={overflowOpen} onClose={() => setOverflowOpen(false)} />
+      </div>
+      <main className="relative flex-1 pb-32 print:p-0 print:m-0 print:overflow-visible">
         {children}
       </main>
-      <BottomNav onMoreClick={() => setOverflowOpen(true)} />
+      <div className="print:hidden">
+        <BottomNav onMoreClick={() => setOverflowOpen(true)} />
+      </div>
     </div>
   );
 }
@@ -49,10 +53,12 @@ function DesktopShell({ children }: AppShellProps) {
   const isResponderRoute = pathname.startsWith('/responder');
 
   return (
-    <div className="civic-shell-noise relative flex h-screen overflow-hidden bg-slate-50">
-      <DesktopSidebar />
-      <main className="relative ml-72 flex-1 overflow-y-auto">
-        <div className="sticky top-0 z-20 border-b border-slate-200/70 bg-white/80 backdrop-blur">
+    <div className="civic-shell-noise relative flex h-screen overflow-hidden bg-slate-50 print:h-auto print:overflow-visible print:bg-white">
+      <div className="print:hidden">
+        <DesktopSidebar />
+      </div>
+      <main className="relative ml-72 flex-1 overflow-y-auto print:ml-0 print:overflow-visible">
+        <div className="print:hidden sticky top-0 z-20 border-b border-slate-200/70 bg-white/80 backdrop-blur">
           <div className="flex justify-end px-6 py-3">
             <PwaInstallAction />
           </div>

@@ -1,6 +1,7 @@
 import type { LucideIcon } from 'lucide-react';
 import {
   Activity,
+  BarChart3,
   Bell,
   FileText,
   FolderLock,
@@ -81,10 +82,21 @@ export const STAFF_NAV_ITEMS: AppNavItem[] = [
 
   // ── Social Work ──────────────────────────────────────────
   {
+    href: '/cases/dashboard',
+    label: 'Case Analytics',
+    mobileLabel: 'Case Stats',
+    description: 'Category graphs, KPIs & trends',
+    pageTitle: 'Social Cases Dashboard',
+    pageEyebrow: 'Social Welfare Analytics',
+    icon: BarChart3,
+    perm: 'view_cases',
+    group: 'Social Work',
+  },
+  {
     href: '/cases',
     label: 'Social Cases',
     mobileLabel: 'Cases',
-    description: 'Confidential VAWC, VAC & case folders',
+    description: 'Confidential VAWC, VAC & GIS folders',
     pageTitle: 'Social Cases & VAWC',
     pageEyebrow: 'Social Welfare Operations',
     icon: FolderLock,
@@ -336,6 +348,9 @@ export function getResidentNavItems(options?: {
 export const RESIDENT_NAV_ITEMS: AppNavItem[] = getResidentNavItems();
 
 export function isPathActive(pathname: string, href: string): boolean {
+  if (href === '/cases') {
+    return pathname === '/cases';
+  }
   return pathname === href || (href !== '/dashboard' && href !== '/resident' && pathname.startsWith(href));
 }
 

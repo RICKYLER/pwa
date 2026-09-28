@@ -1,7 +1,15 @@
 'use client';
 
-import React from 'react';
-import { X, Printer, QrCode, ShieldCheck, Heart, User, CheckCircle2, Ban, AlertTriangle } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import QRCode from 'qrcode';
+import {
+  X,
+  Printer,
+  ShieldCheck,
+  User,
+  Ban,
+  CheckCircle2,
+} from 'lucide-react';
 import type { SoloParentRecord } from '@/lib/db/schema';
 import { SOLO_PARENT_CATEGORY_LABELS } from '@/lib/solo-parents/rosp-exporter';
 import { getBarangayName } from '@/lib/mabini-barangays';
@@ -17,35 +25,752 @@ export default function SoloParentIdCardModal({
   onClose,
   record,
 }: SoloParentIdCardModalProps) {
+  const [qrCodeDataUrl, setQrCodeDataUrl] = useState<string>('');
+
+  const categoryLabel = record ? (SOLO_PARENT_CATEGORY_LABELS[record.category] || record.category) : '';
+  const barangayName = record ? getBarangayName(record.barangay_id) : '';
+
+  // Generate verified QR code with optimized payload for maximum scannability & sharp dots
+  useEffect(() => {
+    if (!record) return;
+    let cancelled = false;
+
+    // Compact verification payload for large, bold, easily scannable QR modules
+    const qrPayload = JSON.stringify({
+      id: record.id_number,
+      name: record.full_name,
+      brgy: barangayName,
+      exp: record.expires_at,
+      law: 'RA11861',
+      subsidy: record.is_minimum_wage_or_below ? 'YES_1K' : 'NO',
+      v: 'VERIFIED',
+    });
+
+    QRCode.toDataURL(qrPayload, {
+      errorCorrectionLevel: 'L',
+      width: 320,
+      margin: 1,
+      color: {
+        dark: '#0f172a',
+        light: '#ffffff',
+      },
+    })
+      .then((url) => {
+        if (!cancelled) setQrCodeDataUrl(url);
+      })
+      .catch((err) => {
+        console.error('Failed to generate Solo Parent QR code:', err);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [record, barangayName]);
+
   if (!isOpen || !record) return null;
 
-  const categoryLabel = SOLO_PARENT_CATEGORY_LABELS[record.category] || record.category;
-  const barangayName = getBarangayName(record.barangay_id);
+  const isRevoked = record.status === 'revoked';
+  const benefitCode = record.is_minimum_wage_or_below
+    ? 'RA 11861 - ₱1k Subsidy (BQC-01)'
+    : 'RA 11861 - Standard (BQC-02)';
+
+  // Build rows for 5 dependents (matches the physical Mabini MSWDO card)
+  const dependentsList = record.dependents || [];
+  const fiveRows = Array.from({ length: 5 }, (_, index) => dependentsList[index] || null);
 
   function handlePrint() {
-    window.print();
+    if (!record) return;
+
+    // Remove any previous print iframe
+    const existing = document.getElementById('solo-parent-print-iframe');
+    if (existing) {
+      existing.remove();
+    }
+
+    const iframe = document.createElement('iframe');
+    iframe.id = 'solo-parent-print-iframe';
+    iframe.style.position = 'fixed';
+    iframe.style.right = '0';
+    iframe.style.bottom = '0';
+    iframe.style.width = '0';
+    iframe.style.height = '0';
+    iframe.style.border = '0';
+    iframe.style.visibility = 'hidden';
+    document.body.appendChild(iframe);
+
+    const doc = iframe.contentWindow?.document;
+    if (!doc) {
+      window.print();
+      return;
+    }
+
+    const origin = typeof window !== 'undefined' ? window.location.origin : '';
+
+    const dependentsTableRowsHtml = fiveRows
+      .map((dep) => {
+        if (dep) {
+          return `
+            <tr>
+              <td style="border: 1px solid #334155; padding: 2.5px 5px; font-weight: 700; font-size: 7.5px; color: #0f172a; text-transform: uppercase;">${dep.full_name}</td>
+              <td style="border: 1px solid #334155; padding: 2.5px 4px; font-size: 7.5px; text-align: center; color: #334155;">${dep.birthdate || ''}</td>
+              <td style="border: 1px solid #334155; padding: 2.5px 4px; font-size: 7.5px; text-align: center; font-weight: 700; color: #0f172a;">${dep.age ? `${dep.age}` : ''}</td>
+              <td style="border: 1px solid #334155; padding: 2.5px 4px; font-size: 7.5px; text-align: center; color: #334155;">${dep.relationship || ''}</td>
+            </tr>
+          `;
+        }
+        return `
+          <tr>
+            <td style="border: 1px solid #334155; padding: 4px; height: 16px;">&nbsp;</td>
+            <td style="border: 1px solid #334155; padding: 4px; height: 16px;">&nbsp;</td>
+            <td style="border: 1px solid #334155; padding: 4px; height: 16px;">&nbsp;</td>
+            <td style="border: 1px solid #334155; padding: 4px; height: 16px;">&nbsp;</td>
+          </tr>
+        `;
+      })
+      .join('');
+
+    const printHtml = `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <meta charset="utf-8" />
+          <base href="${origin}/" />
+          <title>Official Solo Parent ID - ${record.id_number} - ${record.full_name}</title>
+          <style>
+            @page {
+              size: A4 portrait;
+              margin: 10mm 12mm;
+            }
+            * {
+              box-sizing: border-box;
+              -webkit-print-color-adjust: exact !important;
+              print-color-adjust: exact !important;
+              color-adjust: exact !important;
+            }
+            body {
+              font-family: Arial, "Helvetica Neue", Helvetica, sans-serif;
+              margin: 0;
+              padding: 0;
+              background: #ffffff;
+              color: #0f172a;
+              -webkit-font-smoothing: antialiased;
+            }
+            .page-container {
+              width: 100%;
+              max-width: 760px;
+              margin: 0 auto;
+              padding: 10px 0;
+            }
+            .header-banner {
+              text-align: center;
+              border-bottom: 2px solid #945d65;
+              padding-bottom: 6px;
+              margin-bottom: 18px;
+            }
+            .header-banner p {
+              margin: 0;
+              font-size: 9.5px;
+              color: #475569;
+              text-transform: uppercase;
+              letter-spacing: 0.08em;
+              font-weight: 700;
+            }
+            .header-banner h2 {
+              margin: 2px 0 0 0;
+              font-size: 13.5px;
+              font-weight: 900;
+              color: #945d65;
+              letter-spacing: 0.02em;
+              text-transform: uppercase;
+            }
+            .cards-layout {
+              display: flex;
+              flex-direction: row;
+              justify-content: center;
+              align-items: flex-start;
+              gap: 20px;
+              margin-bottom: 16px;
+            }
+            .card-wrapper {
+              display: flex;
+              flex-direction: column;
+              align-items: center;
+            }
+            .guide-label {
+              font-size: 8.5px;
+              color: #64748b;
+              font-weight: 700;
+              text-transform: uppercase;
+              letter-spacing: 0.06em;
+              margin-bottom: 4px;
+            }
+            /* ISO/IEC ID-1 Standard ID Card Dimensions: 355px x 225px (~85.6mm x 54mm) */
+            .id-card {
+              width: 355px;
+              height: 225px;
+              border: 1px solid #cbd5e1;
+              background-color: #ffffff;
+              padding: 6px 8px;
+              position: relative;
+              overflow: hidden;
+              display: flex;
+              flex-direction: column;
+              justify-content: space-between;
+              outline: 1px dashed #94a3b8;
+              outline-offset: 3px;
+            }
+            .id-card-back {
+              width: 355px;
+              height: 225px;
+              border: 3.5px double #334155;
+              background-color: #ffffff;
+              padding: 7px 9px;
+              position: relative;
+              overflow: hidden;
+              display: flex;
+              flex-direction: column;
+              justify-content: space-between;
+              outline: 1px dashed #94a3b8;
+              outline-offset: 3px;
+            }
+            .watermark {
+              position: absolute;
+              inset: 0;
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              pointer-events: none;
+              z-index: 20;
+            }
+            .watermark-box {
+              border: 3.5px solid rgba(225, 29, 72, 0.85);
+              border-radius: 8px;
+              padding: 4px 14px;
+              color: rgba(225, 29, 72, 0.9);
+              font-size: 18px;
+              font-weight: 900;
+              text-transform: uppercase;
+              letter-spacing: 0.15em;
+              transform: rotate(-12deg);
+              background-color: rgba(255, 255, 255, 0.88);
+            }
+            .front-top-header {
+              display: flex;
+              align-items: center;
+              justify-content: space-between;
+              gap: 4px;
+              padding-bottom: 2px;
+            }
+            .front-logo {
+              width: 38px;
+              height: 38px;
+              object-fit: contain;
+              flex-shrink: 0;
+            }
+            .front-header-text {
+              text-align: center;
+              flex: 1;
+              line-height: 1.15;
+            }
+            .front-header-text .line1 {
+              font-size: 9px;
+              font-weight: 900;
+              text-transform: uppercase;
+              letter-spacing: 0.04em;
+              color: #0f172a;
+            }
+            .front-header-text .line2 {
+              font-size: 8px;
+              font-weight: 600;
+              color: #334155;
+            }
+            .front-header-text .line3 {
+              font-size: 8px;
+              font-weight: 600;
+              color: #334155;
+            }
+            .banner-strip {
+              background-color: #945d65;
+              color: #ffffff;
+              text-align: center;
+              font-size: 8.5px;
+              font-weight: 900;
+              text-transform: uppercase;
+              letter-spacing: 0.08em;
+              padding: 3px 4px;
+              margin: 2px 0 3px 0;
+            }
+            .id-no-row {
+              text-align: right;
+              font-size: 8px;
+              font-weight: 700;
+              color: #0f172a;
+              margin-bottom: 2px;
+            }
+            .id-no-val {
+              border-bottom: 1px solid #0f172a;
+              font-family: monospace;
+              font-weight: 900;
+              font-size: 8.5px;
+              padding: 0 4px;
+              min-width: 90px;
+              display: inline-block;
+              text-align: center;
+            }
+            .front-body {
+              display: flex;
+              gap: 7px;
+              align-items: flex-start;
+              flex: 1;
+            }
+            .photo-frame {
+              width: 72px;
+              height: 82px;
+              border: 1px solid #475569;
+              background-color: #f8fafc;
+              display: flex;
+              flex-direction: column;
+              align-items: center;
+              justify-content: center;
+              text-align: center;
+              padding: 2px;
+              flex-shrink: 0;
+            }
+            .photo-frame span {
+              font-size: 6.5px;
+              color: #64748b;
+              text-transform: uppercase;
+              font-weight: 600;
+            }
+            .fields-area {
+              flex: 1;
+              min-width: 0;
+              display: flex;
+              flex-direction: column;
+              gap: 2.5px;
+            }
+            .name-box {
+              text-align: center;
+              margin-bottom: 2px;
+            }
+            .name-line {
+              border-bottom: 1px solid #0f172a;
+              font-weight: 900;
+              font-size: 9.5px;
+              text-transform: uppercase;
+              color: #0f172a;
+              display: block;
+              padding-bottom: 1px;
+            }
+            .name-label {
+              font-size: 6.5px;
+              font-weight: 700;
+              text-transform: uppercase;
+              color: #475569;
+              letter-spacing: 0.05em;
+              display: block;
+              margin-top: 1px;
+            }
+            .field-row {
+              font-size: 7.5px;
+              color: #334155;
+              display: flex;
+              align-items: baseline;
+              line-height: 1.15;
+            }
+            .field-label {
+              font-weight: 700;
+              color: #0f172a;
+              white-space: nowrap;
+            }
+            .field-underline {
+              border-bottom: 1px solid #475569;
+              flex: 1;
+              font-weight: 700;
+              color: #0f172a;
+              padding-left: 3px;
+              white-space: nowrap;
+              overflow: hidden;
+              text-overflow: ellipsis;
+            }
+            .front-bottom {
+              display: flex;
+              align-items: flex-end;
+              justify-content: space-between;
+              padding-top: 3px;
+              font-size: 6.5px;
+            }
+            .validity-block {
+              color: #334155;
+              line-height: 1.2;
+            }
+            .validity-underline {
+              border-bottom: 1px solid #0f172a;
+              font-weight: 800;
+              color: #be123c;
+              padding: 0 3px;
+            }
+            .sig-block {
+              text-align: center;
+              width: 145px;
+            }
+            .sig-line {
+              border-bottom: 1px solid #0f172a;
+              width: 100%;
+              margin-bottom: 1.5px;
+            }
+            .sig-text {
+              font-size: 6.5px;
+              color: #334155;
+            }
+            /* Back Card Styling */
+            .dep-table {
+              width: 100%;
+              border-collapse: collapse;
+              margin-bottom: 3px;
+            }
+            .dep-table-title {
+              border: 1px solid #334155;
+              background-color: #f1f5f9;
+              text-align: center;
+              font-size: 7.5px;
+              font-weight: 900;
+              text-transform: uppercase;
+              letter-spacing: 0.05em;
+              padding: 2px;
+            }
+            .dep-col-header {
+              border: 1px solid #334155;
+              background-color: #f8fafc;
+              font-size: 6.5px;
+              font-weight: 800;
+              text-transform: uppercase;
+              padding: 2px 3px;
+              text-align: center;
+            }
+            .emergency-section {
+              display: flex;
+              justify-content: space-between;
+              align-items: center;
+              font-size: 7px;
+              padding: 2px 0;
+              border-top: 1px solid #cbd5e1;
+            }
+            .emerg-left {
+              display: flex;
+              flex-direction: column;
+              gap: 1.5px;
+              flex: 1;
+            }
+            .emerg-title {
+              font-weight: 900;
+              text-transform: uppercase;
+              color: #0f172a;
+              font-size: 7.5px;
+            }
+            .emerg-field {
+              display: flex;
+              align-items: baseline;
+              font-size: 7px;
+            }
+            .emerg-underline {
+              border-bottom: 1px solid #475569;
+              flex: 1;
+              min-width: 90px;
+              padding-left: 2px;
+              font-weight: 700;
+            }
+            .emerg-qr-badge-box {
+              display: flex;
+              flex-direction: column;
+              align-items: center;
+              justify-content: center;
+              background: #f8fafc;
+              border: 1.5px solid #0d9488;
+              border-radius: 6px;
+              padding: 3px 5px;
+              text-align: center;
+              box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+            }
+            .emerg-qr-img {
+              width: 52px;
+              height: 52px;
+              display: block;
+              background: #ffffff;
+              border: 1px solid #cbd5e1;
+              border-radius: 3px;
+            }
+            .emerg-verified-tag {
+              background-color: #0f766e;
+              color: #ffffff;
+              font-size: 7.5px;
+              font-weight: 900;
+              letter-spacing: 0.08em;
+              text-transform: uppercase;
+              padding: 1.5px 5px;
+              border-radius: 3px;
+              margin-top: 2px;
+              display: block;
+            }
+            .signatures-row {
+              display: flex;
+              justify-content: space-between;
+              align-items: flex-end;
+              padding-top: 3px;
+              margin-top: 2px;
+              border-top: 1px solid #cbd5e1;
+            }
+            .official-sig-box {
+              width: 145px;
+              text-align: center;
+            }
+            .official-sig-img {
+              height: 22px;
+              display: flex;
+              align-items: flex-end;
+              justify-content: center;
+              margin-bottom: -4px;
+            }
+            .official-sig-line {
+              border-top: 1px solid #0f172a;
+              width: 100%;
+              margin-bottom: 1px;
+            }
+            .official-name {
+              font-size: 7.5px;
+              font-weight: 900;
+              text-transform: uppercase;
+              color: #0f172a;
+              line-height: 1.1;
+            }
+            .official-role {
+              font-size: 6.5px;
+              font-weight: 700;
+              text-transform: uppercase;
+              color: #475569;
+              line-height: 1.1;
+            }
+            .print-guide-footer {
+              text-align: center;
+              font-size: 8.5px;
+              color: #64748b;
+              margin-top: 16px;
+              padding-top: 8px;
+              border-top: 1px dashed #cbd5e1;
+            }
+          </style>
+        </head>
+        <body>
+          <div class="page-container">
+            <div class="header-banner">
+              <p>Republic of the Philippines • Province of Davao de Oro • Municipality of Mabini</p>
+              <h2>Municipal Social Welfare & Development Office (MSWDO)</h2>
+            </div>
+
+            <div class="cards-layout">
+              <!-- FRONT OF THE CARD -->
+              <div class="card-wrapper">
+                <div class="guide-label">✂ Front of Card</div>
+                <div class="id-card">
+                  ${isRevoked ? '<div class="watermark"><div class="watermark-box">REVOKED / VOID</div></div>' : ''}
+                  
+                  <div>
+                    <div class="front-top-header">
+                      <img src="/davao-de-oro-logo.png" alt="Davao de Oro Seal" class="front-logo" />
+                      <div class="front-header-text">
+                        <div class="line1">REPUBLIC OF THE PHILIPPINES</div>
+                        <div class="line2">Province of Davao de Oro</div>
+                        <div class="line3">Solo Parent Office / Division of Mabini</div>
+                      </div>
+                      <img src="/mswdo-logo.png" alt="MSWDO Logo" class="front-logo" />
+                    </div>
+
+                    <div class="banner-strip">
+                      SOLO PARENT IDENTIFICATION CARD
+                    </div>
+
+                    <div class="id-no-row">
+                      ID No. <span class="id-no-val">${record.id_number}</span>
+                    </div>
+                  </div>
+
+                  <div class="front-body">
+                    <div class="photo-frame">
+                      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"></path>
+                        <circle cx="12" cy="7" r="4"></circle>
+                      </svg>
+                      <span>1x1 ID picture</span>
+                    </div>
+
+                    <div class="fields-area">
+                      <div class="name-box">
+                        <span class="name-line">${record.full_name.toUpperCase()}</span>
+                        <span class="name-label">NAME</span>
+                      </div>
+
+                      <div class="field-row">
+                        <span class="field-label">Date and Place of Birth:&nbsp;</span>
+                        <span class="field-underline">${record.birthdate || 'N/A'}, Mabini</span>
+                      </div>
+
+                      <div class="field-row">
+                        <span class="field-label">Address:&nbsp;</span>
+                        <span class="field-underline">${record.purok_sitio ? `${record.purok_sitio}, ` : ''}${barangayName}, Mabini</span>
+                      </div>
+
+                      <div class="field-row">
+                        <span class="field-label">Solo Parent Category:&nbsp;</span>
+                        <span class="field-underline">${categoryLabel}</span>
+                      </div>
+
+                      <div class="field-row">
+                        <span class="field-label">Benefit Qualification Code:&nbsp;</span>
+                        <span class="field-underline">${benefitCode}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="front-bottom">
+                    <div class="validity-block">
+                      <div>This card is non-transferable and</div>
+                      <div>valid until <span class="validity-underline">${record.expires_at}</span></div>
+                    </div>
+
+                    <div class="sig-block">
+                      <div class="sig-line"></div>
+                      <div class="sig-text">Signature or thumbprint of solo parent</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- BACK OF THE CARD -->
+              <div class="card-wrapper">
+                <div class="guide-label">✂ Back of Card</div>
+                <div class="id-card-back">
+                  ${isRevoked ? '<div class="watermark"><div class="watermark-box">REVOKED / VOID</div></div>' : ''}
+
+                  <div>
+                    <table class="dep-table">
+                      <thead>
+                        <tr>
+                          <th colspan="4" class="dep-table-title">CHILD/REN/DEPENDENT/S</th>
+                        </tr>
+                        <tr>
+                          <th class="dep-col-header" style="width: 44%;">NAME</th>
+                          <th class="dep-col-header" style="width: 24%;">DATE OF BIRTH</th>
+                          <th class="dep-col-header" style="width: 12%;">AGE</th>
+                          <th class="dep-col-header" style="width: 20%;">RELATIONSHIP</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        ${dependentsTableRowsHtml}
+                      </tbody>
+                    </table>
+
+                    <div class="emergency-section">
+                      <div class="emerg-left">
+                        <div class="emerg-title">IN CASE OF EMERGENCY:</div>
+                        <div class="emerg-field">
+                          <span style="font-weight: 700; color: #0f172a;">Name:&nbsp;</span>
+                          <span class="emerg-underline">&nbsp;</span>
+                        </div>
+                        <div class="emerg-field">
+                          <span style="font-weight: 700; color: #0f172a;">Address:&nbsp;</span>
+                          <span class="emerg-underline">${barangayName}, Mabini</span>
+                        </div>
+                        <div class="emerg-field">
+                          <span style="font-weight: 700; color: #0f172a;">Contact Number:&nbsp;</span>
+                          <span class="emerg-underline" style="font-family: monospace;">${record.contact_number || '&nbsp;'}</span>
+                        </div>
+                      </div>
+
+                      ${
+                        qrCodeDataUrl
+                          ? `
+                          <div class="emerg-qr-badge-box">
+                            <img src="${qrCodeDataUrl}" alt="QR" class="emerg-qr-img" />
+                            <span class="emerg-verified-tag">✓ VERIFIED</span>
+                            <span style="font-size: 5.5px; font-weight: 800; color: #475569; margin-top: 1px; font-family: monospace;">RA 11861</span>
+                          </div>
+                        `
+                          : ''
+                      }
+                    </div>
+                  </div>
+
+                  <div class="signatures-row">
+                    <!-- Left: Municipal Mayor -->
+                    <div class="official-sig-box">
+                      <div class="official-sig-img">
+                        <svg viewBox="0 0 120 32" style="width: 80px; height: 20px;" fill="none" stroke="#0f172a" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                          <path d="M 8 22 C 14 12, 20 6, 26 10 C 32 14, 25 28, 38 18 C 45 13, 52 20, 60 15 C 68 10, 75 22, 85 15 C 95 10, 105 14, 112 12" />
+                          <path d="M 16 18 C 35 20, 65 19, 105 17" />
+                        </svg>
+                      </div>
+                      <div class="official-sig-line"></div>
+                      <div class="official-name">HON. EMERSON L. LUEGO</div>
+                      <div class="official-role">MUNICIPAL MAYOR</div>
+                    </div>
+
+                    <!-- Right: C/MSWDO HEAD -->
+                    <div class="official-sig-box">
+                      <div class="official-sig-img">
+                        <svg viewBox="0 0 120 32" style="width: 80px; height: 20px;" fill="none" stroke="#0f172a" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                          <path d="M 12 20 C 16 8, 22 4, 26 12 C 30 18, 32 26, 40 14 C 48 2, 54 18, 62 16 C 70 14, 76 24, 85 12 C 92 5, 98 20, 106 16" />
+                          <path d="M 18 24 C 42 27, 68 24, 95 22" />
+                        </svg>
+                      </div>
+                      <div class="official-sig-line"></div>
+                      <div class="official-name">VIRGENCITA M. CHU, RSW, MPA</div>
+                      <div class="official-role">C/MSWDO HEAD</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="print-guide-footer">
+              ✂ <strong>Official LGU Printing Guide:</strong> Print on standard Letter or A4 cardstock paper (Scale 100%). Cut along dashed outer borders and laminate back-to-back for official Municipal Solo Parent ID Card.
+            </div>
+          </div>
+        </body>
+      </html>
+    `;
+
+    doc.open();
+    doc.write(printHtml);
+    doc.close();
+
+    // Trigger printing once DOM is ready
+    setTimeout(() => {
+      iframe.contentWindow?.focus();
+      iframe.contentWindow?.print();
+    }, 280);
   }
 
-  // QR Code payload data
-  const qrVerificationData = JSON.stringify({
-    id: record.id_number,
-    name: record.full_name,
-    brgy: barangayName,
-    exp: record.expires_at,
-    subsidy: record.is_minimum_wage_or_below ? 'YES' : 'NO',
-  });
-
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 p-3 sm:p-4 backdrop-blur-sm overflow-y-auto">
-      <div className="relative w-full max-w-2xl rounded-2xl bg-white shadow-2xl border border-slate-200 overflow-hidden flex flex-col">
-        {/* Header (No print) */}
-        <div className="print:hidden flex items-center justify-between border-b border-slate-100 bg-slate-900 px-6 py-4 text-white">
+    <div
+      id="solo-parent-id-card-modal-root"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/75 p-3 sm:p-4 backdrop-blur-sm overflow-y-auto print:p-0 print:bg-white print:static"
+    >
+      <div
+        id="solo-parent-id-card-modal-dialog"
+        className="relative w-full max-w-4xl rounded-2xl bg-white shadow-2xl border border-slate-200 overflow-hidden flex flex-col print:border-none print:shadow-none print:max-w-none print:w-full"
+      >
+        {/* Header */}
+        <div className="print:hidden flex items-center justify-between border-b border-slate-100 bg-slate-900 px-5 py-4 text-white">
           <div className="flex items-center gap-2.5">
-            <ShieldCheck className="h-5 w-5 text-teal-400" />
+            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-rose-500/20 text-rose-400 border border-rose-500/30">
+              <ShieldCheck className="h-5 w-5" />
+            </div>
             <div>
-              <h2 className="text-base font-bold">Printable Official Solo Parent ID Card</h2>
-              <p className="text-xs text-slate-400">
-                Republic Act 11861 Compliant ID Layout (Front & Back)
+              <h2 className="text-sm sm:text-base font-bold text-white leading-tight">
+                Official Solo Parent Identification Card
+              </h2>
+              <p className="text-[11px] text-slate-400">
+                Municipality of Mabini • Province of Davao de Oro (RA 11861 Format)
               </p>
             </div>
           </div>
@@ -53,14 +778,14 @@ export default function SoloParentIdCardModal({
             <button
               type="button"
               onClick={handlePrint}
-              className="flex items-center gap-1.5 rounded-xl bg-teal-600 px-4 py-2 text-xs font-bold text-white hover:bg-teal-500 shadow transition"
+              className="flex items-center gap-1.5 rounded-xl bg-[#945d65] px-4 py-2 text-xs font-bold text-white hover:bg-[#834d55] shadow transition active:scale-95 cursor-pointer"
             >
-              <Printer className="h-4 w-4" /> Print Card
+              <Printer className="h-4 w-4" /> Print Official Card
             </button>
             <button
               type="button"
               onClick={onClose}
-              className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-800 hover:text-white transition"
+              className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-800 hover:text-white transition cursor-pointer"
             >
               <X className="h-5 w-5" />
             </button>
@@ -68,12 +793,13 @@ export default function SoloParentIdCardModal({
         </div>
 
         {/* Revoked Notice Banner */}
-        {record.status === 'revoked' && (
-          <div className="print:hidden bg-rose-50 border-b border-rose-200 px-6 py-3 text-xs text-rose-900 flex items-center justify-between">
+        {isRevoked && (
+          <div className="print:hidden bg-rose-50 border-b border-rose-200 px-6 py-2.5 text-xs text-rose-900 flex items-center justify-between">
             <div className="flex items-center gap-2">
               <Ban className="h-4 w-4 text-rose-600 shrink-0" />
               <span>
-                <strong>Notice:</strong> This ID has been <strong>REVOKED / TERMINATED</strong> ({record.revocation_reason || 'Naminyo / Re-married'}). Privileges are invalid.
+                <strong>Notice:</strong> This ID has been <strong>REVOKED / TERMINATED</strong> (
+                {record.revocation_reason || 'Naminyo / Re-married'}). Privileges are invalid.
               </span>
             </div>
             <span className="rounded bg-rose-200 text-rose-900 px-2 py-0.5 text-[10px] font-bold">
@@ -82,234 +808,357 @@ export default function SoloParentIdCardModal({
           </div>
         )}
 
-        {/* Printable Area */}
-        <div className="p-6 bg-slate-100 space-y-6 overflow-y-auto max-h-[80vh] flex flex-col items-center">
-          {/* Card Container for Print */}
-          <div className="space-y-6 w-full max-w-md">
+        {/* Main Printable / Digital Preview Area */}
+        <div
+          id="solo-parent-id-card-print-area"
+          className="p-5 sm:p-6 bg-slate-100/90 overflow-y-auto max-h-[82vh] flex flex-col items-center print:bg-white print:p-0 print:max-h-none print:overflow-visible"
+        >
+          {/* Instructions header banner */}
+          <div className="print:hidden text-center mb-5">
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-200/90 px-3.5 py-1 text-[11px] font-bold text-slate-800 shadow-2xs">
+              <CheckCircle2 className="h-3.5 w-3.5 text-teal-700" />
+              Official Digital ID & Printable Format (Front & Back)
+            </span>
+          </div>
+
+          <div className="flex flex-col lg:flex-row items-center justify-center gap-6 w-full">
             {/* FRONT OF THE CARD */}
-            <div className="rounded-2xl border-2 border-slate-300 bg-white shadow-md overflow-hidden p-4 relative text-slate-900 font-sans">
-              {/* Revoked Watermark */}
-              {record.status === 'revoked' && (
-                <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-20">
-                  <div className="border-4 border-rose-600/70 rounded-xl px-6 py-2 text-rose-600/80 font-black text-2xl uppercase tracking-widest -rotate-12 bg-white/70 shadow-sm backdrop-blur-2xs select-none">
-                    REVOKED / VOID
+            <div className="flex flex-col items-center">
+              <span className="print:hidden text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">
+                Front of ID Card
+              </span>
+              <div className="w-[375px] h-[240px] sm:w-[390px] sm:h-[248px] rounded-xl border border-slate-300 bg-white shadow-lg p-2.5 relative text-slate-900 font-sans flex flex-col justify-between overflow-hidden select-none">
+                {/* Revoked Watermark */}
+                {isRevoked && (
+                  <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-20">
+                    <div className="border-4 border-rose-600/70 rounded-xl px-5 py-2 text-rose-600/85 font-black text-xl uppercase tracking-widest -rotate-12 bg-white/80 shadow-sm backdrop-blur-2xs">
+                      REVOKED / VOID
+                    </div>
                   </div>
-                </div>
-              )}
-              {/* Header with Republic of the Philippines */}
-              <div className="text-center border-b border-slate-200 pb-2">
-                <p className="text-[9px] uppercase tracking-wider font-semibold text-slate-500">
-                  Republic of the Philippines • Municipality of Mabini
-                </p>
-                <h3 className="text-xs font-black uppercase text-teal-900 tracking-tight">
-                  Municipal Social Welfare & Development Office
-                </h3>
-                <div className="inline-block bg-teal-800 text-white font-extrabold text-[10px] px-3 py-0.5 rounded-full mt-1 uppercase tracking-wider">
-                  SOLO PARENT IDENTIFICATION CARD
-                </div>
-              </div>
+                )}
 
-              {/* Card Body */}
-              <div className="flex gap-3.5 mt-3 items-center">
-                {/* Photo frame */}
-                <div className="flex flex-col items-center">
-                  <div className="h-28 w-24 rounded-lg border-2 border-dashed border-slate-300 bg-slate-50 flex flex-col items-center justify-center text-slate-400 text-center p-1">
-                    <User className="h-10 w-10 text-slate-300 mb-1" />
-                    <span className="text-[8px] font-bold uppercase tracking-wider text-slate-400">
-                      1x1 / 2x2 Photo
-                    </span>
+                {/* Top Section */}
+                <div>
+                  <div className="flex items-center justify-between gap-1.5 pb-0.5">
+                    <img
+                      src="/davao-de-oro-logo.png"
+                      alt="Davao de Oro Seal"
+                      className="h-10 w-10 object-contain shrink-0"
+                    />
+                    <div className="text-center flex-1 leading-tight">
+                      <p className="text-[9.5px] font-black uppercase tracking-tight text-slate-900">
+                        REPUBLIC OF THE PHILIPPINES
+                      </p>
+                      <p className="text-[8.5px] font-semibold text-slate-700">
+                        Province of Davao de Oro
+                      </p>
+                      <p className="text-[8.5px] font-semibold text-slate-700">
+                        Solo Parent Office / Division of Mabini
+                      </p>
+                    </div>
+                    <img
+                      src="/mswdo-logo.png"
+                      alt="MSWDO Logo"
+                      className="h-10 w-10 object-contain shrink-0"
+                    />
                   </div>
-                  <span className="text-[9px] font-bold text-teal-900 mt-1 uppercase">
-                    RA 11861
-                  </span>
-                </div>
 
-                {/* Details */}
-                <div className="flex-1 min-w-0 text-left space-y-1">
-                  <div>
-                    <span className="text-[8.5px] uppercase font-bold text-slate-400 block leading-tight">
-                      Card ID Number
-                    </span>
-                    <span className="text-sm font-mono font-black text-teal-900 leading-tight">
+                  {/* Ribbon Banner */}
+                  <div className="bg-[#945d65] text-white text-center font-black text-[9px] uppercase tracking-wider py-0.5 mt-0.5 shadow-xs">
+                    SOLO PARENT IDENTIFICATION CARD
+                  </div>
+
+                  {/* ID No line */}
+                  <div className="text-right text-[8.5px] font-bold text-slate-900 mt-1">
+                    ID No.{' '}
+                    <span className="border-b border-slate-900 font-mono font-black text-[9px] px-2 inline-block min-w-[100px] text-center text-[#945d65]">
                       {record.id_number}
                     </span>
                   </div>
+                </div>
 
-                  <div>
-                    <span className="text-[8.5px] uppercase font-bold text-slate-400 block leading-tight">
-                      Name of Solo Parent
-                    </span>
-                    <span className="text-xs font-bold text-slate-900 uppercase block truncate leading-tight">
-                      {record.full_name}
+                {/* Body: Photo & Fields */}
+                <div className="flex gap-2.5 items-start mt-0.5">
+                  {/* Photo frame */}
+                  <div className="w-[78px] h-[90px] border border-slate-400 bg-slate-50 flex flex-col items-center justify-center text-center p-1 shrink-0 rounded-xs">
+                    <User className="h-8 w-8 text-slate-300 mb-0.5" />
+                    <span className="text-[7px] font-bold uppercase text-slate-500">
+                      1x1 ID picture
                     </span>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-1 text-[10px]">
-                    <div>
-                      <span className="text-[8.5px] uppercase font-bold text-slate-400 block">
-                        Birthdate
+                  {/* Fields Area */}
+                  <div className="flex-1 min-w-0 flex flex-col gap-0.5 text-left">
+                    <div className="text-center">
+                      <span className="border-b border-slate-900 font-black text-[10px] text-slate-900 uppercase block truncate leading-tight pb-0.5">
+                        {record.full_name}
                       </span>
-                      <span className="font-semibold text-slate-800">{record.birthdate}</span>
-                    </div>
-                    <div>
-                      <span className="text-[8.5px] uppercase font-bold text-slate-400 block">
-                        Gender
-                      </span>
-                      <span className="font-semibold text-slate-800">
-                        {record.gender === 'F' ? 'Female' : 'Male'}
+                      <span className="text-[7px] font-bold uppercase text-slate-500 block -mt-0.5">
+                        NAME
                       </span>
                     </div>
-                  </div>
 
-                  <div>
-                    <span className="text-[8.5px] uppercase font-bold text-slate-400 block">
-                      Address / Barangay
-                    </span>
-                    <span className="text-[10.5px] font-semibold text-slate-800 block truncate">
-                      {record.purok_sitio ? `${record.purok_sitio}, ` : ''}
-                      {barangayName}
-                    </span>
-                  </div>
+                    <div className="text-[8px] flex items-baseline leading-tight">
+                      <span className="font-bold text-slate-900 whitespace-nowrap">
+                        Date and Place of Birth:&nbsp;
+                      </span>
+                      <span className="border-b border-slate-400 font-semibold text-slate-800 flex-1 truncate pl-1">
+                        {record.birthdate || 'N/A'}, Mabini
+                      </span>
+                    </div>
 
-                  <div>
-                    <span className="text-[8.5px] uppercase font-bold text-slate-400 block">
-                      Category
-                    </span>
-                    <span className="text-[10px] font-bold text-slate-700 block truncate">
-                      {categoryLabel}
-                    </span>
+                    <div className="text-[8px] flex items-baseline leading-tight">
+                      <span className="font-bold text-slate-900 whitespace-nowrap">
+                        Address:&nbsp;
+                      </span>
+                      <span className="border-b border-slate-400 font-semibold text-slate-800 flex-1 truncate pl-1">
+                        {record.purok_sitio ? `${record.purok_sitio}, ` : ''}
+                        {barangayName}, Mabini
+                      </span>
+                    </div>
+
+                    <div className="text-[8px] flex items-baseline leading-tight">
+                      <span className="font-bold text-slate-900 whitespace-nowrap">
+                        Solo Parent Category:&nbsp;
+                      </span>
+                      <span className="border-b border-slate-400 font-semibold text-slate-800 flex-1 truncate pl-1">
+                        {categoryLabel}
+                      </span>
+                    </div>
+
+                    <div className="text-[8px] flex items-baseline leading-tight">
+                      <span className="font-bold text-slate-900 whitespace-nowrap">
+                        Benefit Qualification Code:&nbsp;
+                      </span>
+                      <span className="border-b border-slate-400 font-semibold text-slate-800 flex-1 truncate pl-1">
+                        {benefitCode}
+                      </span>
+                    </div>
                   </div>
                 </div>
 
-                {/* QR Code */}
-                <div className="flex flex-col items-center justify-center p-1 bg-slate-50 border border-slate-200 rounded-lg">
-                  <div className="h-16 w-16 bg-white border border-slate-300 flex items-center justify-center p-1">
-                    {/* Simulated SVG QR */}
-                    <QrCode className="h-14 w-14 text-slate-800" />
+                {/* Bottom Row */}
+                <div className="flex items-end justify-between text-[7px] pt-1">
+                  <div className="text-slate-700 leading-tight">
+                    <p>This card is non-transferable and</p>
+                    <p>
+                      valid until{' '}
+                      <span className="border-b border-slate-900 font-bold text-rose-700 px-1">
+                        {record.expires_at}
+                      </span>
+                    </p>
                   </div>
-                  <span className="text-[7.5px] font-mono font-bold text-slate-500 mt-0.5">
-                    VERIFIED
-                  </span>
-                </div>
-              </div>
 
-              {/* Card Footer */}
-              <div className="mt-3 pt-2 border-t border-slate-200 flex items-center justify-between text-[9px] text-slate-600">
-                <div>
-                  <span className="text-slate-400 font-medium">Issued: </span>
-                  <span className="font-bold text-slate-800">{record.issued_at}</span>
+                  <div className="text-center w-36">
+                    <div className="border-b border-slate-900 w-full mb-0.5" />
+                    <p className="text-[7px] text-slate-600">
+                      Signature or thumbprint of solo parent
+                    </p>
+                  </div>
                 </div>
-                <div>
-                  <span className="text-slate-400 font-medium">Valid Until: </span>
-                  <span className="font-bold text-rose-700">{record.expires_at}</span>
-                </div>
-                {record.is_minimum_wage_or_below && (
-                  <span className="rounded bg-emerald-100 px-1.5 py-0.5 text-[8px] font-bold text-emerald-800">
-                    ₱1k Subsidy Tagged
-                  </span>
-                )}
               </div>
             </div>
 
             {/* BACK OF THE CARD */}
-            <div className="rounded-2xl border-2 border-slate-300 bg-white shadow-md overflow-hidden p-4 relative text-slate-900 font-sans">
-              {/* Revoked Watermark */}
-              {record.status === 'revoked' && (
-                <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-20">
-                  <div className="border-4 border-rose-600/70 rounded-xl px-6 py-2 text-rose-600/80 font-black text-2xl uppercase tracking-widest -rotate-12 bg-white/70 shadow-sm backdrop-blur-2xs select-none">
-                    REVOKED / VOID
+            <div className="flex flex-col items-center">
+              <span className="print:hidden text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">
+                Back of ID Card
+              </span>
+              <div className="w-[375px] h-[240px] sm:w-[390px] sm:h-[248px] rounded-xl border-4 border-double border-slate-600 bg-white shadow-lg p-2.5 relative text-slate-900 font-sans flex flex-col justify-between overflow-hidden select-none">
+                {/* Revoked Watermark */}
+                {isRevoked && (
+                  <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-20">
+                    <div className="border-4 border-rose-600/70 rounded-xl px-5 py-2 text-rose-600/85 font-black text-xl uppercase tracking-widest -rotate-12 bg-white/80 shadow-sm backdrop-blur-2xs">
+                      REVOKED / VOID
+                    </div>
+                  </div>
+                )}
+
+                {/* Dependents Table */}
+                <div>
+                  <table className="w-full border-collapse text-left">
+                    <thead>
+                      <tr>
+                        <th
+                          colSpan={4}
+                          className="border border-slate-600 bg-slate-100 text-center font-black text-[8px] uppercase tracking-wider py-0.5 text-slate-900"
+                        >
+                          CHILD/REN/DEPENDENT/S
+                        </th>
+                      </tr>
+                      <tr className="bg-slate-50 text-[7px] font-black uppercase text-slate-800 text-center">
+                        <th className="border border-slate-600 py-0.5 px-1 text-left w-[44%]">
+                          NAME
+                        </th>
+                        <th className="border border-slate-600 py-0.5 px-1 w-[24%]">
+                          DATE OF BIRTH
+                        </th>
+                        <th className="border border-slate-600 py-0.5 px-1 w-[12%]">AGE</th>
+                        <th className="border border-slate-600 py-0.5 px-1 w-[20%]">
+                          RELATIONSHIP
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {fiveRows.map((dep, idx) => (
+                        <tr key={idx} className="text-[7.5px] text-slate-800 h-[14px]">
+                          <td className="border border-slate-600 px-1 py-0.5 font-bold truncate max-w-[140px]">
+                            {dep?.full_name || '\u00A0'}
+                          </td>
+                          <td className="border border-slate-600 px-1 py-0.5 text-center">
+                            {dep?.birthdate || '\u00A0'}
+                          </td>
+                          <td className="border border-slate-600 px-1 py-0.5 text-center font-bold">
+                            {dep?.age ? `${dep.age}` : '\u00A0'}
+                          </td>
+                          <td className="border border-slate-600 px-1 py-0.5 text-center">
+                            {dep?.relationship || '\u00A0'}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+
+                  {/* Emergency Contact & Prominent Verified QR Code */}
+                  <div className="flex justify-between items-center pt-2 text-[7.5px] border-t border-slate-300 mt-1 gap-2">
+                    <div className="flex-1 flex flex-col gap-1">
+                      <p className="font-black text-slate-900 text-[7.5px] uppercase tracking-wide">
+                        IN CASE OF EMERGENCY:
+                      </p>
+                      <p className="flex items-baseline leading-tight">
+                        <span className="font-bold text-slate-800">Name:&nbsp;</span>
+                        <span className="border-b border-slate-400 flex-1 min-w-[80px]">
+                          &nbsp;
+                        </span>
+                      </p>
+                      <p className="flex items-baseline leading-tight">
+                        <span className="font-bold text-slate-800">Address:&nbsp;</span>
+                        <span className="border-b border-slate-400 flex-1 min-w-[70px] text-slate-700">
+                          {barangayName}, Mabini
+                        </span>
+                      </p>
+                      <p className="flex items-baseline leading-tight">
+                        <span className="font-bold text-slate-800">Contact Number:&nbsp;</span>
+                        <span className="border-b border-slate-400 inline-block min-w-[75px] font-mono font-bold text-slate-900">
+                          {record.contact_number || '\u00A0'}
+                        </span>
+                      </p>
+                    </div>
+
+                    {/* Highly visible, crisp QR Code Badge */}
+                    {qrCodeDataUrl && (
+                      <div className="flex flex-col items-center justify-center p-1.5 bg-teal-50/70 border-1.5 border-teal-600 rounded-lg shadow-xs shrink-0">
+                        <img
+                          src={qrCodeDataUrl}
+                          alt="Verified QR"
+                          className="h-14 w-14 object-contain block bg-white border border-teal-200 p-0.5 rounded"
+                        />
+                        <div className="mt-1 flex items-center justify-center gap-0.5 rounded bg-teal-800 px-2 py-0.5 text-[7.5px] font-black uppercase tracking-wider text-white shadow-xs">
+                          <CheckCircle2 className="h-2.5 w-2.5 text-teal-200" />
+                          <span>VERIFIED</span>
+                        </div>
+                        <span className="text-[5.5px] font-mono font-bold text-teal-900 mt-0.5">
+                          RA 11861
+                        </span>
+                      </div>
+                    )}
                   </div>
                 </div>
-              )}
-              <div className="text-center border-b border-slate-200 pb-1.5">
-                <h4 className="text-[10.5px] font-black uppercase text-teal-900 tracking-wider">
-                  QUALIFIED DEPENDENT CHILDREN (RA 11861)
-                </h4>
-                <p className="text-[8.5px] text-slate-500">
-                  Dependents entitled to benefits under the custody of the Solo Parent
-                </p>
-              </div>
 
-              {/* Table of Dependents */}
-              <div className="mt-2 min-h-[90px]">
-                <table className="w-full text-left text-[9.5px]">
-                  <thead>
-                    <tr className="border-b border-slate-200 text-slate-400 font-bold uppercase text-[8px]">
-                      <th className="py-1">Name of Child</th>
-                      <th className="py-1">Birthdate</th>
-                      <th className="py-1">Age</th>
-                      <th className="py-1">Relation</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {record.dependents.slice(0, 4).map((dep, i) => (
-                      <tr key={i} className="text-slate-800">
-                        <td className="py-1 font-bold truncate max-w-[140px]">{dep.full_name}</td>
-                        <td className="py-1">{dep.birthdate}</td>
-                        <td className="py-1 font-semibold">{dep.age} y/o</td>
-                        <td className="py-1">{dep.relationship}</td>
-                      </tr>
-                    ))}
-                    {record.dependents.length === 0 && (
-                      <tr>
-                        <td colSpan={4} className="py-2 text-center text-slate-400 italic">
-                          No dependent registered
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
+                {/* Signatures Row */}
+                <div className="flex justify-between items-end pt-1 border-t border-slate-300 mt-1">
+                  {/* Left: Mayor Emerson Luego */}
+                  <div className="w-[145px] text-center">
+                    <div className="h-6 flex items-end justify-center -mb-1">
+                      <svg
+                        viewBox="0 0 120 32"
+                        className="w-20 h-5"
+                        fill="none"
+                        stroke="#0f172a"
+                        strokeWidth="1.8"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      >
+                        <path d="M 8 22 C 14 12, 20 6, 26 10 C 32 14, 25 28, 38 18 C 45 13, 52 20, 60 15 C 68 10, 75 22, 85 15 C 95 10, 105 14, 112 12" />
+                        <path d="M 16 18 C 35 20, 65 19, 105 17" />
+                      </svg>
+                    </div>
+                    <div className="border-t border-slate-900 w-full mb-0.5" />
+                    <p className="text-[7.5px] font-black uppercase text-slate-900 leading-tight">
+                      HON. EMERSON L. LUEGO
+                    </p>
+                    <p className="text-[6.5px] font-bold uppercase text-slate-600 leading-tight">
+                      MUNICIPAL MAYOR
+                    </p>
+                  </div>
 
-              {/* Signatures & Conditions */}
-              <div className="mt-3 pt-2 border-t border-slate-200 grid grid-cols-2 gap-4 text-center">
-                <div className="pt-3">
-                  <div className="border-t border-slate-800 mx-2" />
-                  <p className="text-[9px] font-bold uppercase text-slate-900 mt-0.5">
-                    Municipal Mayor
-                  </p>
-                  <p className="text-[7.5px] text-slate-500">Municipality of Mabini</p>
+                  {/* Right: C/MSWDO HEAD Virgencita Chu */}
+                  <div className="w-[145px] text-center">
+                    <div className="h-6 flex items-end justify-center -mb-1">
+                      <svg
+                        viewBox="0 0 120 32"
+                        className="w-20 h-5"
+                        fill="none"
+                        stroke="#0f172a"
+                        strokeWidth="1.8"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      >
+                        <path d="M 12 20 C 16 8, 22 4, 26 12 C 30 18, 32 26, 40 14 C 48 2, 54 18, 62 16 C 70 14, 76 24, 85 12 C 92 5, 98 20, 106 16" />
+                        <path d="M 18 24 C 42 27, 68 24, 95 22" />
+                      </svg>
+                    </div>
+                    <div className="border-t border-slate-900 w-full mb-0.5" />
+                    <p className="text-[7.5px] font-black uppercase text-slate-900 leading-tight">
+                      VIRGENCITA M. CHU, RSW, MPA
+                    </p>
+                    <p className="text-[6.5px] font-bold uppercase text-slate-600 leading-tight">
+                      C/MSWDO HEAD
+                    </p>
+                  </div>
                 </div>
-                <div className="pt-3">
-                  <div className="border-t border-slate-800 mx-2" />
-                  <p className="text-[9px] font-bold uppercase text-slate-900 mt-0.5">
-                    MSWDO Officer
-                  </p>
-                  <p className="text-[7.5px] text-slate-500">Solo Parent Focal Person</p>
-                </div>
-              </div>
-
-              <div className="mt-2 text-center">
-                <p className="text-[7.5px] text-slate-400 italic">
-                  Non-transferable. Valid only when presented with proper identification.
-                </p>
               </div>
             </div>
           </div>
         </div>
 
-        {/* Print Stylesheet injection */}
+        {/* Global Print fallback for Ctrl+P */}
         <style jsx global>{`
           @media print {
-            body * {
-              visibility: hidden;
+            body {
+              background: #ffffff !important;
+              color: #000000 !important;
             }
-            .fixed,
-            .fixed * {
-              visibility: visible;
-            }
-            .fixed {
-              position: absolute;
-              left: 0;
-              top: 0;
-              width: 100%;
-              height: auto;
-              background: transparent !important;
-              padding: 0 !important;
-              box-shadow: none !important;
-            }
+            header,
+            nav,
+            aside,
+            .civic-topbar,
             .print\\:hidden {
               display: none !important;
+            }
+            #solo-parent-id-card-modal-root {
+              position: static !important;
+              background: transparent !important;
+              padding: 0 !important;
+              margin: 0 !important;
+              overflow: visible !important;
+            }
+            #solo-parent-id-card-modal-dialog {
+              border: none !important;
+              box-shadow: none !important;
+              max-width: 100% !important;
+              width: 100% !important;
+              overflow: visible !important;
+            }
+            #solo-parent-id-card-print-area {
+              background: transparent !important;
+              max-height: none !important;
+              overflow: visible !important;
+              padding: 10px !important;
+            }
+            * {
+              -webkit-print-color-adjust: exact !important;
+              print-color-adjust: exact !important;
             }
           }
         `}</style>

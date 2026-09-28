@@ -691,3 +691,20 @@
     transform: scaleX(1);
   }
 }
+
+@media print {
+  header,
+  nav,
+  aside,
+  [role="navigation"],
+  .civic-topbar,
+  .print\:hidden {
+    display: none !important;
+  }
+
+  body {
+    background: #ffffff !important;
+    color: #000000 !important;
+  }
+}
+

@@ -22,7 +22,12 @@ where table_schema = 'public'
     'audit_logs',
     'sync_backups',
     'password_setup_tokens',
-    'email_verification_tokens'
+    'email_verification_tokens',
+    'cases',
+    'case_attachments',
+    'case_notes',
+    'solo_parents',
+    'forecasting_dataset_uploads'
   )
 order by table_name;
 
@@ -43,6 +48,11 @@ where schemaname = 'public'
     'distribution_events',
     'incidents',
     'password_setup_tokens',
-    'email_verification_tokens'
+    'email_verification_tokens',
+    'cases',
+    'case_attachments',
+    'case_notes',
+    'solo_parents',
+    'forecasting_dataset_uploads'
   )
 order by tablename;

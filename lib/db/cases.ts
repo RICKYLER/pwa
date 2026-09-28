@@ -57,6 +57,7 @@ export async function getCases(filters?: CaseQueryFilters): Promise<CaseRecord[]
           (c.perpetrator_name && c.perpetrator_name.toLowerCase().includes(q)) ||
           (c.purok_sitio && c.purok_sitio.toLowerCase().includes(q)) ||
           (c.case_summary && c.case_summary.toLowerCase().includes(q)) ||
+          (c.intake_sheet?.problem_presented && c.intake_sheet.problem_presented.toLowerCase().includes(q)) ||
           (c.assigned_worker_name && c.assigned_worker_name.toLowerCase().includes(q))
         );
       });

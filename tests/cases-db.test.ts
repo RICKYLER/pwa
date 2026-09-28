@@ -180,3 +180,83 @@ test('5. addCaseAttachment, getCaseAttachments and deleteCase', async () => {
   const deleted = await getCase(c.id);
   assert.equal(deleted, undefined);
 });
+
+test('6. createCase with acts_of_lasciviousness and full intake_sheet GIS profile', async () => {
+  const c = await createCase({
+    case_number: 'GIS-TEST-2026-001',
+    case_type: 'acts_of_lasciviousness',
+    status: 'active',
+    reported_at: '2026-09-28',
+    victim_name: 'Maria Dela Cruz',
+    victim_age: 24,
+    victim_gender: 'F',
+    victim_address: 'Purok 3, Cadunan, Mabini',
+    barangay_id: 'cadunan',
+    purok_sitio: 'Purok 3',
+    case_summary: 'Acts of Lasciviousness reported by walk-in client',
+    source: 'manual_intake',
+    intake_sheet: {
+      date_of_interview: '2026-09-28',
+      client_category: 'walk_in',
+      sectors: ['women', 'solo_parent'],
+      case_category_type: 'acts_of_lasciviousness',
+      birthdate: '2002-05-14',
+      birthplace: 'Mabini, Davao de Oro',
+      civil_status: 'Single',
+      educational_attainment: 'College Level',
+      occupation: 'Store Assistant',
+      monthly_income: 6000,
+      house_occupancy: 'renter',
+      family_members: [
+        {
+          name: 'Angelo Dela Cruz',
+          age: 4,
+          civil_status: 'Single',
+          relationship: 'Son',
+          birthday: '2022-03-10',
+        },
+      ],
+      monthly_expenses: {
+        food: 3000,
+        water: 300,
+        electricity: 500,
+        total: 3800,
+      },
+      agricultural_profile: {
+        has_land: false,
+      },
+      problem_presented: 'Alleged harassment and indecent advances by landlord on September 25, 2026',
+      family_background: 'Living independently with 4-year-old child; father provides no support',
+      assessment: 'Client is distressed and requires immediate legal counseling and psycho-social support',
+      recommendation_action: 'Issue Barangay Protection Order referral and assist with filing at PNP WCPD',
+      priority_assistance_for: 'Legal and Medical Assistance',
+      priority_rank: 'Priority 1',
+      date_interviewed: '2026-09-28',
+      client_signature_name: 'Maria Dela Cruz',
+      mswdo_worker_name: 'Social Worker Elena, RSW',
+    },
+  });
+
+  assert.equal(c.case_type, 'acts_of_lasciviousness');
+  assert.ok(c.intake_sheet);
+  assert.equal(c.intake_sheet.client_category, 'walk_in');
+  assert.deepEqual(c.intake_sheet.sectors, ['women', 'solo_parent']);
+  assert.equal(c.intake_sheet.family_members.length, 1);
+  assert.equal(c.intake_sheet.family_members[0].name, 'Angelo Dela Cruz');
+  assert.equal(c.intake_sheet.monthly_expenses?.total, 3800);
+  assert.equal(c.intake_sheet.mswdo_worker_name, 'Social Worker Elena, RSW');
+
+  // Verify retrieval
+  const fetched = await getCase(c.id);
+  assert.ok(fetched);
+  assert.equal(fetched?.case_type, 'acts_of_lasciviousness');
+  assert.equal(fetched?.intake_sheet?.problem_presented, 'Alleged harassment and indecent advances by landlord on September 25, 2026');
+
+  // Search matching problem_presented
+  const searchResults = await getCases({ query: 'harassment and indecent advances' });
+  assert.ok(searchResults.some((item) => item.id === c.id));
+
+  // Clean up
+  await deleteCase(c.id);
+});
+

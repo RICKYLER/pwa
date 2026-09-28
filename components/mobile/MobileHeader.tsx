@@ -23,7 +23,7 @@ export default function MobileHeader({ title, onMenuClick }: MobileHeaderProps) 
     .join('') ?? (user?.email ? user.email.slice(0, 2).toUpperCase() : 'U');
 
   return (
-    <header className="civic-topbar civic-hairline sticky top-0 z-30">
+    <header className="civic-topbar civic-hairline sticky top-0 z-30 print:hidden">
       <div className="mx-auto flex items-center justify-between gap-3 px-4 pb-3 pt-[max(env(safe-area-inset-top),0.7rem)]">
         <div className="flex min-w-0 items-center gap-2.5">
           <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-200/80 bg-white p-1 shadow-xs">

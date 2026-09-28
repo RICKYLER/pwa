@@ -215,7 +215,7 @@ export async function decompressJsonPayload<T = unknown>(compressedBase64: strin
     const bytes = base64ToUint8Array(compressedBase64);
 
     if (typeof DecompressionStream !== 'undefined') {
-      const stream = new Response(bytes).body?.pipeThrough(new DecompressionStream('gzip'));
+      const stream = new Response(bytes as unknown as BodyInit).body?.pipeThrough(new DecompressionStream('gzip'));
       if (stream) {
         const decompressedText = await new Response(stream).text();
         return JSON.parse(decompressedText) as T;

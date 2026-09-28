@@ -23,7 +23,7 @@ create table if not exists public.users (
   middle_name text not null default '',
   last_name text not null default '',
   role text not null default 'resident'
-    check (role in ('admin', 'encoder', 'health_worker', 'responder', 'resident')),
+    check (role in ('admin', 'social_worker', 'solo_parent_focal', 'encoder', 'health_worker', 'responder', 'resident')),
   status text not null default 'active'
     check (status in ('active', 'inactive')),
   barangay_id text not null default 'anitapan',
@@ -638,6 +638,9 @@ create table if not exists public.vulnerability_flags (
   has_chronic_illness boolean not null default false,
     chronic_conditions text[] not null default '{}'::text[],
     is_low_income boolean not null default false,
+    is_solo_parent boolean not null default false,
+    solo_parent_id text,
+    solo_parent_category text,
     follow_up_status text not null default 'none'
       check (follow_up_status in ('none', 'needs_visit', 'visited', 'referred', 'resolved')),
     medical_notes text,
@@ -928,6 +931,159 @@ create table if not exists public.email_verification_tokens (
   used_at timestamptz
 );
 
+create table if not exists public.cases (
+  id text primary key default ('case_' || floor(extract(epoch from now()) * 1000)::text || '_' || substr(md5(random()::text), 1, 7)),
+  case_number text not null unique,
+  case_type text not null check (
+    case_type in (
+      'vawc_physical',
+      'vawc_psychological',
+      'vawc_sexual',
+      'vawc_economic',
+      'vac_abuse',
+      'vac_neglect',
+      'vac_exploitation',
+      'rape',
+      'acts_of_lasciviousness',
+      'cicl',
+      'other'
+    )
+  ),
+  reported_at timestamptz not null default timezone('utc', now()),
+  incident_date date,
+  victim_name text not null,
+  victim_age integer check (victim_age is null or (victim_age >= 0 and victim_age <= 130)),
+  victim_gender text check (victim_gender is null or victim_gender in ('F', 'M', 'Other')),
+  victim_contact text,
+  victim_address text,
+  barangay_id text not null default 'cadunan',
+  purok_sitio text,
+  perpetrator_name text,
+  perpetrator_relationship text,
+  perpetrator_address text,
+  status text not null default 'active' check (
+    status in (
+      'active',
+      'under_bpo_tpo',
+      'referred_pnp_wcpd',
+      'filed_in_court',
+      'resolved_closed',
+      'monitoring'
+    )
+  ),
+  case_summary text not null,
+  intake_notes text,
+  assigned_worker_id text,
+  assigned_worker_name text,
+  resident_id text references public.residents (id) on delete set null,
+  household_id text references public.households (id) on delete set null,
+  source text not null default 'manual_intake' check (source in ('excel_import', 'manual_intake')),
+  intake_sheet jsonb default null,
+  created_at timestamptz not null default timezone('utc', now()),
+  updated_at timestamptz not null default timezone('utc', now())
+);
+
+create table if not exists public.case_attachments (
+  id text primary key default ('att_' || floor(extract(epoch from now()) * 1000)::text || '_' || substr(md5(random()::text), 1, 7)),
+  case_id text not null references public.cases (id) on delete cascade,
+  file_name text not null,
+  file_type text not null default 'application/octet-stream',
+  file_size integer,
+  file_url text not null,
+  document_type text not null default 'intake_sheet' check (
+    document_type in (
+      'intake_sheet',
+      'bpo_tpo',
+      'medico_legal',
+      'pnp_blotter',
+      'court_order',
+      'progress_report',
+      'other'
+    )
+  ),
+  uploaded_by text not null default 'Social Worker',
+  uploaded_at timestamptz not null default timezone('utc', now())
+);
+
+create table if not exists public.case_notes (
+  id text primary key default ('note_' || floor(extract(epoch from now()) * 1000)::text || '_' || substr(md5(random()::text), 1, 7)),
+  case_id text not null references public.cases (id) on delete cascade,
+  worker_id text,
+  worker_name text not null default 'Social Worker',
+  date date not null default current_date,
+  note text not null,
+  action_taken text,
+  next_follow_up date,
+  created_at timestamptz not null default timezone('utc', now())
+);
+
+create table if not exists public.solo_parents (
+  id text primary key default gen_random_uuid()::text,
+  id_number text unique not null,
+  resident_id text references public.residents(id) on delete set null,
+  household_id text references public.households(id) on delete set null,
+  full_name text not null,
+  first_name text,
+  middle_name text,
+  last_name text,
+  birthdate date not null,
+  age integer default 0,
+  gender text default 'F',
+  civil_status text,
+  contact_number text,
+  barangay_id text not null,
+  purok_sitio text,
+  street_address text,
+  category text not null check (
+    category in (
+      'death_of_spouse',
+      'abandonment',
+      'unmarried',
+      'legal_separation',
+      'spouse_detained',
+      'spouse_incapacitated',
+      'other_extenuating'
+    )
+  ),
+  category_narrative text,
+  monthly_income numeric default 0,
+  is_minimum_wage_or_below boolean default false,
+  occupation text,
+  employment_status text,
+  dependents jsonb default '[]'::jsonb,
+  requirements jsonb default '{}'::jsonb,
+  issued_at date not null,
+  expires_at date not null,
+  encoder_id text,
+  encoder_name text not null default 'MSWDO Desk Officer',
+  notes text,
+  status text not null default 'active' check (status in ('active', 'expiring', 'expired', 'revoked')),
+  revocation_reason text,
+  revocation_date date,
+  created_at timestamptz not null default timezone('utc', now()),
+  updated_at timestamptz not null default timezone('utc', now())
+);
+
+create table if not exists public.forecasting_dataset_uploads (
+  id text primary key,
+  file_name text not null,
+  file_size_bytes bigint not null check (file_size_bytes >= 0),
+  compressed_size_bytes bigint not null check (compressed_size_bytes >= 0),
+  file_type text not null check (file_type in ('xlsx', 'xls', 'csv')),
+  storage_path text,
+  records_count integer not null default 0 check (records_count >= 0),
+  accuracy_rate numeric(5, 2) not null default 0,
+  mape_percent numeric(5, 2) not null default 0,
+  mae_error numeric(8, 2) not null default 0,
+  uploaded_by text not null default 'MSWDO Staff',
+  uploaded_at timestamptz not null default timezone('utc', now()),
+  is_active boolean not null default false,
+  metadata jsonb not null default '{}'::jsonb,
+  dataset_events jsonb not null default '[]'::jsonb,
+  created_at timestamptz not null default timezone('utc', now()),
+  updated_at timestamptz not null default timezone('utc', now())
+);
+
 create index if not exists households_barangay_id_idx on public.households (barangay_id);
 create index if not exists households_registration_status_idx on public.households (registration_status);
 create index if not exists households_status_idx on public.households (status);
@@ -976,6 +1132,25 @@ create unique index if not exists distribution_records_unique_resident_per_event
   on public.distribution_records (event_id, resident_id)
   where resident_id is not null;
 
+create index if not exists cases_case_number_idx on public.cases (case_number);
+create index if not exists cases_victim_name_idx on public.cases (victim_name);
+create index if not exists cases_barangay_id_idx on public.cases (barangay_id);
+create index if not exists cases_status_idx on public.cases (status);
+create index if not exists cases_case_type_idx on public.cases (case_type);
+create index if not exists cases_resident_id_idx on public.cases (resident_id);
+create index if not exists cases_reported_at_idx on public.cases (reported_at desc);
+create index if not exists cases_intake_sheet_gin_idx on public.cases using gin (intake_sheet);
+create index if not exists case_attachments_case_id_idx on public.case_attachments (case_id);
+create index if not exists case_notes_case_id_idx on public.case_notes (case_id);
+create index if not exists idx_solo_parents_resident_id on public.solo_parents (resident_id);
+create index if not exists idx_solo_parents_household_id on public.solo_parents (household_id);
+create index if not exists idx_solo_parents_barangay_id on public.solo_parents (barangay_id);
+create index if not exists idx_solo_parents_status on public.solo_parents (status);
+create index if not exists idx_solo_parents_id_number on public.solo_parents (id_number);
+create index if not exists idx_solo_parents_expires_at on public.solo_parents (expires_at);
+create index if not exists forecasting_dataset_uploads_uploaded_at_idx on public.forecasting_dataset_uploads (uploaded_at desc);
+create index if not exists forecasting_dataset_uploads_is_active_idx on public.forecasting_dataset_uploads (is_active);
+
 drop trigger if exists users_set_updated_at on public.users;
 create trigger users_set_updated_at
 before update on public.users
@@ -1021,6 +1196,24 @@ execute function public.set_updated_at();
 drop trigger if exists package_templates_set_updated_at on public.package_templates;
 create trigger package_templates_set_updated_at
 before update on public.package_templates
+for each row
+execute function public.set_updated_at();
+
+drop trigger if exists cases_set_updated_at on public.cases;
+create trigger cases_set_updated_at
+before update on public.cases
+for each row
+execute function public.set_updated_at();
+
+drop trigger if exists solo_parents_set_updated_at on public.solo_parents;
+create trigger solo_parents_set_updated_at
+before update on public.solo_parents
+for each row
+execute function public.set_updated_at();
+
+drop trigger if exists forecasting_dataset_uploads_set_updated_at on public.forecasting_dataset_uploads;
+create trigger forecasting_dataset_uploads_set_updated_at
+before update on public.forecasting_dataset_uploads
 for each row
 execute function public.set_updated_at();
 
@@ -1164,7 +1357,7 @@ as $$
       and (
         public.is_admin()
         or (
-          public.current_user_role() in ('encoder', 'health_worker', 'responder')
+          public.current_user_role() in ('encoder', 'health_worker', 'responder', 'social_worker', 'solo_parent_focal')
           and h.barangay_id = public.current_user_barangay_id()
         )
         or (
@@ -1542,6 +1735,169 @@ on public.sync_backups
 for insert
 with check (public.current_user_is_active() and synced_by = auth.uid());
 
+-- Cases RLS
+alter table public.cases enable row level security;
+alter table public.case_attachments enable row level security;
+alter table public.case_notes enable row level security;
+
+drop policy if exists "cases_select_authorized" on public.cases;
+create policy "cases_select_authorized"
+on public.cases
+for select
+using (
+  public.current_user_is_active()
+  and coalesce(public.current_user_role(), '') in ('admin', 'social_worker')
+);
+
+drop policy if exists "cases_insert_authorized" on public.cases;
+create policy "cases_insert_authorized"
+on public.cases
+for insert
+with check (
+  public.current_user_is_active()
+  and coalesce(public.current_user_role(), '') in ('admin', 'social_worker')
+);
+
+drop policy if exists "cases_update_authorized" on public.cases;
+create policy "cases_update_authorized"
+on public.cases
+for update
+using (
+  public.current_user_is_active()
+  and coalesce(public.current_user_role(), '') in ('admin', 'social_worker')
+)
+with check (
+  public.current_user_is_active()
+  and coalesce(public.current_user_role(), '') in ('admin', 'social_worker')
+);
+
+drop policy if exists "cases_delete_admin_only" on public.cases;
+create policy "cases_delete_admin_only"
+on public.cases
+for delete
+using (
+  public.current_user_is_active()
+  and public.is_admin()
+);
+
+drop policy if exists "case_attachments_select_authorized" on public.case_attachments;
+create policy "case_attachments_select_authorized"
+on public.case_attachments
+for select
+using (
+  public.current_user_is_active()
+  and coalesce(public.current_user_role(), '') in ('admin', 'social_worker')
+);
+
+drop policy if exists "case_attachments_insert_authorized" on public.case_attachments;
+create policy "case_attachments_insert_authorized"
+on public.case_attachments
+for insert
+with check (
+  public.current_user_is_active()
+  and coalesce(public.current_user_role(), '') in ('admin', 'social_worker')
+);
+
+drop policy if exists "case_attachments_delete_authorized" on public.case_attachments;
+create policy "case_attachments_delete_authorized"
+on public.case_attachments
+for delete
+using (
+  public.current_user_is_active()
+  and coalesce(public.current_user_role(), '') in ('admin', 'social_worker')
+);
+
+drop policy if exists "case_notes_select_authorized" on public.case_notes;
+create policy "case_notes_select_authorized"
+on public.case_notes
+for select
+using (
+  public.current_user_is_active()
+  and coalesce(public.current_user_role(), '') in ('admin', 'social_worker')
+);
+
+drop policy if exists "case_notes_insert_authorized" on public.case_notes;
+create policy "case_notes_insert_authorized"
+on public.case_notes
+for insert
+with check (
+  public.current_user_is_active()
+  and coalesce(public.current_user_role(), '') in ('admin', 'social_worker')
+);
+
+drop policy if exists "case_notes_update_authorized" on public.case_notes;
+create policy "case_notes_update_authorized"
+on public.case_notes
+for update
+using (
+  public.current_user_is_active()
+  and coalesce(public.current_user_role(), '') in ('admin', 'social_worker')
+)
+with check (
+  public.current_user_is_active()
+  and coalesce(public.current_user_role(), '') in ('admin', 'social_worker')
+);
+
+-- Solo Parents RLS
+alter table public.solo_parents enable row level security;
+
+drop policy if exists "staff_solo_parents_access" on public.solo_parents;
+create policy "staff_solo_parents_access"
+on public.solo_parents
+for all
+using (
+  exists (
+    select 1 from public.users
+    where users.id = auth.uid()
+      and users.role in ('admin', 'solo_parent_focal', 'social_worker')
+  )
+)
+with check (
+  exists (
+    select 1 from public.users
+    where users.id = auth.uid()
+      and users.role in ('admin', 'solo_parent_focal', 'social_worker')
+  )
+);
+
+drop policy if exists "residents_view_own_solo_parent" on public.solo_parents;
+create policy "residents_view_own_solo_parent"
+on public.solo_parents
+for select
+using (
+  exists (
+    select 1 from public.residents r
+    join public.households h on h.id = r.household_id
+    where r.id = solo_parents.resident_id
+      and h.applicant_user_id = auth.uid()
+  )
+);
+
+-- Forecasting Dataset Uploads RLS
+alter table public.forecasting_dataset_uploads enable row level security;
+
+drop policy if exists "forecasting_dataset_uploads_read" on public.forecasting_dataset_uploads;
+create policy "forecasting_dataset_uploads_read"
+on public.forecasting_dataset_uploads
+for select
+using (
+  public.current_user_is_active()
+  or auth.role() = 'authenticated'
+);
+
+drop policy if exists "forecasting_dataset_uploads_write" on public.forecasting_dataset_uploads;
+create policy "forecasting_dataset_uploads_write"
+on public.forecasting_dataset_uploads
+for all
+using (
+  public.current_user_is_active()
+  or auth.role() = 'authenticated'
+)
+with check (
+  public.current_user_is_active()
+  or auth.role() = 'authenticated'
+);
+
 alter table public.households replica identity full;
 alter table public.residents replica identity full;
 alter table public.vulnerability_flags replica identity full;
@@ -1560,6 +1916,11 @@ alter table public.audit_logs replica identity full;
 alter table public.sync_backups replica identity full;
 alter table public.password_setup_tokens replica identity full;
 alter table public.email_verification_tokens replica identity full;
+alter table public.cases replica identity full;
+alter table public.case_attachments replica identity full;
+alter table public.case_notes replica identity full;
+alter table public.solo_parents replica identity full;
+alter table public.forecasting_dataset_uploads replica identity full;
 
 do $$
 declare
@@ -1582,7 +1943,12 @@ declare
     'distribution_qr_scan_logs',
     'incidents',
     'audit_logs',
-    'sync_backups'
+    'sync_backups',
+    'cases',
+    'case_attachments',
+    'case_notes',
+    'solo_parents',
+    'forecasting_dataset_uploads'
   ];
 begin
   foreach v_table in array v_tables

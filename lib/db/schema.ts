@@ -46,6 +46,7 @@ export type CaseClassification =
   | 'vac_neglect'
   | 'vac_exploitation'
   | 'rape'
+  | 'acts_of_lasciviousness'
   | 'cicl'
   | 'other';
 
@@ -486,6 +487,92 @@ export interface Incident {
   syncStatus: SyncStatus;
 }
 
+export type GeneralIntakeCategory = 'walk_in' | 'referred' | 'rescued';
+
+export type GeneralIntakeSector =
+  | '4ps'
+  | 'children'
+  | 'youth'
+  | 'women'
+  | 'senior_citizen'
+  | 'pwd'
+  | 'solo_parent';
+
+export interface CaseFamilyMember {
+  name: string;
+  age?: number | string;
+  civil_status?: string;
+  relationship: string;
+  educational_attainment?: string;
+  occupation?: string;
+  income?: number | string;
+  birthday?: string;
+}
+
+export interface CaseExpenses {
+  food?: number;
+  water?: number;
+  electricity?: number;
+  education?: number;
+  transportation?: number;
+  total?: number;
+}
+
+export interface CaseAgriculturalProfile {
+  has_land?: boolean;
+  hectares?: string;
+  crops_planted?: string;
+  area_location?: string;
+}
+
+export interface GeneralIntakeSheetData {
+  date_of_interview: string;
+  client_category: GeneralIntakeCategory;
+  sectors: GeneralIntakeSector[];
+  case_category_type: string;
+  case_category_other?: string;
+
+  // I. Identifying Information
+  birthdate?: string;
+  birthplace?: string;
+  length_of_stay?: string;
+  civil_status?: string;
+  educational_attainment?: string;
+  religion?: string;
+  occupation?: string;
+  monthly_income?: number;
+  house_occupancy?: 'owner' | 'renter' | string;
+  estimated_property_damage?: number;
+
+  // Family Members Table (up to 10 rows)
+  family_members: CaseFamilyMember[];
+
+  // Financial Profile
+  sources_of_income?: string;
+  total_family_income?: number;
+  monthly_expenses?: CaseExpenses;
+
+  // Agricultural Land & Outside Assistance
+  agricultural_profile?: CaseAgriculturalProfile;
+  other_sources_of_income?: string;
+  has_sought_outside_assistance?: boolean;
+  outside_assistance_details?: string;
+
+  // Four Clinical Narrative Sections
+  problem_presented?: string;
+  family_background?: string;
+  assessment?: string;
+  recommendation_action?: string;
+
+  // Case Prioritization & Signatures
+  priority_assistance_for?: string;
+  priority_rank?: string;
+  date_interviewed?: string;
+  client_signature_name?: string;
+  mswdo_worker_name?: string;
+  noted_by_name?: string;
+}
+
 export interface CaseRecord {
   id: string;
   case_number: string;
@@ -510,6 +597,7 @@ export interface CaseRecord {
   resident_id?: string;
   household_id?: string;
   source: 'excel_import' | 'manual_intake';
+  intake_sheet?: GeneralIntakeSheetData;
   createdAt: Date | string;
   updatedAt: Date | string;
   syncStatus?: SyncStatus;

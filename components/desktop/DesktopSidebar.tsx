@@ -104,7 +104,7 @@ export default function DesktopSidebar() {
   }
 
   return (
-    <aside className="fixed inset-y-0 left-0 z-30 flex w-72 flex-col border-r border-slate-200/70 bg-[linear-gradient(180deg,rgba(248,251,255,0.98),rgba(239,246,255,0.96))] shadow-[22px_0_60px_-42px_rgba(15,23,42,0.35)] backdrop-blur">
+    <aside className="fixed inset-y-0 left-0 z-30 flex w-72 flex-col border-r border-slate-200/70 bg-[linear-gradient(180deg,rgba(248,251,255,0.98),rgba(239,246,255,0.96))] shadow-[22px_0_60px_-42px_rgba(15,23,42,0.35)] backdrop-blur print:hidden">
       <div className="border-b border-slate-200/70 px-4 pb-4 pt-5">
         <div className="flex items-center gap-3">
           <div className="flex h-12 w-12 items-center justify-center overflow-hidden rounded-[18px] border border-slate-100 bg-white p-1.5 shadow-[0_12px_32px_-16px_rgba(8,47,73,0.2)] transition-transform hover:scale-105">
@@ -151,7 +151,7 @@ export default function DesktopSidebar() {
                     description={item.description}
                     Icon={item.icon}
                     active={isPathActive(pathname, item.href)}
-                    isConfidential={item.href === '/cases'}
+                    isConfidential={item.href === '/cases' || item.href === '/cases/dashboard'}
                   />
                 ))}
               </div>

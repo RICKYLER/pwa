@@ -22,6 +22,7 @@ import {
   ExternalLink,
   Users,
   Search,
+  Printer,
 } from 'lucide-react';
 import type {
   CaseRecord,
@@ -42,6 +43,8 @@ import {
 } from '@/lib/db/cases';
 import { db, STORE_NAMES } from '@/lib/db/indexeddb';
 import { getCurrentUser } from '@/lib/auth';
+import { printGeneralIntakeSheet } from '@/lib/cases/gis-printer';
+import CaseIntakeSheetTab from '@/components/cases/CaseIntakeSheetTab';
 import { cn } from '@/lib/utils';
 
 interface CaseDetailModalProps {
@@ -60,7 +63,9 @@ export default function CaseDetailModal({
   const [caseRecord, setCaseRecord] = useState<CaseRecord | null>(null);
   const [attachments, setAttachments] = useState<CaseAttachment[]>([]);
   const [notes, setNotes] = useState<CaseNote[]>([]);
-  const [activeTab, setActiveTab] = useState<'overview' | 'attachments' | 'notes' | 'census'>('overview');
+  const [activeTab, setActiveTab] = useState<
+    'overview' | 'intake_sheet' | 'attachments' | 'notes' | 'census'
+  >('overview');
   const [isLoading, setIsLoading] = useState(false);
 
   // New Note state
@@ -295,6 +300,19 @@ export default function CaseDetailModal({
             </div>
 
             <div className="flex items-center gap-3">
+              {/* Quick Print Official GIS */}
+              {caseRecord && (
+                <button
+                  type="button"
+                  onClick={() => printGeneralIntakeSheet(caseRecord)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-xl bg-amber-600 hover:bg-amber-700 text-white shadow-sm transition"
+                  title="Print Official 2-Page General Intake Sheet (GIS)"
+                >
+                  <Printer className="h-3.5 w-3.5" />
+                  <span className="hidden sm:inline">Print GIS</span>
+                </button>
+              )}
+
               {/* Status Selector */}
               {caseRecord && (
                 <select
@@ -336,11 +354,11 @@ export default function CaseDetailModal({
           </div>
 
           {/* Navigation Tabs */}
-          <div className="flex items-center gap-1 mt-4 -mb-4 border-b border-slate-200 text-xs font-semibold">
+          <div className="flex items-center gap-1 mt-4 -mb-4 border-b border-slate-200 text-xs font-semibold overflow-x-auto">
             <button
               onClick={() => setActiveTab('overview')}
               className={cn(
-                'px-4 py-2.5 border-b-2 transition flex items-center gap-1.5',
+                'px-4 py-2.5 border-b-2 transition flex items-center gap-1.5 whitespace-nowrap',
                 activeTab === 'overview'
                   ? 'border-amber-600 text-amber-700 font-bold'
                   : 'border-transparent text-slate-500 hover:text-slate-800',
@@ -350,9 +368,21 @@ export default function CaseDetailModal({
               Case Overview
             </button>
             <button
+              onClick={() => setActiveTab('intake_sheet')}
+              className={cn(
+                'px-4 py-2.5 border-b-2 transition flex items-center gap-1.5 whitespace-nowrap',
+                activeTab === 'intake_sheet'
+                  ? 'border-amber-600 text-amber-700 font-bold'
+                  : 'border-transparent text-slate-500 hover:text-slate-800',
+              )}
+            >
+              <FileText className="h-4 w-4 text-amber-600" />
+              General Intake Sheet (GIS)
+            </button>
+            <button
               onClick={() => setActiveTab('attachments')}
               className={cn(
-                'px-4 py-2.5 border-b-2 transition flex items-center gap-1.5',
+                'px-4 py-2.5 border-b-2 transition flex items-center gap-1.5 whitespace-nowrap',
                 activeTab === 'attachments'
                   ? 'border-amber-600 text-amber-700 font-bold'
                   : 'border-transparent text-slate-500 hover:text-slate-800',
@@ -483,6 +513,17 @@ export default function CaseDetailModal({
                     </div>
                   </div>
                 </div>
+              )}
+
+              {/* TAB: GENERAL INTAKE SHEET (GIS) */}
+              {activeTab === 'intake_sheet' && caseRecord && (
+                <CaseIntakeSheetTab
+                  caseRecord={caseRecord}
+                  onCaseUpdated={(updated) => {
+                    setCaseRecord(updated);
+                    onCaseUpdated?.();
+                  }}
+                />
               )}
 
               {/* TAB 2: SCANNED ATTACHMENTS */}
