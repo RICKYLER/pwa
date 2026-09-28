@@ -265,19 +265,11 @@ function SoloParentVerificationContent() {
               : 'bg-gradient-to-b from-amber-500/15 via-amber-500/5 to-white'
           }`}
         >
-          {/* Background Decorative Rings */}
-          <div className="absolute inset-0 flex items-center justify-center pointer-events-none opacity-20">
-            <div className="w-64 h-64 rounded-full border-2 border-dashed border-current animate-[spin_40s_linear_infinite]" />
-          </div>
-
           {/* BADGE 1: OFFICIAL & VALID SOLO PARENT ID */}
           {isValidActive && (
             <div className="flex flex-col items-center relative z-10">
-              <div className="relative mb-3">
-                {/* Concentric Pulsing Radar Rings */}
-                <div className="absolute -inset-3 bg-emerald-500/20 rounded-full animate-ping pointer-events-none" />
-                <div className="absolute -inset-1.5 bg-emerald-500/30 rounded-full animate-pulse pointer-events-none" />
-                <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-full bg-gradient-to-tr from-emerald-600 to-teal-500 text-white flex items-center justify-center shadow-xl shadow-emerald-600/30 relative">
+              <div className="mb-3">
+                <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-full bg-gradient-to-tr from-emerald-600 to-teal-500 text-white flex items-center justify-center shadow-xl shadow-emerald-600/30">
                   <CheckCircle2 className="w-12 h-12 sm:w-14 sm:h-14 stroke-[2.5]" />
                 </div>
               </div>
@@ -300,9 +292,8 @@ function SoloParentVerificationContent() {
           {/* BADGE 2: REVOKED / CANCELLED */}
           {isRevoked && (
             <div className="flex flex-col items-center relative z-10">
-              <div className="relative mb-3">
-                <div className="absolute -inset-3 bg-rose-500/25 rounded-full animate-ping pointer-events-none" />
-                <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-full bg-gradient-to-tr from-rose-600 to-red-500 text-white flex items-center justify-center shadow-xl shadow-rose-600/30 relative">
+              <div className="mb-3">
+                <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-full bg-gradient-to-tr from-rose-600 to-red-500 text-white flex items-center justify-center shadow-xl shadow-rose-600/30">
                   <ShieldAlert className="w-12 h-12 sm:w-14 sm:h-14 stroke-[2.5]" />
                 </div>
               </div>
@@ -336,9 +327,8 @@ function SoloParentVerificationContent() {
           {/* BADGE 3: EXPIRED ID */}
           {isExpired && !isRevoked && (
             <div className="flex flex-col items-center relative z-10">
-              <div className="relative mb-3">
-                <div className="absolute -inset-2 bg-amber-500/25 rounded-full animate-pulse pointer-events-none" />
-                <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-full bg-gradient-to-tr from-amber-600 to-yellow-500 text-white flex items-center justify-center shadow-xl shadow-amber-600/30 relative">
+              <div className="mb-3">
+                <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-full bg-gradient-to-tr from-amber-600 to-yellow-500 text-white flex items-center justify-center shadow-xl shadow-amber-600/30">
                   <AlertTriangle className="w-12 h-12 sm:w-14 sm:h-14 stroke-[2.5]" />
                 </div>
               </div>
