@@ -599,6 +599,9 @@ export default function NewCaseModal({
                       onChange={(e) => {
                         const val = e.target.value;
                         setCaseCategoryType(val);
+                        if (val !== 'other') {
+                          setCaseCategoryOther('');
+                        }
                         if (val === 'vawc') setCaseType('vawc_physical');
                         else if (val === 'rape') setCaseType('rape');
                         else if (val === 'child_custody' || val === 'child_support') setCaseType('vac_abuse');
@@ -620,25 +623,18 @@ export default function NewCaseModal({
                       <option value="other">Others (Specify)</option>
                     </select>
 
-                    {/* Pop-up input right under Case Category when Others is selected */}
-                    {(caseCategoryType === 'other' ||
-                      caseCategoryType === 'permit_to_travel' ||
-                      caseCategoryType === 'indigency' ||
-                      caseCategoryType === 'scsr' ||
-                      caseCategoryType === 'adoption' ||
-                      caseCategoryType === 'trafficking' ||
-                      caseCategoryType === 'osaec_csaem' ||
-                      Boolean(caseCategoryOther)) && (
+                    {/* Pop-up input right under Case Category ONLY when Others is selected */}
+                    {caseCategoryType === 'other' && (
                       <div className="pt-1.5 space-y-1 animate-in fade-in slide-in-from-top-1 duration-150">
                         <label className="text-[11px] font-bold text-amber-900 block">
-                          Specify Others / I-type ang Kategorya:
+                          Specify Other Category:
                         </label>
                         <input
                           type="text"
                           autoFocus
                           value={caseCategoryOther}
                           onChange={(e) => setCaseCategoryOther(e.target.value)}
-                          placeholder="I-type diri ang category..."
+                          placeholder="Please specify case category..."
                           className="w-full p-2 text-xs rounded-xl border-2 border-amber-500 bg-amber-50/50 text-slate-900 font-medium focus:ring-2 focus:ring-amber-500 focus:bg-white outline-none"
                         />
                       </div>

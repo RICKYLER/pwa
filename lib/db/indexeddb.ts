@@ -27,6 +27,8 @@ export const STORE_NAMES = {
   case_attachments: 'case_attachments',
   case_notes: 'case_notes',
   solo_parents: 'solo_parents',
+  aics_records: 'aics_records',
+  aics_daily_budgets: 'aics_daily_budgets',
   sync_queue: 'sync_queue',
 } as const;
 
@@ -51,6 +53,8 @@ const SYNC_TRACKED_STORES = new Set<string>([
   STORE_NAMES.cases,
   STORE_NAMES.case_attachments,
   STORE_NAMES.case_notes,
+  STORE_NAMES.aics_records,
+  STORE_NAMES.aics_daily_budgets,
 ]);
 
 const ALL_STORE_NAMES = Object.values(STORE_NAMES);
@@ -401,6 +405,7 @@ export class IndexedDBManager {
       });
     }
 
+    void saveStoreToCacheDb(storeName, Array.from(this.getStore(storeName).values()));
     return cloneValue(data);
   }
 
@@ -419,14 +424,16 @@ export class IndexedDBManager {
     try {
       await this.queueSyncMutation(
         storeName,
-        'update',
+        existingRecord ? 'update' : 'create',
         data,
         existingRecord as Record<string, any> | undefined,
       );
     } catch (error) {
-      console.error(`Failed to queue update mutation for ${storeName}:`, error);
+      console.error(`Failed to queue ${existingRecord ? 'update' : 'create'} mutation for ${storeName}:`, error);
       if (existingRecord && typeof data.id === 'string') {
         this.getStore(storeName).set(data.id, cloneValue(existingRecord as Record<string, any>));
+      } else if (typeof data.id === 'string') {
+        this.getStore(storeName).delete(data.id);
       }
       throw error;
     }

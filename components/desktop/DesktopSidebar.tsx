@@ -93,7 +93,10 @@ export default function DesktopSidebar() {
   const router = useRouter();
   const user = getCurrentUser();
 
-  const visibleItems = STAFF_NAV_ITEMS.filter((item) => !item.perm || hasPermission(item.perm as never));
+  const visibleItems = STAFF_NAV_ITEMS.filter((item) => {
+    if (user?.role === 'admin') return true;
+    return !item.perm || hasPermission(item.perm as never);
+  });
   const adminItems = user?.role === 'admin' ? ADMIN_NAV_ITEMS : [];
   const pendingApprovals = usePendingMemberApprovalCount();
   const pendingLocationReviews = usePendingLocationReviewCount();

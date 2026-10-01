@@ -27,7 +27,9 @@ where table_schema = 'public'
     'case_attachments',
     'case_notes',
     'solo_parents',
-    'forecasting_dataset_uploads'
+    'forecasting_dataset_uploads',
+    'aics_records',
+    'aics_daily_budgets'
   )
 order by table_name;
 
@@ -53,6 +55,8 @@ where schemaname = 'public'
     'case_attachments',
     'case_notes',
     'solo_parents',
-    'forecasting_dataset_uploads'
+    'forecasting_dataset_uploads',
+    'aics_records',
+    'aics_daily_budgets'
   )
 order by tablename;

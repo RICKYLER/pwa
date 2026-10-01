@@ -20,6 +20,8 @@ export function getRealtimeTopicsForUser(user: User | null | undefined): string[
         'role:admin:distribution',
         'role:admin:incidents',
         'role:admin:audit',
+        'role:admin:cases',
+        'role:social_worker:cases',
         `user:${user.id}:notifications`,
       ]);
     case 'encoder':
@@ -56,6 +58,13 @@ export function getRealtimeTopicsForUser(user: User | null | undefined): string[
         ...topics,
         `barangay:${user.barangay_id}:registry`,
         'role:solo_parent_focal:registry',
+        `user:${user.id}:notifications`,
+      ]);
+    case 'aics_focal':
+      return uniqueTopics([
+        ...topics,
+        `barangay:${user.barangay_id}:registry`,
+        'role:aics_focal:assistance',
         `user:${user.id}:notifications`,
       ]);
     default:

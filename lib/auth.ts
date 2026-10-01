@@ -38,6 +38,18 @@ const PERMISSIONS = {
     'manage_solo_parents',
     'revoke_solo_parents',
     'delete_solo_parents',
+    'view_aics',
+    'manage_aics',
+    'disburse_aics',
+    'export_aics',
+  ],
+  aics_focal: [
+    'view_aics',
+    'manage_aics',
+    'disburse_aics',
+    'export_aics',
+    'view_residents',
+    'view_households',
   ],
   social_worker: [
     'view_cases',
@@ -224,6 +236,9 @@ export function setAuthenticatedUser(user: User | null) {
  * Get current authenticated user
  */
 export function getCurrentUser(): User | null {
+  if (!currentUser && canUseStorage()) {
+    restoreStoredSessionSnapshot();
+  }
   return currentUser;
 }
 
@@ -231,24 +246,29 @@ export function getCurrentUser(): User | null {
  * Get current user's role
  */
 export function getCurrentRole(): UserRole | null {
-  return currentUser?.role || null;
+  const user = getCurrentUser();
+  return user?.role || null;
 }
 
 /**
  * Check if user has a specific role
  */
 export function hasRole(role: UserRole | UserRole[]): boolean {
-  if (!currentUser) return false;
+  const user = getCurrentUser();
+  if (!user) return false;
   const roles = Array.isArray(role) ? role : [role];
-  return roles.includes(currentUser.role);
+  return roles.includes(user.role);
 }
 
 /**
  * Check if user has permission for an action
  */
 export function hasPermission(action: string): boolean {
-  if (!currentUser) return false;
-  const rolePermissions = PERMISSIONS[currentUser.role];
+  const user = getCurrentUser();
+  if (!user) return false;
+  if (user.role === 'admin') return true;
+  const rolePermissions = PERMISSIONS[user.role];
+  if (!rolePermissions) return false;
   return rolePermissions.includes(action) || rolePermissions.includes('view_all');
 }
 
@@ -260,6 +280,7 @@ export function getDefaultRouteForUser(user: User | null | undefined): string {
   if (!user) return '/login';
   if (user.role === 'resident') return '/resident';
   if (user.role === 'solo_parent_focal') return '/solo-parents';
+  if (user.role === 'aics_focal') return '/aics';
   if (user.role === 'social_worker') return '/cases';
   if (user.role === 'responder') return '/responder';
   return '/dashboard';

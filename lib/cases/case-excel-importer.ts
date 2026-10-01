@@ -1,4 +1,4 @@
-import * as XLSX from 'xlsx';
+import * as XLSX from 'xlsx-js-style';
 import type {
   CaseRecord,
   CaseClassification,
@@ -6,6 +6,11 @@ import type {
   Gender,
 } from '@/lib/db/schema';
 import { BARANGAY_REGISTRY } from '@/lib/mabini-barangays';
+import {
+  downloadBlankVacTemplate,
+  downloadBlankVawcTemplate,
+  downloadBlankCustodySupportTemplate,
+} from '@/lib/cases/case-templates-exporter';
 
 export const CASE_TEMPLATE_HEADERS = [
   'Case Number',
@@ -37,14 +42,16 @@ export interface CaseImportResult {
   rawRows?: (string | number)[][];
 }
 
+const CURRENT_YEAR = new Date().getFullYear();
+
 /**
  * Sample rows used in the downloadable Excel / CSV template
  */
 export const SAMPLE_CASE_ROWS: (string | number)[][] = [
   [
-    'VAWC-2024-001',
-    '2024-01-15',
-    '2024-01-14',
+    `VAWC-${CURRENT_YEAR}-001`,
+    `${CURRENT_YEAR}-01-15`,
+    `${CURRENT_YEAR}-01-14`,
     'VAWC (RA 9262) - Physical',
     'Maria Santos',
     34,
@@ -60,9 +67,9 @@ export const SAMPLE_CASE_ROWS: (string | number)[][] = [
     'Assisted in Barangay Protection Order (BPO) application; scheduled psychosocial intake.',
   ],
   [
-    'VAC-2024-002',
-    '2024-02-03',
-    '2024-02-01',
+    `VAC-${CURRENT_YEAR}-002`,
+    `${CURRENT_YEAR}-02-03`,
+    `${CURRENT_YEAR}-02-01`,
     'VAC (RA 7610) - Child Neglect',
     'Minor A. D.',
     9,
@@ -78,9 +85,9 @@ export const SAMPLE_CASE_ROWS: (string | number)[][] = [
     'Home visit conducted with Barangay Kagawad on Women & Family; temporary foster placement explored.',
   ],
   [
-    'RAPE-2024-003',
-    '2024-03-10',
-    '2024-03-08',
+    `RAPE-${CURRENT_YEAR}-003`,
+    `${CURRENT_YEAR}-03-10`,
+    `${CURRENT_YEAR}-03-08`,
     'Rape',
     'Jane Doe (Confidential)',
     17,
@@ -96,9 +103,9 @@ export const SAMPLE_CASE_ROWS: (string | number)[][] = [
     'Accompanied to Davao de Oro Provincial Hospital for medico-legal; case endorsed to PNP WCPD.',
   ],
   [
-    'VAWC-2024-004',
-    '2024-04-18',
-    '2024-04-18',
+    `VAWC-${CURRENT_YEAR}-004`,
+    `${CURRENT_YEAR}-09-25`,
+    `${CURRENT_YEAR}-09-25`,
     'VAWC (RA 9262) - Economic Abuse',
     'Luzviminda Reyes',
     29,
@@ -116,10 +123,53 @@ export const SAMPLE_CASE_ROWS: (string | number)[][] = [
 ];
 
 /**
- * Builds an Excel workbook for download
+ * Builds an Excel workbook for download with clean header styling and borders
  */
 export function buildCaseExcelWorkbook(): XLSX.WorkBook {
-  const ws = XLSX.utils.aoa_to_sheet([CASE_TEMPLATE_HEADERS, ...SAMPLE_CASE_ROWS]);
+  const ws: XLSX.WorkSheet = {};
+  const borderThin = {
+    top: { style: 'thin', color: { rgb: '000000' } },
+    bottom: { style: 'thin', color: { rgb: '000000' } },
+    left: { style: 'thin', color: { rgb: '000000' } },
+    right: { style: 'thin', color: { rgb: '000000' } },
+  };
+
+  // Header row
+  CASE_TEMPLATE_HEADERS.forEach((header, c) => {
+    const ref = XLSX.utils.encode_cell({ r: 0, c });
+    ws[ref] = {
+      v: header,
+      t: 's',
+      s: {
+        font: { name: 'Calibri', sz: 9.5, bold: true, color: { rgb: '78350F' } },
+        alignment: { horizontal: 'center', vertical: 'center', wrapText: true },
+        fill: { fgColor: { rgb: 'FEF3C7' } },
+        border: borderThin,
+      },
+    };
+  });
+
+  // Sample data rows
+  SAMPLE_CASE_ROWS.forEach((row, rIdx) => {
+    const r = rIdx + 1;
+    row.forEach((val, c) => {
+      const ref = XLSX.utils.encode_cell({ r, c });
+      const isNum = typeof val === 'number';
+      ws[ref] = {
+        v: val,
+        t: isNum ? 'n' : 's',
+        s: {
+          font: { name: 'Calibri', sz: 9 },
+          alignment: {
+            horizontal: isNum || c === 1 || c === 2 || c === 6 ? 'center' : 'left',
+            vertical: 'center',
+          },
+          border: borderThin,
+        },
+      };
+    });
+  });
+
   ws['!cols'] = [
     { wch: 18 }, // Case Number
     { wch: 16 }, // Date Reported
@@ -138,6 +188,12 @@ export function buildCaseExcelWorkbook(): XLSX.WorkBook {
     { wch: 22 }, // Assigned Social Worker
     { wch: 45 }, // Intake Notes
   ];
+
+  ws['!rows'] = [{ hpx: 30 }, ...SAMPLE_CASE_ROWS.map(() => ({ hpx: 22 }))];
+  ws['!ref'] = XLSX.utils.encode_range({
+    s: { r: 0, c: 0 },
+    e: { r: SAMPLE_CASE_ROWS.length, c: CASE_TEMPLATE_HEADERS.length - 1 },
+  });
 
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'MSWDO Case Records');
@@ -158,6 +214,27 @@ export function downloadCaseExcelTemplate(): void {
     console.warn('Falling back to CSV download:', err);
     downloadCaseCsvTemplate();
   }
+}
+
+/**
+ * Downloads the official VAC Monitoring Form template with full pastel color styling
+ */
+export function downloadVacExcelTemplate(): void {
+  downloadBlankVacTemplate();
+}
+
+/**
+ * Downloads the official VAWC Registry template (RA 9262) with royal purple styling
+ */
+export function downloadVawcExcelTemplate(): void {
+  downloadBlankVawcTemplate();
+}
+
+/**
+ * Downloads the official Child Custody & Support template with soft emerald styling
+ */
+export function downloadCustodySupportExcelTemplate(): void {
+  downloadBlankCustodySupportTemplate();
 }
 
 /**
@@ -295,6 +372,190 @@ function findColIndex(headers: string[], aliases: string[]): number {
 }
 
 /**
+ * Specialized parser for official DILG/BCPC VAC Monitoring Form (both Two-Tier and Wide formats)
+ */
+function parseVacMonitoringSheet(
+  rows: (string | number)[][],
+  warnings: string[]
+): Array<Omit<CaseRecord, 'id' | 'createdAt' | 'updatedAt'>> {
+  const parsedCases: Array<Omit<CaseRecord, 'id' | 'createdAt' | 'updatedAt'>> = [];
+
+  // Check if Two-Tier layout: find where PERPETRATORS appears in row 4+
+  let s2HeaderIdx = -1;
+  for (let r = 2; r < rows.length; r++) {
+    const rowStr = rows[r].map((v) => String(v || '').toLowerCase()).join(' ');
+    if (
+      rowStr.includes('perpetrator') &&
+      (rowStr.includes('immediate family') || rowStr.includes('actions taken') || rowStr.includes('5a') || rowStr.includes('remarks'))
+    ) {
+      s2HeaderIdx = r;
+      break;
+    }
+  }
+
+  if (s2HeaderIdx > 2) {
+    // Two-Tier Layout:
+    const sec1Rows = rows.slice(2, s2HeaderIdx);
+    const sec2Rows = rows.slice(s2HeaderIdx + 2);
+
+    const sec2Map = new Map<number, (string | number)[]>();
+    sec2Rows.forEach((r, idx) => {
+      const seq = parseInt(String(r[0]), 10);
+      const key = isNaN(seq) ? idx + 1 : seq;
+      sec2Map.set(key, r);
+    });
+
+    sec1Rows.forEach((r, idx) => {
+      const seq = parseInt(String(r[0]), 10);
+      const key = isNaN(seq) ? idx + 1 : seq;
+
+      const first = String(r[5] || '').trim();
+      const middle = String(r[6] || '').trim();
+      const last = String(r[7] || '').trim();
+      const ext = String(r[8] || '').trim();
+      const fullName = [first, middle, last, ext].filter(Boolean).join(' ');
+
+      if (!fullName) return;
+
+      const reportedAt = parseDateClean(r[1]);
+      const rawBrgy = String(r[2] || '').trim();
+      const barangayId = resolveCaseBarangay(rawBrgy);
+      const incidentDate = r[3] ? parseDateClean(r[3]) : reportedAt;
+
+      const isMale = String(r[9] || '').trim() === '1' || String(r[9] || '').toUpperCase().startsWith('M');
+      const gender: Gender = isMale ? 'M' : 'F';
+      const rawAge = parseInt(String(r[11]).replace(/[^0-9]/g, ''), 10);
+      const age = isNaN(rawAge) ? undefined : rawAge;
+
+      let caseType: CaseClassification = 'vac_abuse';
+      if (String(r[13] || '').trim() === '1') caseType = 'vawc_sexual';
+      else if (String(r[12] || '').trim() === '1') caseType = 'vawc_physical';
+      else if (String(r[14] || '').trim() === '1') caseType = 'vawc_psychological';
+      else if (String(r[15] || '').trim() === '1') caseType = 'vac_neglect';
+      else if (String(r[16] || '').trim() === '1') caseType = 'other';
+
+      const s2Row = sec2Map.get(key) || [];
+      const perpName = String(s2Row[22] || '').trim() || undefined;
+
+      let perpRel = '';
+      if (String(s2Row[15] || '').trim() === '1') perpRel = 'Immediate Family Member';
+      else if (String(s2Row[16] || '').trim() === '1') perpRel = 'Close Relative';
+      else if (String(s2Row[17] || '').trim() === '1') perpRel = 'Acquaintance';
+      else if (String(s2Row[18] || '').trim() === '1') perpRel = 'Stranger';
+      else if (String(s2Row[19] || '').trim() === '1') perpRel = 'Local Official';
+      else if (String(s2Row[20] || '').trim() === '1') perpRel = 'Law Enforcer';
+      else if (String(s2Row[21] || '').trim() === '1') perpRel = 'Others (Guardian)';
+
+      const actionsTaken: string[] = [];
+      if (String(s2Row[23] || '').trim() === '1') actionsTaken.push('Referred to LSWDO (6a)');
+      if (String(s2Row[24] || '').trim() === '1') actionsTaken.push('Referred to PNP (6b)');
+      if (String(s2Row[25] || '').trim() === '1') actionsTaken.push('Referred to NBI (6c)');
+      if (String(s2Row[26] || '').trim() === '1') actionsTaken.push('Medical Treatment (6d)');
+      if (String(s2Row[27] || '').trim() === '1') actionsTaken.push('Legal Assistance (6e)');
+      if (String(s2Row[28] || '').trim() === '1') actionsTaken.push('Referred to NGOs/FBOs (6f)');
+
+      const summaryNote = String(s2Row[14] || '').trim();
+      const statusNote = String(s2Row[29] || '').trim();
+      const status = normalizeCaseStatus(statusNote || actionsTaken.join(', '));
+      const caseNumber = `VAC-${reportedAt.slice(0, 4)}-${String(key).padStart(3, '0')}`;
+
+      parsedCases.push({
+        case_number: caseNumber,
+        case_type: caseType,
+        reported_at: reportedAt,
+        incident_date: incidentDate,
+        victim_name: fullName,
+        victim_age: age,
+        victim_gender: gender,
+        barangay_id: barangayId,
+        perpetrator_name: perpName,
+        perpetrator_relationship: perpRel || undefined,
+        status,
+        case_summary: summaryNote || `VAC incident report for ${fullName}`,
+        intake_notes: actionsTaken.length > 0 ? actionsTaken.join('; ') : undefined,
+        source: 'excel_import',
+        syncStatus: 'pending',
+      });
+    });
+
+    return parsedCases;
+  }
+
+  // Wide Layout (Sheet 2 or single row continuous format)
+  const dataRows = rows.slice(2);
+  dataRows.forEach((r, idx) => {
+    const seq = parseInt(String(r[0]), 10);
+    const first = String(r[5] || '').trim();
+    const middle = String(r[6] || '').trim();
+    const last = String(r[7] || '').trim();
+    const ext = String(r[8] || '').trim();
+    const fullName = [first, middle, last, ext].filter(Boolean).join(' ');
+
+    if (!fullName) return;
+
+    const reportedAt = parseDateClean(r[1]);
+    const rawBrgy = String(r[2] || '').trim();
+    const barangayId = resolveCaseBarangay(rawBrgy);
+    const incidentDate = r[3] ? parseDateClean(r[3]) : reportedAt;
+
+    const isMale = String(r[9] || '').trim() === '1' || String(r[9] || '').toUpperCase().startsWith('M');
+    const gender: Gender = isMale ? 'M' : 'F';
+    const rawAge = parseInt(String(r[11]).replace(/[^0-9]/g, ''), 10);
+    const age = isNaN(rawAge) ? undefined : rawAge;
+
+    let caseType: CaseClassification = 'vac_abuse';
+    if (String(r[13] || '').trim() === '1') caseType = 'vawc_sexual';
+    else if (String(r[12] || '').trim() === '1') caseType = 'vawc_physical';
+    else if (String(r[14] || '').trim() === '1') caseType = 'vawc_psychological';
+    else if (String(r[15] || '').trim() === '1') caseType = 'vac_neglect';
+    else if (String(r[16] || '').trim() === '1') caseType = 'other';
+
+    let perpRel = '';
+    if (String(r[17] || '').trim() === '1') perpRel = 'Immediate Family Member';
+    else if (String(r[18] || '').trim() === '1') perpRel = 'Close Relative';
+    else if (String(r[19] || '').trim() === '1') perpRel = 'Acquaintance';
+    else if (String(r[20] || '').trim() === '1') perpRel = 'Stranger';
+    else if (String(r[21] || '').trim() === '1') perpRel = 'Local Official';
+    else if (String(r[22] || '').trim() === '1') perpRel = 'Law Enforcer';
+    else if (String(r[23] || '').trim() === '1') perpRel = 'Others (Guardian)';
+
+    const perpName = String(r[24] || '').trim() || undefined;
+
+    const actionsTaken: string[] = [];
+    if (String(r[25] || '').trim() === '1') actionsTaken.push('Referred to LSWDO (6a)');
+    if (String(r[26] || '').trim() === '1') actionsTaken.push('Referred to PNP (6b)');
+    if (String(r[27] || '').trim() === '1') actionsTaken.push('Referred to NBI (6c)');
+    if (String(r[28] || '').trim() === '1') actionsTaken.push('Medical Treatment (6d)');
+    if (String(r[29] || '').trim() === '1') actionsTaken.push('Legal Assistance (6e)');
+    if (String(r[30] || '').trim() === '1') actionsTaken.push('Referred to NGOs/FBOs (6f)');
+
+    const remarks = String(r[31] || '').trim();
+    const status = normalizeCaseStatus(remarks || actionsTaken.join(', '));
+    const caseNumber = `VAC-${reportedAt.slice(0, 4)}-${String(isNaN(seq) ? idx + 1 : seq).padStart(3, '0')}`;
+
+    parsedCases.push({
+      case_number: caseNumber,
+      case_type: caseType,
+      reported_at: reportedAt,
+      incident_date: incidentDate,
+      victim_name: fullName,
+      victim_age: age,
+      victim_gender: gender,
+      barangay_id: barangayId,
+      perpetrator_name: perpName,
+      perpetrator_relationship: perpRel || undefined,
+      status,
+      case_summary: remarks || `VAC incident report for ${fullName}`,
+      intake_notes: actionsTaken.length > 0 ? actionsTaken.join('; ') : undefined,
+      source: 'excel_import',
+      syncStatus: 'pending',
+    });
+  });
+
+  return parsedCases;
+}
+
+/**
  * Parses and cleanses raw spreadsheet binary buffer, array buffer, or CSV text
  */
 export function parseAndCleanseCaseFile(
@@ -335,7 +596,13 @@ export function parseAndCleanseCaseFile(
     };
   }
 
-  const sheet = workbook.Sheets[firstSheetName];
+  // Prioritize VAC Monitoring Form sheet if present
+  const vacSheetName = workbook.SheetNames.find(
+    (s) => s.toLowerCase().includes('vac') || s.toLowerCase().includes('monitoring')
+  );
+  const targetSheetName = vacSheetName || firstSheetName;
+  const sheet = workbook.Sheets[targetSheetName];
+
   const rows: (string | number)[][] = XLSX.utils.sheet_to_json(sheet, {
     header: 1,
     defval: '',
@@ -353,8 +620,65 @@ export function parseAndCleanseCaseFile(
     };
   }
 
-  const headers = rows[0].map((h) => String(h || '').trim());
-  const dataRows = rows.slice(1);
+  // Check if this sheet is an official VAC Monitoring Form
+  const topRowsJoined = rows
+    .slice(0, 3)
+    .map((r) => r.map((c) => String(c || '').toLowerCase()).join(' '))
+    .join(' ');
+  const isVacForm =
+    topRowsJoined.includes('types of violence') ||
+    topRowsJoined.includes('vac victims') ||
+    targetSheetName.toLowerCase().includes('vac monitoring') ||
+    targetSheetName.toLowerCase().includes('vac master') ||
+    (topRowsJoined.includes('perpetrators') && topRowsJoined.includes('actions taken'));
+
+  if (isVacForm) {
+    const vacCases = parseVacMonitoringSheet(rows, warnings);
+    return {
+      success: vacCases.length > 0,
+      totalRows: vacCases.length,
+      validCount: vacCases.length,
+      cases: vacCases,
+      errors:
+        vacCases.length === 0
+          ? ['The uploaded VAC Monitoring Form does not contain any filled child victim records.']
+          : [],
+      warnings,
+      rawHeaders: rows[0].map(String),
+      rawRows: rows.slice(1),
+    };
+  }
+
+  // Find the true header row index (accounts for title banners or group headers in rows 0-2)
+  let headerRowIdx = 0;
+  let maxMatchedCols = 0;
+  for (let r = 0; r < Math.min(4, rows.length); r++) {
+    const candidateHeaders = rows[r].map((h) => String(h || '').trim().toLowerCase());
+    let matches = 0;
+    candidateHeaders.forEach((h) => {
+      if (
+        h.includes('case') ||
+        h.includes('date') ||
+        h.includes('victim') ||
+        h.includes('survivor') ||
+        h.includes('client') ||
+        h.includes('complainant') ||
+        h.includes('child name') ||
+        h.includes('perpetrator') ||
+        h.includes('respondent') ||
+        h.includes('barangay')
+      ) {
+        matches++;
+      }
+    });
+    if (matches > maxMatchedCols) {
+      maxMatchedCols = matches;
+      headerRowIdx = r;
+    }
+  }
+
+  const headers = rows[headerRowIdx].map((h) => String(h || '').trim());
+  const dataRows = rows.slice(headerRowIdx + 1);
 
   // Column matching with flexible aliases
   const colCaseNo = findColIndex(headers, [
@@ -372,6 +696,7 @@ export function parseAndCleanseCaseFile(
     'reported at',
     'reported date',
     'intake date',
+    'filing date',
     'petsa sa report',
     'date_reported',
     'date',
@@ -389,6 +714,7 @@ export function parseAndCleanseCaseFile(
     'type',
     'violation',
     'crime',
+    'nature of dispute',
     'klase sa kaso',
     'category',
   ]);
@@ -400,12 +726,19 @@ export function parseAndCleanseCaseFile(
     'ngalan sa biktima',
     'victim name',
     'client full name',
+    'survivor full name',
+    'survivor name',
+    'survivor',
+    'child name',
+    'child',
+    'beneficiary',
+    'custodial parent name',
     'name',
   ]);
   const colAge = findColIndex(headers, ['age', 'edad', 'victim age', 'client age']);
   const colGender = findColIndex(headers, ['gender', 'sex', 'kasarian']);
-  const colContact = findColIndex(headers, ['contact', 'contact number', 'phone', 'cellphone', 'mobile']);
-  const colAddress = findColIndex(headers, ['address', 'purok', 'sitio', 'street', 'tirahan']);
+  const colContact = findColIndex(headers, ['contact', 'contact number', 'contact no.', 'phone', 'cellphone', 'mobile']);
+  const colAddress = findColIndex(headers, ['address', 'purok', 'sitio', 'street', 'tirahan', 'purok / address']);
   const colBarangay = findColIndex(headers, ['barangay', 'brgy', 'barangay name']);
   const colPerpetrator = findColIndex(headers, [
     'perpetrator',
@@ -415,6 +748,8 @@ export function parseAndCleanseCaseFile(
     'reklamado',
     'alleged perpetrator',
     'perpetrator name',
+    'respondent name',
+    'respondent / perpetrator',
   ]);
   const colRelationship = findColIndex(headers, [
     'relationship',
@@ -422,7 +757,7 @@ export function parseAndCleanseCaseFile(
     'relasyon',
     'relationship to victim',
   ]);
-  const colStatus = findColIndex(headers, ['status', 'case status', 'kahimtang']);
+  const colStatus = findColIndex(headers, ['status', 'case status', 'current status', 'status of agreement', 'kahimtang']);
   const colSummary = findColIndex(headers, [
     'case summary',
     'summary',
@@ -431,6 +766,8 @@ export function parseAndCleanseCaseFile(
     'details',
     'remarks',
     'description',
+    'remarks & monitoring',
+    'remarks / action plan',
   ]);
   const colWorker = findColIndex(headers, [
     'assigned social worker',
@@ -445,6 +782,7 @@ export function parseAndCleanseCaseFile(
     'notes',
     'actions taken',
     'action taken',
+    'action taken / referral',
     'rekomendasyon',
   ]);
 

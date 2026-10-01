@@ -193,9 +193,10 @@ export default function CasesMobile() {
     const counts: Record<MainCategoryTab, number> = {
       all: cases.length,
       vawc: 0,
+      child_abuse_vac: 0,
+      child_custody_support: 0,
       rape: 0,
       acts_of_lasciviousness: 0,
-      child_abuse_vac: 0,
       other: 0,
     };
     for (const c of cases) {
@@ -325,13 +326,13 @@ export default function CasesMobile() {
             New Intake
           </button>
         </div>
-        {/* VAC Logbook Download */}
+        {/* VAC Monitoring Form Download */}
         <button
           onClick={handleDownloadVacLogbook}
-          className="w-full flex items-center justify-center gap-1.5 py-2 px-3 text-xs font-bold rounded-xl bg-emerald-700/40 border border-emerald-500/30 text-emerald-200 hover:bg-emerald-600/50 transition"
+          className="w-full flex items-center justify-center gap-1.5 py-2 px-3 text-xs font-bold rounded-xl bg-blue-700/40 border border-blue-500/30 text-blue-200 hover:bg-blue-600/50 transition cursor-pointer"
         >
           <Download className="h-3.5 w-3.5" />
-          Download VAC Logbook (DILG/BCPC RA 7610 Format)
+          Download VAC Monitoring Form (Official Color Format)
         </button>
       </div>
 

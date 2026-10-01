@@ -238,6 +238,7 @@ export default function CaseIntakeSheetTab({
         intake_sheet: formData,
         case_summary: formData.problem_presented || caseRecord.case_summary,
         intake_notes: formData.recommendation_action || caseRecord.intake_notes,
+        reported_at: formData.date_of_interview || caseRecord.reported_at,
       });
       setIsEditing(false);
       setSaveSuccess(true);
@@ -375,12 +376,14 @@ export default function CaseIntakeSheetTab({
               </label>
               <select
                 value={formData.case_category_type}
-                onChange={(e) =>
+                onChange={(e) => {
+                  const val = e.target.value;
                   setFormData((p) => ({
                     ...p,
-                    case_category_type: e.target.value,
-                  }))
-                }
+                    case_category_type: val,
+                    case_category_other: val === 'other' ? p.case_category_other : '',
+                  }));
+                }}
                 className="w-full p-2.5 text-xs rounded-xl border border-slate-300 bg-white focus:ring-2 focus:ring-amber-500 outline-none font-semibold"
               >
                 <option value="vawc">VAWC (RA 9262)</option>
@@ -397,18 +400,11 @@ export default function CaseIntakeSheetTab({
                 <option value="other">Others (Specify)</option>
               </select>
 
-              {/* Pop-up input right under Case Category when Others is selected */}
-              {(formData.case_category_type === 'other' ||
-                formData.case_category_type === 'permit_to_travel' ||
-                formData.case_category_type === 'indigency' ||
-                formData.case_category_type === 'scsr' ||
-                formData.case_category_type === 'adoption' ||
-                formData.case_category_type === 'trafficking' ||
-                formData.case_category_type === 'osaec_csaem' ||
-                Boolean(formData.case_category_other)) && (
+              {/* Pop-up input right under Case Category ONLY when Others is selected */}
+              {formData.case_category_type === 'other' && (
                 <div className="pt-1.5 space-y-1 animate-in fade-in slide-in-from-top-1 duration-150">
                   <label className="text-[11px] font-bold text-amber-900 block">
-                    Specify Others / I-type ang Kategorya:
+                    Specify Other Category:
                   </label>
                   <input
                     type="text"
@@ -417,7 +413,7 @@ export default function CaseIntakeSheetTab({
                     onChange={(e) =>
                       setFormData((p) => ({ ...p, case_category_other: e.target.value }))
                     }
-                    placeholder="I-type diri ang category..."
+                    placeholder="Please specify case category..."
                     className="w-full p-2 text-xs rounded-xl border-2 border-amber-500 bg-amber-50/50 text-slate-900 font-medium focus:ring-2 focus:ring-amber-500 focus:bg-white outline-none"
                   />
                 </div>

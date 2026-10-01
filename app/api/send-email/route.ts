@@ -21,6 +21,7 @@ export async function POST(req: NextRequest) {
     const roleLabels: Record<string, string> = {
       admin: 'Administrator',
       solo_parent_focal: 'Solo Parent Focal Officer',
+      aics_focal: 'AICS Focal Officer',
       social_worker: 'Social Worker',
       encoder: 'Encoder',
       responder: 'Responder',

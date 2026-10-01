@@ -210,13 +210,17 @@ export function proxy(request: NextRequest) {
   }
 
   // ── 3. Continue to the route and add security headers ────────────────────
-  const response = NextResponse.next();
+  const requestHeaders = new Headers(request.headers);
+  requestHeaders.set('x-real-ip', ip);
+  requestHeaders.set('x-cf-country', cfCountry);
 
-  // Forward real IP to your API routes via a custom header
-  response.headers.set('x-real-ip', ip);
-  response.headers.set('x-cf-country', cfCountry);
+  const response = NextResponse.next({
+    request: {
+      headers: requestHeaders,
+    },
+  });
 
-  return addSecurityHeaders(response);
+  return response;
 }
 
 // ---------------------------------------------------------------------------

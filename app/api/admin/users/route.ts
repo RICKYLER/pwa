@@ -16,7 +16,7 @@ export const runtime = 'nodejs';
 const createUserSchema = z.object({
   name: z.string().min(1),
   email: z.string().email(),
-  role: z.enum(['admin', 'social_worker', 'solo_parent_focal', 'encoder', 'responder', 'resident']),
+  role: z.enum(['admin', 'social_worker', 'solo_parent_focal', 'aics_focal', 'encoder', 'responder', 'resident']),
   barangay_id: z.string()
     .trim()
     .min(1, 'Select a barangay.')
@@ -27,6 +27,7 @@ const ROLE_LABELS: Record<string, string> = {
   admin: 'Administrator',
   social_worker: 'Social Worker',
   solo_parent_focal: 'Solo Parent Focal Officer',
+  aics_focal: 'AICS Focal Officer',
   encoder: 'Encoder',
   responder: 'Responder',
   resident: 'Resident',

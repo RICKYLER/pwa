@@ -1,6 +1,6 @@
 // Core type definitions for MSWDO Census PWA
 
-export type UserRole = 'admin' | 'encoder' | 'responder' | 'resident' | 'social_worker' | 'solo_parent_focal';
+export type UserRole = 'admin' | 'encoder' | 'responder' | 'resident' | 'social_worker' | 'solo_parent_focal' | 'aics_focal';
 export type UserAccountStatus = 'active' | 'inactive';
 export type HouseholdStatus = 'active' | 'moved_out' | 'deceased';
 export type ResidentStatus = 'active' | 'moved_out' | 'deceased' | 'rejected';
@@ -571,6 +571,20 @@ export interface GeneralIntakeSheetData {
   client_signature_name?: string;
   mswdo_worker_name?: string;
   noted_by_name?: string;
+  requirements?: {
+    checklist?: Record<string, boolean>;
+    documents?: Array<{
+      id: string;
+      requirement_key: string;
+      name: string;
+      file_url: string;
+      file_size?: number;
+      original_size?: number;
+      uploaded_at: string;
+      saved_percentage?: number;
+    }>;
+    all_mandatory_met?: boolean;
+  };
   _trash?: {
     is_deleted?: boolean;
     deleted_at?: string;
@@ -722,6 +736,61 @@ export interface SoloParentRecord {
   syncStatus?: SyncStatus;
 }
 
+export type AicsIntakeCategory = 'walk_in' | 'referred' | 'rescued';
+
+export type AicsSector =
+  | '4ps'
+  | 'children'
+  | 'youth'
+  | 'women'
+  | 'senior_citizen'
+  | 'pwd'
+  | 'solo_parent';
+
+export type AicsClientCategory = 'fhona' | 'senior_citizen' | 'pwd' | 'ynsp';
+
+export type AicsAssistanceType =
+  | 'medical'
+  | 'burial'
+  | 'educational'
+  | 'food_transportation'
+  | 'disaster_distress'
+  | 'other';
+
+export type AicsStatus = 'pending' | 'assessed' | 'approved' | 'disbursed' | 'liquidated';
+
+export interface AicsRecord {
+  id: string;
+  control_number: string;
+  intake_date: string;
+  intake_category: AicsIntakeCategory;
+  sectors: AicsSector[];
+  client_category: AicsClientCategory;
+  sub_category: string;
+  client_name: string;
+  client_age: number;
+  client_gender: 'Male' | 'Female' | string;
+  barangay_id: string;
+  purok_sitio?: string;
+  contact_number?: string;
+  resident_id?: string;
+  household_id?: string;
+  assistance_type: AicsAssistanceType;
+  specific_assistance: string;
+  amount_approved: number;
+  disbursement_type: 'cash' | 'guarantee_letter' | 'food_pack' | 'cheque' | string;
+  status: AicsStatus;
+  intake_sheet?: GeneralIntakeSheetData;
+  assigned_worker_id?: string;
+  assigned_worker_name?: string;
+  is_deleted?: boolean;
+  deleted_at?: string;
+  deleted_by?: string;
+  createdAt: Date | string;
+  updatedAt: Date | string;
+  syncStatus?: SyncStatus;
+}
+
 export interface AuditLog {
   id: string;
   user_id?: string | null;
@@ -740,7 +809,8 @@ export interface AuditLog {
     | 'case'
     | 'case_attachment'
     | 'case_note'
-    | 'solo_parent';
+    | 'solo_parent'
+    | 'aics_record';
   entity_id: string;
   changes?: Record<string, any>;
   timestamp: Date;

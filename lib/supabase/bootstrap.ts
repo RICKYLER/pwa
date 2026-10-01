@@ -88,6 +88,14 @@ function notifyBootstrapTableChanged(table: SupabaseBootstrapTable, mode: 'hydra
       mode,
     },
   }));
+
+  if (table === 'aics_records') {
+    window.dispatchEvent(new CustomEvent('mswdo:aics-records-changed'));
+  }
+
+  if (table === 'aics_daily_budgets') {
+    window.dispatchEvent(new CustomEvent('mswdo:aics-budget-changed'));
+  }
 }
 
 export async function clearSupabaseBootstrapData(options?: {

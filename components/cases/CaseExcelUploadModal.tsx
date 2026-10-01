@@ -17,6 +17,9 @@ import {
   parseAndCleanseCaseFile,
   downloadCaseExcelTemplate,
   downloadCaseCsvTemplate,
+  downloadVacExcelTemplate,
+  downloadVawcExcelTemplate,
+  downloadCustodySupportExcelTemplate,
   type CaseImportResult,
 } from '@/lib/cases/case-excel-importer';
 import { bulkImportCases } from '@/lib/db/cases';
@@ -136,31 +139,59 @@ export default function CaseExcelUploadModal({
         {/* Content */}
         <div className="flex-1 overflow-y-auto p-6 space-y-6">
           {/* Template Download Banner */}
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 rounded-xl bg-gradient-to-r from-amber-50/80 to-orange-50/60 border border-amber-200/70">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 p-4 rounded-xl bg-gradient-to-r from-blue-50/90 via-amber-50/80 to-emerald-50/70 border border-slate-200 shadow-xs">
             <div className="flex items-start gap-3">
-              <Info className="h-5 w-5 text-amber-600 mt-0.5 flex-shrink-0" />
+              <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-blue-600 text-white shrink-0 mt-0.5 shadow-xs">
+                <FileSpreadsheet className="h-4.5 w-4.5" />
+              </div>
               <div>
-                <p className="text-sm font-semibold text-amber-950">Need the official MSWDO format?</p>
-                <p className="text-xs text-amber-800/80 mt-0.5">
-                  Download our formatted template with sample VAWC, VAC, and Rape cases, standard headers, and notes.
+                <div className="flex items-center gap-2">
+                  <p className="text-sm font-bold text-slate-900">Need official Excel templates?</p>
+                  <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-100 text-blue-800 border border-blue-200">
+                    Official BCPC / DILG Format
+                  </span>
+                </div>
+                <p className="text-xs text-slate-600 mt-0.5">
+                  Download official MSWDO / DILG Excel templates with pre-configured color schemes, group headers, and column validation.
                 </p>
               </div>
             </div>
-            <div className="flex items-center gap-2 flex-shrink-0">
+            <div className="flex flex-wrap items-center gap-2 shrink-0">
               <button
                 type="button"
-                onClick={downloadCaseExcelTemplate}
-                className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold rounded-lg bg-amber-600 text-white hover:bg-amber-700 shadow-sm transition"
+                onClick={downloadVacExcelTemplate}
+                className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold rounded-lg bg-blue-600 text-white hover:bg-blue-700 shadow-xs transition cursor-pointer"
+                title="Download official VAC Monitoring Form with Blue & Green pastel color format (RA 7610)"
               >
                 <Download className="h-3.5 w-3.5" />
-                Download Excel (.xlsx)
+                VAC (RA 7610)
               </button>
               <button
                 type="button"
-                onClick={downloadCaseCsvTemplate}
-                className="px-2.5 py-2 text-xs font-semibold rounded-lg border border-amber-300 text-amber-900 hover:bg-amber-100/60 transition"
+                onClick={downloadVawcExcelTemplate}
+                className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold rounded-lg bg-purple-700 text-white hover:bg-purple-800 shadow-xs transition cursor-pointer"
+                title="Download official VAWC Registry template (RA 9262)"
               >
-                CSV
+                <Download className="h-3.5 w-3.5" />
+                VAWC (RA 9262)
+              </button>
+              <button
+                type="button"
+                onClick={downloadCustodySupportExcelTemplate}
+                className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold rounded-lg bg-emerald-700 text-white hover:bg-emerald-800 shadow-xs transition cursor-pointer"
+                title="Download Child Custody & Support Monitoring Registry"
+              >
+                <Download className="h-3.5 w-3.5" />
+                Custody & Support
+              </button>
+              <button
+                type="button"
+                onClick={downloadCaseExcelTemplate}
+                className="flex items-center gap-1.5 px-2.5 py-2 text-xs font-semibold rounded-lg bg-white border border-slate-300 text-slate-800 hover:bg-slate-50 transition cursor-pointer"
+                title="Download general MSWDO Master Case registry template"
+              >
+                <Download className="h-3.5 w-3.5" />
+                Master (.xlsx)
               </button>
             </div>
           </div>

@@ -33,6 +33,10 @@ function notifyDataChanged(table: string, mode: 'hydrate' | 'change') {
       mode,
     },
   }));
+
+  if (table === 'aics_records') {
+    window.dispatchEvent(new CustomEvent('mswdo:aics-records-changed'));
+  }
 }
 
 type BroadcastDbChangePayload = {

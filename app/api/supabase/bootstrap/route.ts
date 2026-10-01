@@ -693,6 +693,61 @@ async function loadCaseAttachments(user: User) {
   }));
 }
 
+async function loadAicsRecords(user: User, residentIds: string[]) {
+  if (user.role !== 'admin' && user.role !== 'aics_focal' && user.role !== 'resident') {
+    return [];
+  }
+
+  const supabase = getSupabaseAdminClient();
+  const query = supabase
+    .from('aics_records')
+    .select('*')
+    .order('created_at', { ascending: false });
+
+  if (user.role === 'resident') {
+    if (!residentIds.length) {
+      return [];
+    }
+    const { data, error } = await query.in('resident_id', residentIds);
+    if (error) {
+      if (isMissingTableError(error, 'aics_records')) {
+        return [];
+      }
+      throw new Error(error.message);
+    }
+    return data ?? [];
+  }
+
+  const { data, error } = await query;
+  if (error) {
+    if (isMissingTableError(error, 'aics_records')) {
+      return [];
+    }
+    throw new Error(error.message);
+  }
+  return data ?? [];
+}
+
+async function loadAicsDailyBudgets(user: User) {
+  if (user.role !== 'admin' && user.role !== 'aics_focal') {
+    return [];
+  }
+
+  const supabase = getSupabaseAdminClient();
+  const { data, error } = await supabase
+    .from('aics_daily_budgets')
+    .select('*')
+    .order('date', { ascending: false });
+
+  if (error) {
+    if (isMissingTableError(error, 'aics_daily_budgets')) {
+      return [];
+    }
+    throw new Error(error.message);
+  }
+  return data ?? [];
+}
+
 async function buildBootstrapPayload(
   user: User,
   requestedTables?: SupabaseBootstrapTable[],
@@ -758,9 +813,15 @@ async function buildBootstrapPayload(
   const caseNotesPromise = wants('case_notes') ? loadCaseNotes(user) : null;
   const caseAttachmentsPromise = wants('case_attachments') ? loadCaseAttachments(user) : null;
 
-  // Solo parents for non-residents does not depend on residentIds:
+  // Solo parents and AICS for non-residents does not depend on residentIds:
   const soloParentsNonResidentPromise = wants('solo_parents') && !isResident
     ? loadSoloParents(user, [])
+    : null;
+  const aicsNonResidentPromise = wants('aics_records') && !isResident
+    ? loadAicsRecords(user, [])
+    : null;
+  const aicsDailyBudgetsPromise = wants('aics_daily_budgets') && !isResident
+    ? loadAicsDailyBudgets(user)
     : null;
 
   // For Admin: households, residents, vulnerability_flags, beneficiaries run simultaneously:
@@ -825,12 +886,14 @@ async function buildBootstrapPayload(
       vulnerabilityFlags,
       beneficiaries,
       residentSoloParents,
+      residentAicsRecords,
       residentDistributionRecords,
       userNotifications,
     ] = await Promise.all([
       wants('vulnerability_flags') ? loadVulnerabilityFlags(residentIds) : Promise.resolve([]),
       wants('beneficiaries') ? loadBeneficiaries(user, residentIds) : Promise.resolve([]),
       wants('solo_parents') && isResident ? loadSoloParents(user, residentIds) : Promise.resolve([]),
+      wants('aics_records') && isResident ? loadAicsRecords(user, residentIds) : Promise.resolve([]),
       wants('distribution_records') && isResident
         ? loadDistributionRecordsForResidentScope(householdIds, residentIds)
         : Promise.resolve([]),
@@ -842,6 +905,7 @@ async function buildBootstrapPayload(
     if (wants('vulnerability_flags')) payload.vulnerability_flags = vulnerabilityFlags;
     if (wants('beneficiaries')) payload.beneficiaries = beneficiaries;
     if (wants('solo_parents') && isResident) payload.solo_parents = residentSoloParents;
+    if (wants('aics_records') && isResident) payload.aics_records = residentAicsRecords;
     if (wants('distribution_records') && isResident) payload.distribution_records = residentDistributionRecords;
     if (wants('user_notifications') && isResident) payload.user_notifications = userNotifications;
   }
@@ -849,6 +913,8 @@ async function buildBootstrapPayload(
   // Resolve all concurrently running promises
   const [
     soloParentsNonResident,
+    aicsNonResident,
+    aicsDailyBudgets,
     cases,
     caseNotes,
     caseAttachments,
@@ -865,6 +931,8 @@ async function buildBootstrapPayload(
     disasterAlerts,
   ] = await Promise.all([
     soloParentsNonResidentPromise ?? Promise.resolve(null),
+    aicsNonResidentPromise ?? Promise.resolve(null),
+    aicsDailyBudgetsPromise ?? Promise.resolve(null),
     casesPromise ?? Promise.resolve(null),
     caseNotesPromise ?? Promise.resolve(null),
     caseAttachmentsPromise ?? Promise.resolve(null),
@@ -882,6 +950,8 @@ async function buildBootstrapPayload(
   ]);
 
   if (soloParentsNonResident !== null) payload.solo_parents = soloParentsNonResident;
+  if (aicsNonResident !== null) payload.aics_records = aicsNonResident;
+  if (aicsDailyBudgets !== null) payload.aics_daily_budgets = aicsDailyBudgets;
   if (cases !== null) payload.cases = cases;
   if (caseNotes !== null) payload.case_notes = caseNotes;
   if (caseAttachments !== null) payload.case_attachments = caseAttachments;

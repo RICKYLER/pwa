@@ -28,6 +28,8 @@ const SUPPORTED_ENTITY_TYPES = [
   'cases',
   'case_attachments',
   'case_notes',
+  'aics_records',
+  'aics_daily_budgets',
 ] as const;
 
 type SupportedEntityType = (typeof SUPPORTED_ENTITY_TYPES)[number];
@@ -75,6 +77,7 @@ const UPSERT_ORDER: SupportedEntityType[] = [
   'cases',
   'case_notes',
   'case_attachments',
+  'aics_records',
   'beneficiaries',
   'inventory_movements',
   'incidents',
@@ -584,6 +587,52 @@ async function mapQueueItemToSupabaseRow(item: SyncQueueItem, syncActorId: strin
         uploaded_by: toOptionalString(data.uploaded_by) ?? 'Social Worker',
         uploaded_at: toTimestamp(data.uploaded_at),
       };
+    case 'aics_records':
+      return {
+        id: toRequiredString(data.id, 'aics_record.id'),
+        control_number: toRequiredString(data.control_number, 'aics_record.control_number'),
+        intake_date: toDateOnly(data.intake_date) ?? new Date().toISOString().slice(0, 10),
+        intake_category: toRequiredString(data.intake_category, 'aics_record.intake_category'),
+        sectors: Array.isArray(data.sectors) ? normalizeJsonValue(data.sectors) : [],
+        client_category: toRequiredString(data.client_category, 'aics_record.client_category'),
+        sub_category: toRequiredString(data.sub_category, 'aics_record.sub_category'),
+        client_name: toRequiredString(data.client_name, 'aics_record.client_name'),
+        client_age: toOptionalNumber(data.client_age) ?? 0,
+        client_gender: toOptionalString(data.client_gender) ?? 'Female',
+        barangay_id: toRequiredString(data.barangay_id, 'aics_record.barangay_id'),
+        purok_sitio: toOptionalString(data.purok_sitio),
+        contact_number: toOptionalString(data.contact_number),
+        resident_id: toOptionalString(data.resident_id),
+        household_id: toOptionalString(data.household_id),
+        assistance_type: toRequiredString(data.assistance_type, 'aics_record.assistance_type'),
+        specific_assistance: toRequiredString(data.specific_assistance, 'aics_record.specific_assistance'),
+        amount_approved: toOptionalNumber(data.amount_approved) ?? 0,
+        disbursement_type: toOptionalString(data.disbursement_type) ?? 'cash',
+        status: toRequiredString(data.status, 'aics_record.status'),
+        intake_sheet: data.intake_sheet && typeof data.intake_sheet === 'object'
+          ? normalizeJsonValue(data.intake_sheet)
+          : {},
+        assigned_worker_id: toOptionalString(data.assigned_worker_id),
+        assigned_worker_name: toOptionalString(data.assigned_worker_name) ?? 'MSWDO AICS Officer',
+        is_deleted: toBooleanValue(data.is_deleted),
+        deleted_at: toTimestamp(data.deleted_at),
+        deleted_by: toOptionalString(data.deleted_by),
+        created_at: toTimestamp(data.createdAt ?? data.created_at),
+        updated_at: toTimestamp(data.updatedAt ?? data.updated_at),
+      };
+    case 'aics_daily_budgets':
+      return {
+        id: toRequiredString(data.id, 'aics_daily_budget.id'),
+        date: toDateOnly(data.date) ?? new Date().toISOString().slice(0, 10),
+        allocated_amount: toOptionalNumber(data.allocated_amount) ?? 0,
+        initial_amount: toOptionalNumber(data.initial_amount) ?? 0,
+        top_ups: Array.isArray(data.top_ups) ? normalizeJsonValue(data.top_ups) : [],
+        history: Array.isArray(data.history) ? normalizeJsonValue(data.history) : [],
+        notes: toOptionalString(data.notes) ?? 'Standard Municipal Daily Allocation',
+        created_by: toOptionalString(data.created_by) ?? 'MSWDO Admin',
+        created_at: toTimestamp(data.createdAt ?? data.created_at),
+        updated_at: toTimestamp(data.updatedAt ?? data.updated_at),
+      };
     default:
       throw new Error(`Unsupported sync entity type: ${item.entity_type}`);
   }
@@ -752,7 +801,7 @@ async function applySyncItem(item: SyncQueueItem, syncActorId: string) {
   if (item.operation === 'create') {
     const { error } = await supabase
       .from(item.entity_type)
-      .insert(payload);
+      .upsert(payload, { onConflict: 'id' });
 
     if (error) {
       throw new Error(error.message);
@@ -785,6 +834,27 @@ async function applySyncItem(item: SyncQueueItem, syncActorId: string) {
   if (!Array.isArray(data) || data.length === 0) {
     if (canUseConflictGuard) {
       throw new Error(`Conflict detected while updating ${item.entity_type}:${item.entity_id}. Refresh before retrying.`);
+    }
+
+    // Check if the record exists in Supabase at all
+    const { data: existingRow, error: checkError } = await supabase
+      .from(item.entity_type)
+      .select('id')
+      .eq('id', item.entity_id)
+      .maybeSingle();
+
+    if (!checkError && !existingRow) {
+      // Record was never inserted into Supabase yet (e.g. client queued update before create or put was called).
+      // Safely upsert the complete payload.
+      const { error: upsertError } = await supabase
+        .from(item.entity_type)
+        .upsert(payload, { onConflict: 'id' });
+
+      if (upsertError) {
+        throw new Error(upsertError.message);
+      }
+
+      return;
     }
 
     throw new Error(`${item.entity_type}:${item.entity_id} no longer exists in Supabase.`);

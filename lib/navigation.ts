@@ -5,6 +5,7 @@ import {
   Bell,
   FileText,
   FolderLock,
+  HandCoins,
   HeartHandshake,
   Home,
   MapPinned,
@@ -102,6 +103,19 @@ export const STAFF_NAV_ITEMS: AppNavItem[] = [
     icon: FolderLock,
     perm: 'view_cases',
     group: 'Social Work',
+  },
+  {
+    href: '/aics',
+    label: 'AICS Assistance',
+    mobileLabel: 'AICS',
+    description: 'Crisis walk-in intake, GIS forms & assistance records',
+    pageTitle: 'AICS Crisis Assistance',
+    pageEyebrow: 'Social Welfare Operations',
+    icon: HandCoins,
+    perm: 'view_aics',
+    group: 'Social Work',
+    showInBottomNav: true,
+    mobilePriority: 2,
   },
   {
     href: '/solo-parents',
@@ -230,6 +244,17 @@ export const STAFF_NAV_ITEMS: AppNavItem[] = [
 ];
 
 export const ADMIN_NAV_ITEMS: AppNavItem[] = [
+  {
+    href: '/aics',
+    label: 'AICS Crisis Desk',
+    mobileLabel: 'AICS',
+    description: 'Crisis walk-in intake, GIS forms & assistance records',
+    pageTitle: 'AICS Crisis Assistance',
+    pageEyebrow: 'Administration',
+    icon: HandCoins,
+    perm: null,
+    group: 'Administration',
+  },
   {
     href: '/admin/member-approvals',
     label: 'Member Approvals',

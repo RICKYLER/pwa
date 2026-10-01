@@ -51,8 +51,8 @@ export default function ForecastingDesktop() {
       {/* Top Header */}
       <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-200/80 pb-5">
         <div className="flex items-center gap-3">
-          <span className="rounded-lg bg-cyan-950 px-2.5 py-1 font-mono text-xs font-bold uppercase tracking-wider text-cyan-300 shadow-sm ring-1 ring-cyan-800">
-            E-MABINI
+          <span className="inline-flex items-center gap-1.5 rounded-lg bg-slate-100 px-2.5 py-1 text-xs font-bold uppercase tracking-wide text-slate-700 border border-slate-200">
+            🏛️ LGU Mabini • MSWDO
           </span>
           <span className="text-xl font-light text-slate-300">|</span>
           <div>

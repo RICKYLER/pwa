@@ -64,6 +64,10 @@ const ROUTE_TABLES: Array<{
     tables: ['solo_parents', 'residents', 'households', 'vulnerability_flags'],
   },
   {
+    prefix: '/aics',
+    tables: ['aics_records', 'aics_daily_budgets', 'residents', 'households'],
+  },
+  {
     prefix: '/cases',
     tables: ['cases', 'case_notes', 'case_attachments'],
   },

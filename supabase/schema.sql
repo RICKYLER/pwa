@@ -23,7 +23,7 @@ create table if not exists public.users (
   middle_name text not null default '',
   last_name text not null default '',
   role text not null default 'resident'
-    check (role in ('admin', 'social_worker', 'solo_parent_focal', 'encoder', 'health_worker', 'responder', 'resident')),
+    check (role in ('admin', 'social_worker', 'solo_parent_focal', 'aics_focal', 'encoder', 'health_worker', 'responder', 'resident')),
   status text not null default 'active'
     check (status in ('active', 'inactive')),
   barangay_id text not null default 'anitapan',
@@ -894,7 +894,7 @@ create table if not exists public.audit_logs (
   user_id uuid references public.users (id) on delete set null,
   action text not null,
   entity_type text not null
-    check (entity_type in ('household', 'resident', 'distribution', 'incident', 'inventory', 'user', 'location_master', 'disaster_alert', 'disaster_alert_rule', 'purok_risk_profile', 'evacuation_center')),
+    check (entity_type in ('household', 'resident', 'distribution', 'incident', 'inventory', 'user', 'location_master', 'disaster_alert', 'disaster_alert_rule', 'purok_risk_profile', 'evacuation_center', 'case', 'aics_record', 'aics_daily_budget')),
   entity_id text not null,
   changes jsonb,
   "timestamp" timestamptz not null default timezone('utc', now())
@@ -1898,6 +1898,159 @@ with check (
   or auth.role() = 'authenticated'
 );
 
+-- -----------------------------------------------------------------------------
+-- AICS Records & Daily Assistance Fund Budgets
+-- -----------------------------------------------------------------------------
+create table if not exists public.aics_records (
+  id text primary key default ('aics_' || floor(extract(epoch from now()) * 1000)::text || '_' || substr(md5(random()::text), 1, 7)),
+  control_number text not null unique,
+  intake_date date not null default current_date,
+  intake_category text not null check (
+    intake_category in ('walk_in', 'referred', 'rescued')
+  ),
+  sectors jsonb not null default '[]'::jsonb,
+  client_category text not null check (
+    client_category in ('fhona', 'senior_citizen', 'pwd', 'ynsp')
+  ),
+  sub_category text not null,
+  client_name text not null,
+  client_age integer default 0 check (client_age is null or (client_age >= 0 and client_age <= 130)),
+  client_gender text default 'Female',
+  barangay_id text not null,
+  purok_sitio text,
+  contact_number text,
+  resident_id text references public.residents(id) on delete set null,
+  household_id text references public.households(id) on delete set null,
+  assistance_type text not null check (
+    assistance_type in (
+      'medical',
+      'burial',
+      'educational',
+      'food_transportation',
+      'disaster_distress',
+      'other'
+    )
+  ),
+  specific_assistance text not null,
+  amount_approved numeric not null default 0 check (amount_approved >= 0),
+  disbursement_type text not null default 'cash',
+  status text not null default 'pending' check (
+    status in ('pending', 'assessed', 'approved', 'disbursed', 'liquidated')
+  ),
+  intake_sheet jsonb not null default '{}'::jsonb,
+  assigned_worker_id text,
+  assigned_worker_name text not null default 'MSWDO AICS Officer',
+  is_deleted boolean not null default false,
+  deleted_at timestamptz,
+  deleted_by text,
+  created_at timestamptz not null default timezone('utc', now()),
+  updated_at timestamptz not null default timezone('utc', now())
+);
+
+drop trigger if exists set_aics_records_updated_at on public.aics_records;
+create trigger set_aics_records_updated_at
+  before update on public.aics_records
+  for each row
+  execute function public.set_updated_at();
+
+create index if not exists idx_aics_records_control_number on public.aics_records (control_number);
+create index if not exists idx_aics_records_resident_id on public.aics_records (resident_id);
+create index if not exists idx_aics_records_household_id on public.aics_records (household_id);
+create index if not exists idx_aics_records_barangay_id on public.aics_records (barangay_id);
+create index if not exists idx_aics_records_client_category on public.aics_records (client_category);
+create index if not exists idx_aics_records_assistance_type on public.aics_records (assistance_type);
+create index if not exists idx_aics_records_status on public.aics_records (status);
+create index if not exists idx_aics_records_intake_date on public.aics_records (intake_date desc);
+create index if not exists idx_aics_records_is_deleted on public.aics_records (is_deleted);
+
+alter table public.aics_records enable row level security;
+
+drop policy if exists "staff_aics_access" on public.aics_records;
+create policy "staff_aics_access"
+  on public.aics_records
+  for all
+  using (
+    exists (
+      select 1 from public.users
+      where users.id = auth.uid()
+        and users.role in ('admin', 'aics_focal')
+    )
+  )
+  with check (
+    exists (
+      select 1 from public.users
+      where users.id = auth.uid()
+        and users.role in ('admin', 'aics_focal')
+    )
+  );
+
+drop policy if exists "residents_view_own_aics_records" on public.aics_records;
+create policy "residents_view_own_aics_records"
+  on public.aics_records
+  for select
+  using (
+    exists (
+      select 1 from public.residents r
+      join public.households h on h.id = r.household_id
+      where (r.id = aics_records.resident_id or h.id = aics_records.household_id)
+        and h.applicant_user_id = auth.uid()
+    )
+  );
+
+-- -----------------------------------------------------------------------------
+-- AICS Daily Budgets Table
+-- -----------------------------------------------------------------------------
+create table if not exists public.aics_daily_budgets (
+  id text primary key default ('aics_budget_' || current_date::text),
+  date date not null unique default current_date,
+  allocated_amount numeric not null default 0 check (allocated_amount >= 0),
+  initial_amount numeric not null default 0 check (initial_amount >= 0),
+  top_ups jsonb not null default '[]'::jsonb,
+  history jsonb not null default '[]'::jsonb,
+  notes text default 'Standard Municipal Daily Allocation',
+  created_by text default 'MSWDO Admin',
+  created_at timestamptz not null default timezone('utc', now()),
+  updated_at timestamptz not null default timezone('utc', now())
+);
+
+drop trigger if exists set_aics_daily_budgets_updated_at on public.aics_daily_budgets;
+create trigger set_aics_daily_budgets_updated_at
+  before update on public.aics_daily_budgets
+  for each row
+  execute function public.set_updated_at();
+
+create index if not exists idx_aics_daily_budgets_date on public.aics_daily_budgets (date desc);
+
+alter table public.aics_daily_budgets enable row level security;
+
+drop policy if exists "staff_aics_daily_budgets_access" on public.aics_daily_budgets;
+create policy "staff_aics_daily_budgets_access"
+  on public.aics_daily_budgets
+  for all
+  using (
+    exists (
+      select 1 from public.users
+      where users.id = auth.uid()
+        and users.role in ('admin', 'aics_focal')
+    )
+  )
+  with check (
+    exists (
+      select 1 from public.users
+      where users.id = auth.uid()
+        and users.role in ('admin', 'aics_focal')
+    )
+  );
+
+drop policy if exists "authenticated_read_aics_daily_budgets" on public.aics_daily_budgets;
+create policy "authenticated_read_aics_daily_budgets"
+  on public.aics_daily_budgets
+  for select
+  using (auth.uid() is not null);
+
+-- -----------------------------------------------------------------------------
+-- Replica Identities for Realtime
+-- -----------------------------------------------------------------------------
 alter table public.households replica identity full;
 alter table public.residents replica identity full;
 alter table public.vulnerability_flags replica identity full;
@@ -1921,6 +2074,8 @@ alter table public.case_attachments replica identity full;
 alter table public.case_notes replica identity full;
 alter table public.solo_parents replica identity full;
 alter table public.forecasting_dataset_uploads replica identity full;
+alter table public.aics_records replica identity full;
+alter table public.aics_daily_budgets replica identity full;
 
 do $$
 declare
@@ -1948,7 +2103,9 @@ declare
     'case_attachments',
     'case_notes',
     'solo_parents',
-    'forecasting_dataset_uploads'
+    'forecasting_dataset_uploads',
+    'aics_records',
+    'aics_daily_budgets'
   ];
 begin
   foreach v_table in array v_tables

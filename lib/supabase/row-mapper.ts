@@ -22,7 +22,9 @@ export type SupabaseBootstrapTable =
   | 'solo_parents'
   | 'cases'
   | 'case_attachments'
-  | 'case_notes';
+  | 'case_notes'
+  | 'aics_records'
+  | 'aics_daily_budgets';
 
 export const SUPABASE_BOOTSTRAP_TABLES: Array<{
   table: SupabaseBootstrapTable;
@@ -50,6 +52,8 @@ export const SUPABASE_BOOTSTRAP_TABLES: Array<{
   { table: 'cases', storeName: STORE_NAMES.cases },
   { table: 'case_attachments', storeName: STORE_NAMES.case_attachments },
   { table: 'case_notes', storeName: STORE_NAMES.case_notes },
+  { table: 'aics_records', storeName: STORE_NAMES.aics_records },
+  { table: 'aics_daily_budgets', storeName: STORE_NAMES.aics_daily_budgets },
 ];
 
 function toOptionalDate(value: unknown) {
@@ -258,6 +262,38 @@ export function mapSupabaseRow(table: SupabaseBootstrapTable, row: Record<string
         ...base,
         ...metadata,
       };
+    case 'aics_records': {
+      const intakeSheet = base.intake_sheet && typeof base.intake_sheet === 'object'
+        ? (base.intake_sheet as Record<string, unknown>)
+        : undefined;
+      const isDeleted = Boolean(base.is_deleted);
+      const deletedAt = typeof base.deleted_at === 'string' ? base.deleted_at : undefined;
+      const deletedBy = typeof base.deleted_by === 'string' ? base.deleted_by : undefined;
+
+      return {
+        ...base,
+        ...metadata,
+        sectors: Array.isArray(base.sectors) ? base.sectors : [],
+        amount_approved: Number(base.amount_approved) || 0,
+        client_age: Number(base.client_age) || 0,
+        intake_sheet: intakeSheet,
+        is_deleted: isDeleted,
+        deleted_at: deletedAt,
+        deleted_by: deletedBy,
+        syncStatus: 'synced' as const,
+      };
+    }
+    case 'aics_daily_budgets': {
+      return {
+        ...base,
+        ...metadata,
+        allocated_amount: Number(base.allocated_amount) || 0,
+        initial_amount: Number(base.initial_amount) || 0,
+        top_ups: Array.isArray(base.top_ups) ? base.top_ups : [],
+        history: Array.isArray(base.history) ? base.history : [],
+        syncStatus: 'synced' as const,
+      };
+    }
     default:
       return {
         ...base,

@@ -142,6 +142,11 @@ function notifyCasesChanged() {
         detail: { source: 'supabase', table: 'cases', mode: 'change' },
       }),
     );
+    window.dispatchEvent(
+      new CustomEvent('mswdo:cases-changed', {
+        detail: { table: 'cases' },
+      }),
+    );
   }
 }
 
@@ -161,6 +166,20 @@ export async function createCase(
   };
 
   await db.put(STORE_NAMES.cases, newCase);
+
+  if (typeof window !== 'undefined') {
+    try {
+      await runServerMutation({
+        action: 'create_case',
+        payload: { caseRecord: newCase },
+      });
+      newCase.syncStatus = 'synced';
+      await db.put(STORE_NAMES.cases, newCase);
+    } catch (err) {
+      console.warn('Failed to sync case to Supabase immediately (offline-queued):', err);
+    }
+  }
+
   notifyCasesChanged();
   return newCase;
 }
@@ -185,6 +204,20 @@ export async function updateCase(
   };
 
   await db.put(STORE_NAMES.cases, updated);
+
+  if (typeof window !== 'undefined') {
+    try {
+      await runServerMutation({
+        action: 'update_case',
+        payload: { caseRecord: updated },
+      });
+      updated.syncStatus = 'synced';
+      await db.put(STORE_NAMES.cases, updated);
+    } catch (err) {
+      console.warn('Failed to sync case update to Supabase immediately:', err);
+    }
+  }
+
   notifyCasesChanged();
   return updated;
 }
@@ -229,6 +262,20 @@ export async function moveCaseToTrash(id: string, deletedBy?: string): Promise<C
   };
 
   await db.put(STORE_NAMES.cases, updated);
+
+  if (typeof window !== 'undefined') {
+    try {
+      await runServerMutation({
+        action: 'update_case',
+        payload: { caseRecord: updated },
+      });
+      updated.syncStatus = 'synced';
+      await db.put(STORE_NAMES.cases, updated);
+    } catch (err) {
+      console.warn('Failed to sync case trash to Supabase immediately:', err);
+    }
+  }
+
   notifyCasesChanged();
   return updated;
 }
@@ -260,6 +307,20 @@ export async function restoreCaseFromTrash(id: string): Promise<CaseRecord> {
   };
 
   await db.put(STORE_NAMES.cases, updated);
+
+  if (typeof window !== 'undefined') {
+    try {
+      await runServerMutation({
+        action: 'update_case',
+        payload: { caseRecord: updated },
+      });
+      updated.syncStatus = 'synced';
+      await db.put(STORE_NAMES.cases, updated);
+    } catch (err) {
+      console.warn('Failed to sync case restoration to Supabase immediately:', err);
+    }
+  }
+
   notifyCasesChanged();
   return updated;
 }
@@ -400,6 +461,19 @@ export async function addCaseNote(
   };
 
   await db.put(STORE_NAMES.case_notes, newNote);
+
+  if (typeof window !== 'undefined') {
+    try {
+      await runServerMutation({
+        action: 'create_case_note',
+        payload: { note: newNote },
+      });
+    } catch (err) {
+      console.warn('Failed to sync note to Supabase immediately:', err);
+    }
+  }
+
+  notifyCasesChanged();
   return newNote;
 }
 
@@ -433,6 +507,19 @@ export async function addCaseAttachment(
   };
 
   await db.put(STORE_NAMES.case_attachments, newAttachment);
+
+  if (typeof window !== 'undefined') {
+    try {
+      await runServerMutation({
+        action: 'create_case_attachment',
+        payload: { attachment: newAttachment },
+      });
+    } catch (err) {
+      console.warn('Failed to sync attachment to Supabase immediately:', err);
+    }
+  }
+
+  notifyCasesChanged();
   return newAttachment;
 }
 
@@ -441,4 +528,17 @@ export async function addCaseAttachment(
  */
 export async function deleteCaseAttachment(attachmentId: string): Promise<void> {
   await db.delete(STORE_NAMES.case_attachments, attachmentId);
+
+  if (typeof window !== 'undefined') {
+    try {
+      await runServerMutation({
+        action: 'delete_case_attachment',
+        payload: { attachmentId },
+      });
+    } catch (err) {
+      console.warn('Failed to sync delete attachment to Supabase immediately:', err);
+    }
+  }
+
+  notifyCasesChanged();
 }

@@ -14,7 +14,10 @@ interface BottomNavProps {
 export default function BottomNav({ onMoreClick }: BottomNavProps) {
   const pathname = usePathname();
   const user = getCurrentUser();
-  const visibleItems = STAFF_NAV_ITEMS.filter((item) => !item.perm || hasPermission(item.perm as never));
+  const visibleItems = STAFF_NAV_ITEMS.filter((item) => {
+    if (user?.role === 'admin') return true;
+    return !item.perm || hasPermission(item.perm as never);
+  });
   const bottomItems = getMobileBottomNavItems(visibleItems);
   const moreItems = visibleItems.filter((item) => !item.showInBottomNav);
   const adminItems = user?.role === 'admin' ? ADMIN_NAV_ITEMS : [];

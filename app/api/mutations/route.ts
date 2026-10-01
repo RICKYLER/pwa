@@ -41,6 +41,13 @@ import {
   rejectResidentOnServer,
   verifyResidentOnServer,
   deleteCasePermanentlyOnServer,
+  saveCaseOnServer,
+  saveCaseNoteOnServer,
+  saveCaseAttachmentOnServer,
+  deleteCaseAttachmentOnServer,
+  saveAicsRecordOnServer,
+  updateAicsRecordOnServer,
+  saveAicsDailyBudgetOnServer,
 } from '@/lib/server/supabase-mutations';
 import {
   createDisasterAlertRuleOnServer,
@@ -63,7 +70,9 @@ export async function POST(request: NextRequest) {
 
   const payload = await request.json().catch(() => null) as Record<string, unknown> | null;
   const body = payload ?? {};
-  const action = typeof body.action === 'string' ? body.action : '';
+  const action = typeof body.action === 'string'
+    ? body.action
+    : (typeof body.type === 'string' ? body.type : '');
   if (!action) {
     return badRequest('Mutation action is required.');
   }
@@ -639,6 +648,90 @@ export async function POST(request: NextRequest) {
           result,
           { headers: { 'Cache-Control': 'no-store' } },
         );
+      }
+      case 'create_case':
+      case 'update_case':
+      case 'save_case': {
+        const rawPayload = body.payload && typeof body.payload === 'object'
+          ? (body.payload as Record<string, unknown>)
+          : {};
+        const caseRecord = (body.caseRecord || rawPayload.caseRecord || body.case || rawPayload.case) as Record<string, unknown> | undefined;
+        if (!caseRecord || typeof caseRecord !== 'object') {
+          return badRequest('caseRecord payload is required.');
+        }
+        const data = await saveCaseOnServer(authResult.user, caseRecord);
+        return NextResponse.json(data);
+      }
+      case 'create_case_note':
+      case 'save_case_note': {
+        const rawPayload = body.payload && typeof body.payload === 'object'
+          ? (body.payload as Record<string, unknown>)
+          : {};
+        const note = (body.note || rawPayload.note) as Record<string, unknown> | undefined;
+        if (!note || typeof note !== 'object') {
+          return badRequest('note payload is required.');
+        }
+        const data = await saveCaseNoteOnServer(authResult.user, note);
+        return NextResponse.json(data);
+      }
+      case 'create_case_attachment':
+      case 'save_case_attachment': {
+        const rawPayload = body.payload && typeof body.payload === 'object'
+          ? (body.payload as Record<string, unknown>)
+          : {};
+        const attachment = (body.attachment || rawPayload.attachment) as Record<string, unknown> | undefined;
+        if (!attachment || typeof attachment !== 'object') {
+          return badRequest('attachment payload is required.');
+        }
+        const data = await saveCaseAttachmentOnServer(authResult.user, attachment);
+        return NextResponse.json(data);
+      }
+      case 'delete_case_attachment': {
+        const rawPayload = body.payload && typeof body.payload === 'object'
+          ? (body.payload as Record<string, unknown>)
+          : {};
+        const attachmentId = typeof body.attachmentId === 'string'
+          ? body.attachmentId
+          : (typeof rawPayload.attachmentId === 'string' ? rawPayload.attachmentId : '');
+        if (!attachmentId) {
+          return badRequest('attachmentId is required.');
+        }
+        const data = await deleteCaseAttachmentOnServer(authResult.user, attachmentId);
+        return NextResponse.json(data);
+      }
+      case 'create_aics_record': {
+        const rawPayload = body.payload && typeof body.payload === 'object'
+          ? (body.payload as Record<string, unknown>)
+          : {};
+        const record = (body.record || rawPayload.record) as Record<string, unknown> | undefined;
+        if (!record || typeof record !== 'object') {
+          return badRequest('record payload is required for create_aics_record.');
+        }
+        const data = await saveAicsRecordOnServer(authResult.user, record);
+        return NextResponse.json(data);
+      }
+      case 'update_aics_record': {
+        const rawPayload = body.payload && typeof body.payload === 'object'
+          ? (body.payload as Record<string, unknown>)
+          : {};
+        const id = typeof body.id === 'string' ? body.id : (typeof rawPayload.id === 'string' ? rawPayload.id : '');
+        const updates = (body.updates || rawPayload.updates) as Record<string, unknown> | undefined;
+        if (!id || !updates || typeof updates !== 'object') {
+          return badRequest('id and updates payload are required for update_aics_record.');
+        }
+        const data = await updateAicsRecordOnServer(authResult.user, id, updates);
+        return NextResponse.json(data);
+      }
+      case 'save_aics_daily_budget': {
+        const rawPayload = body.payload && typeof body.payload === 'object'
+          ? (body.payload as Record<string, unknown>)
+          : {};
+        const budget = (body.budget || rawPayload.budget) as Record<string, unknown> | undefined;
+        if (!budget || typeof budget !== 'object') {
+          return badRequest('budget payload is required for save_aics_daily_budget.');
+        }
+        const data = await saveAicsDailyBudgetOnServer(authResult.user, budget);
+        return NextResponse.json(data);
       }
       default:
         return badRequest(`Unsupported mutation action: ${action}`);

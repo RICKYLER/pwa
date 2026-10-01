@@ -81,9 +81,10 @@ export default function CasesDashboardMobile() {
     const counts: Record<MainCategoryTab, number> = {
       all: cases.length,
       vawc: 0,
+      child_abuse_vac: 0,
+      child_custody_support: 0,
       rape: 0,
       acts_of_lasciviousness: 0,
-      child_abuse_vac: 0,
       other: 0,
     };
     for (const c of cases) {

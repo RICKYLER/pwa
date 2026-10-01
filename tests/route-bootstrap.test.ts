@@ -63,3 +63,10 @@ test('cases and case-analytics routes bootstrap cases, case_notes, and case_atta
   );
 });
 
+test('aics route bootstraps aics_records, aics_daily_budgets, residents, and households', () => {
+  assert.deepEqual(
+    getRouteBootstrapTables('/aics'),
+    ['aics_records', 'aics_daily_budgets', 'residents', 'households'],
+  );
+});
+

@@ -495,7 +495,9 @@ async function createAuditLogEntry(params: {
     | 'disaster_alert'
     | 'disaster_alert_rule'
     | 'evacuation_center'
-    | 'case';
+    | 'case'
+    | 'aics_record'
+    | 'aics_daily_budget';
   entityId: string;
   changes?: Record<string, unknown>;
 }) {
@@ -514,7 +516,7 @@ async function createAuditLogEntry(params: {
     });
 
   if (error) {
-    throw new Error(`Failed to create audit log: ${error.message}`);
+    console.warn(`[AuditLog] Warning: Failed to record audit log (${params.entityType}):`, error.message);
   }
 }
 
@@ -3191,3 +3193,358 @@ export async function deleteCasePermanentlyOnServer(
 
   return { id: caseId, success: true };
 }
+
+export async function saveCaseOnServer(
+  user: User,
+  rawCase: Record<string, unknown>,
+) {
+  if (!['admin', 'social_worker'].includes(user.role)) {
+    throw new Error('You are not allowed to manage confidential case records.');
+  }
+
+  const supabase = getSupabaseAdminClient();
+  const id = typeof rawCase.id === 'string' && rawCase.id.trim()
+    ? rawCase.id.trim()
+    : `case_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+
+  const nowIso = new Date().toISOString();
+  const reportedAt = typeof rawCase.reported_at === 'string' && rawCase.reported_at.trim()
+    ? rawCase.reported_at.trim()
+    : nowIso;
+
+  const intakeSheet = rawCase.intake_sheet && typeof rawCase.intake_sheet === 'object'
+    ? rawCase.intake_sheet
+    : null;
+
+  const caseRow: Record<string, unknown> = {
+    id,
+    case_number: typeof rawCase.case_number === 'string' ? rawCase.case_number.trim() : `VAWC-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`,
+    case_type: typeof rawCase.case_type === 'string' ? rawCase.case_type : 'vawc_physical',
+    reported_at: reportedAt,
+    incident_date: typeof rawCase.incident_date === 'string' && rawCase.incident_date.trim() ? rawCase.incident_date.trim() : null,
+    victim_name: typeof rawCase.victim_name === 'string' ? rawCase.victim_name.trim() : '',
+    victim_age: typeof rawCase.victim_age === 'number' ? rawCase.victim_age : (rawCase.victim_age ? Number(rawCase.victim_age) : null),
+    victim_gender: typeof rawCase.victim_gender === 'string' ? rawCase.victim_gender : 'F',
+    victim_contact: typeof rawCase.victim_contact === 'string' ? rawCase.victim_contact : null,
+    victim_address: typeof rawCase.victim_address === 'string' ? rawCase.victim_address : null,
+    barangay_id: typeof rawCase.barangay_id === 'string' ? rawCase.barangay_id : 'cadunan',
+    purok_sitio: typeof rawCase.purok_sitio === 'string' ? rawCase.purok_sitio : null,
+    perpetrator_name: typeof rawCase.perpetrator_name === 'string' ? rawCase.perpetrator_name : null,
+    perpetrator_relationship: typeof rawCase.perpetrator_relationship === 'string' ? rawCase.perpetrator_relationship : null,
+    perpetrator_address: typeof rawCase.perpetrator_address === 'string' ? rawCase.perpetrator_address : null,
+    status: typeof rawCase.status === 'string' ? rawCase.status : 'active',
+    case_summary: typeof rawCase.case_summary === 'string' ? rawCase.case_summary : '',
+    intake_notes: typeof rawCase.intake_notes === 'string' ? rawCase.intake_notes : null,
+    assigned_worker_id: typeof rawCase.assigned_worker_id === 'string' ? rawCase.assigned_worker_id : user.id,
+    assigned_worker_name: typeof rawCase.assigned_worker_name === 'string' ? rawCase.assigned_worker_name : user.name,
+    resident_id: typeof rawCase.resident_id === 'string' ? rawCase.resident_id : null,
+    household_id: typeof rawCase.household_id === 'string' ? rawCase.household_id : null,
+    source: typeof rawCase.source === 'string' ? rawCase.source : 'manual_intake',
+    intake_sheet: intakeSheet,
+    is_deleted: Boolean(rawCase.is_deleted),
+    deleted_at: typeof rawCase.deleted_at === 'string' ? rawCase.deleted_at : null,
+    deleted_by: typeof rawCase.deleted_by === 'string' ? rawCase.deleted_by : null,
+    created_at: typeof rawCase.createdAt === 'string' ? rawCase.createdAt : nowIso,
+    updated_at: nowIso,
+  };
+
+  let { data, error } = await supabase
+    .from('cases')
+    .upsert(caseRow, { onConflict: 'id' })
+    .select('*')
+    .maybeSingle();
+
+  if (error && (error.message.includes('is_deleted') || error.message.includes('deleted_at') || error.message.includes('deleted_by'))) {
+    const { is_deleted, deleted_at, deleted_by, ...safeRow } = caseRow;
+    const retry = await supabase
+      .from('cases')
+      .upsert(safeRow, { onConflict: 'id' })
+      .select('*')
+      .maybeSingle();
+    data = retry.data;
+    error = retry.error;
+  }
+
+  if (error) {
+    throw new Error(`Failed to save case on server: ${error.message}`);
+  }
+
+  await createAuditLogEntry({
+    user,
+    action: rawCase.is_deleted ? 'DELETE' : 'UPDATE',
+    entityType: 'case',
+    entityId: id,
+    changes: {
+      case_number: caseRow.case_number,
+      victim_name: caseRow.victim_name,
+      status: caseRow.status,
+      is_deleted: caseRow.is_deleted,
+    },
+  });
+
+  return data ?? caseRow;
+}
+
+export async function saveCaseNoteOnServer(
+  user: User,
+  rawNote: Record<string, unknown>,
+) {
+  if (!['admin', 'social_worker'].includes(user.role)) {
+    throw new Error('You are not allowed to add case notes.');
+  }
+
+  const supabase = getSupabaseAdminClient();
+  const id = typeof rawNote.id === 'string' && rawNote.id.trim()
+    ? rawNote.id.trim()
+    : `note_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+
+  const nowIso = new Date().toISOString();
+  const noteRow = {
+    id,
+    case_id: typeof rawNote.case_id === 'string' ? rawNote.case_id : '',
+    worker_id: typeof rawNote.worker_id === 'string' ? rawNote.worker_id : user.id,
+    worker_name: typeof rawNote.worker_name === 'string' ? rawNote.worker_name : user.name,
+    date: typeof rawNote.date === 'string' ? rawNote.date : nowIso.slice(0, 10),
+    note: typeof rawNote.note === 'string' ? rawNote.note : '',
+    action_taken: typeof rawNote.action_taken === 'string' ? rawNote.action_taken : null,
+    next_follow_up: typeof rawNote.next_follow_up === 'string' ? rawNote.next_follow_up : null,
+    created_at: typeof rawNote.createdAt === 'string' ? rawNote.createdAt : nowIso,
+  };
+
+  const { data, error } = await supabase
+    .from('case_notes')
+    .upsert(noteRow, { onConflict: 'id' })
+    .select('*')
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(`Failed to save case note: ${error.message}`);
+  }
+
+  return data ?? noteRow;
+}
+
+export async function saveCaseAttachmentOnServer(
+  user: User,
+  rawAtt: Record<string, unknown>,
+) {
+  if (!['admin', 'social_worker'].includes(user.role)) {
+    throw new Error('You are not allowed to upload case attachments.');
+  }
+
+  const supabase = getSupabaseAdminClient();
+  const id = typeof rawAtt.id === 'string' && rawAtt.id.trim()
+    ? rawAtt.id.trim()
+    : `att_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+
+  const nowIso = new Date().toISOString();
+  const attRow = {
+    id,
+    case_id: typeof rawAtt.case_id === 'string' ? rawAtt.case_id : '',
+    file_name: typeof rawAtt.file_name === 'string' ? rawAtt.file_name : 'attachment',
+    file_type: typeof rawAtt.file_type === 'string' ? rawAtt.file_type : 'application/octet-stream',
+    file_size: typeof rawAtt.file_size === 'number' ? rawAtt.file_size : 0,
+    file_url: typeof rawAtt.file_url === 'string' ? rawAtt.file_url : '',
+    document_type: typeof rawAtt.document_type === 'string' ? rawAtt.document_type : 'other',
+    uploaded_by: typeof rawAtt.uploaded_by === 'string' ? rawAtt.uploaded_by : user.name,
+    uploaded_at: typeof rawAtt.uploaded_at === 'string' ? rawAtt.uploaded_at : nowIso,
+  };
+
+  const { data, error } = await supabase
+    .from('case_attachments')
+    .upsert(attRow, { onConflict: 'id' })
+    .select('id, case_id, file_name, file_type, file_size, document_type, uploaded_by, uploaded_at')
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(`Failed to save case attachment: ${error.message}`);
+  }
+
+  return data ?? attRow;
+}
+
+export async function deleteCaseAttachmentOnServer(
+  user: User,
+  attachmentId: string,
+) {
+  if (!['admin', 'social_worker'].includes(user.role)) {
+    throw new Error('You are not allowed to delete case attachments.');
+  }
+
+  const supabase = getSupabaseAdminClient();
+  const { error } = await supabase
+    .from('case_attachments')
+    .delete()
+    .eq('id', attachmentId);
+
+  if (error) {
+    throw new Error(`Failed to delete case attachment: ${error.message}`);
+  }
+
+  return { id: attachmentId, success: true };
+}
+
+export async function saveAicsRecordOnServer(
+  user: User,
+  rawRecord: Record<string, unknown>,
+) {
+  if (user.role !== 'admin' && user.role !== 'aics_focal') {
+    throw new Error('You are not allowed to manage AICS crisis assistance records.');
+  }
+
+  const supabase = getSupabaseAdminClient();
+  const id = typeof rawRecord.id === 'string' && rawRecord.id.trim()
+    ? rawRecord.id.trim()
+    : `aics_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+
+  const now = new Date().toISOString();
+  const recordRow = {
+    id,
+    control_number: typeof rawRecord.control_number === 'string' && rawRecord.control_number.trim()
+      ? rawRecord.control_number.trim()
+      : `AICS-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`,
+    intake_date: typeof rawRecord.intake_date === 'string' && rawRecord.intake_date.trim()
+      ? rawRecord.intake_date.trim()
+      : now.slice(0, 10),
+    intake_category: typeof rawRecord.intake_category === 'string' ? rawRecord.intake_category : 'walk_in',
+    sectors: Array.isArray(rawRecord.sectors) ? rawRecord.sectors : [],
+    client_category: typeof rawRecord.client_category === 'string' ? rawRecord.client_category : 'fhona',
+    sub_category: typeof rawRecord.sub_category === 'string' ? rawRecord.sub_category : 'General',
+    client_name: typeof rawRecord.client_name === 'string' ? rawRecord.client_name : '',
+    client_age: Number(rawRecord.client_age) || 0,
+    client_gender: typeof rawRecord.client_gender === 'string' ? rawRecord.client_gender : 'Female',
+    barangay_id: typeof rawRecord.barangay_id === 'string' ? rawRecord.barangay_id : user.barangay_id || 'poblacion',
+    purok_sitio: typeof rawRecord.purok_sitio === 'string' ? rawRecord.purok_sitio : null,
+    contact_number: typeof rawRecord.contact_number === 'string' ? rawRecord.contact_number : null,
+    resident_id: typeof rawRecord.resident_id === 'string' ? rawRecord.resident_id : null,
+    household_id: typeof rawRecord.household_id === 'string' ? rawRecord.household_id : null,
+    assistance_type: typeof rawRecord.assistance_type === 'string' ? rawRecord.assistance_type : 'other',
+    specific_assistance: typeof rawRecord.specific_assistance === 'string' ? rawRecord.specific_assistance : '',
+    amount_approved: Number(rawRecord.amount_approved) || 0,
+    disbursement_type: typeof rawRecord.disbursement_type === 'string' ? rawRecord.disbursement_type : 'cash',
+    status: typeof rawRecord.status === 'string' ? rawRecord.status : 'pending',
+    intake_sheet: rawRecord.intake_sheet && typeof rawRecord.intake_sheet === 'object' ? rawRecord.intake_sheet : {},
+    assigned_worker_id: typeof rawRecord.assigned_worker_id === 'string' ? rawRecord.assigned_worker_id : user.id,
+    assigned_worker_name: typeof rawRecord.assigned_worker_name === 'string' ? rawRecord.assigned_worker_name : user.name,
+    is_deleted: Boolean(rawRecord.is_deleted),
+    deleted_at: typeof rawRecord.deleted_at === 'string' ? rawRecord.deleted_at : null,
+    deleted_by: typeof rawRecord.deleted_by === 'string' ? rawRecord.deleted_by : null,
+    created_at: typeof rawRecord.createdAt === 'string' ? rawRecord.createdAt : now,
+    updated_at: now,
+  };
+
+  const { data, error } = await supabase
+    .from('aics_records')
+    .upsert(recordRow, { onConflict: 'id' })
+    .select('*')
+    .single();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  await createAuditLogEntry({
+    user,
+    action: 'CREATE',
+    entityType: 'aics_record',
+    entityId: id,
+    changes: {
+      control_number: recordRow.control_number,
+      client_name: recordRow.client_name,
+      assistance_type: recordRow.assistance_type,
+      amount_approved: recordRow.amount_approved,
+    },
+  });
+
+  return { record: data ?? recordRow };
+}
+
+export async function updateAicsRecordOnServer(
+  user: User,
+  id: string,
+  updates: Record<string, unknown>,
+) {
+  if (user.role !== 'admin' && user.role !== 'aics_focal') {
+    throw new Error('You are not allowed to manage AICS crisis assistance records.');
+  }
+
+  const supabase = getSupabaseAdminClient();
+  const payload: Record<string, unknown> = {
+    ...updates,
+    updated_at: new Date().toISOString(),
+  };
+
+  const { data, error } = await supabase
+    .from('aics_records')
+    .update(payload)
+    .eq('id', id)
+    .select('*')
+    .single();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  await createAuditLogEntry({
+    user,
+    action: 'UPDATE',
+    entityType: 'aics_record',
+    entityId: id,
+    changes: updates,
+  });
+
+  return { record: data };
+}
+
+export async function saveAicsDailyBudgetOnServer(
+  user: User,
+  rawBudget: Record<string, unknown>,
+) {
+  if (user.role !== 'admin' && user.role !== 'aics_focal') {
+    throw new Error('You are not allowed to manage AICS daily budget allocations.');
+  }
+
+  const supabase = getSupabaseAdminClient();
+  const now = new Date().toISOString();
+  const id = typeof rawBudget.id === 'string' && rawBudget.id.trim()
+    ? rawBudget.id.trim()
+    : `aics_budget_${rawBudget.date || new Date().toISOString().slice(0, 10)}`;
+
+  const budgetRow = {
+    id,
+    date: typeof rawBudget.date === 'string' ? rawBudget.date : new Date().toISOString().slice(0, 10),
+    allocated_amount: Number(rawBudget.allocated_amount) || 0,
+    initial_amount: Number(rawBudget.initial_amount) || 0,
+    top_ups: Array.isArray(rawBudget.top_ups) ? rawBudget.top_ups : [],
+    history: Array.isArray(rawBudget.history) ? rawBudget.history : [],
+    notes: typeof rawBudget.notes === 'string' ? rawBudget.notes : 'Standard Municipal Daily Allocation',
+    created_by: typeof rawBudget.created_by === 'string' ? rawBudget.created_by : user.name,
+    created_at: typeof rawBudget.createdAt === 'string' ? rawBudget.createdAt : now,
+    updated_at: now,
+  };
+
+  const { data, error } = await supabase
+    .from('aics_daily_budgets')
+    .upsert(budgetRow, { onConflict: 'id' })
+    .select('*')
+    .single();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  await createAuditLogEntry({
+    user,
+    action: 'UPDATE',
+    entityType: 'aics_daily_budget',
+    entityId: id,
+    changes: {
+      date: budgetRow.date,
+      allocated_amount: budgetRow.allocated_amount,
+      initial_amount: budgetRow.initial_amount,
+    },
+  });
+
+  return { budget: data ?? budgetRow };
+}
+
