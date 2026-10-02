@@ -49,14 +49,12 @@ const PERMISSIONS = {
     'disburse_aics',
     'export_aics',
     'view_residents',
-    'view_households',
   ],
   social_worker: [
     'view_cases',
     'manage_cases',
     'upload_cases',
     'view_residents',
-    'view_households',
   ],
   solo_parent_focal: [
     'view_solo_parents',

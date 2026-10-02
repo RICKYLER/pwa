@@ -5,11 +5,12 @@ import { usePathname, useRouter } from 'next/navigation';
 import { ChevronRight, LogOut, type LucideIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle } from '@/components/ui/sheet';
-import { getCurrentUser, hasPermission, logout } from '@/lib/auth';
+import { getCurrentUser, logout } from '@/lib/auth';
 import {
   ADMIN_NAV_GROUP,
   ADMIN_NAV_ITEMS,
   type AppNavItem,
+  getVisibleNavItemsForUser,
   isPathActive,
   STAFF_NAV_GROUPS,
   STAFF_NAV_ITEMS,
@@ -128,10 +129,7 @@ export default function MobileSidebar({ isOpen, onClose }: MobileSidebarProps) {
   const router = useRouter();
   const user = getCurrentUser();
 
-  const visibleItems = STAFF_NAV_ITEMS.filter((item) => {
-    if (user?.role === 'admin') return true;
-    return !item.perm || hasPermission(item.perm as never);
-  });
+  const visibleItems = getVisibleNavItemsForUser(STAFF_NAV_ITEMS, user);
   const adminItems = user?.role === 'admin' ? ADMIN_NAV_ITEMS : [];
   const pendingApprovals = usePendingMemberApprovalCount();
   const pendingLocationReviews = usePendingLocationReviewCount();

@@ -1,4 +1,6 @@
 import type { LucideIcon } from 'lucide-react';
+import type { User } from './db/schema';
+import { hasPermission } from './auth';
 import {
   Activity,
   BarChart3,
@@ -103,10 +105,12 @@ export const STAFF_NAV_ITEMS: AppNavItem[] = [
     icon: FolderLock,
     perm: 'view_cases',
     group: 'Social Work',
+    showInBottomNav: true,
+    mobilePriority: 2,
   },
   {
     href: '/aics',
-    label: 'AICS Assistance',
+    label: 'AICS Crisis Desk',
     mobileLabel: 'AICS',
     description: 'Crisis walk-in intake, GIS forms & assistance records',
     pageTitle: 'AICS Crisis Assistance',
@@ -245,17 +249,6 @@ export const STAFF_NAV_ITEMS: AppNavItem[] = [
 
 export const ADMIN_NAV_ITEMS: AppNavItem[] = [
   {
-    href: '/aics',
-    label: 'AICS Crisis Desk',
-    mobileLabel: 'AICS',
-    description: 'Crisis walk-in intake, GIS forms & assistance records',
-    pageTitle: 'AICS Crisis Assistance',
-    pageEyebrow: 'Administration',
-    icon: HandCoins,
-    perm: null,
-    group: 'Administration',
-  },
-  {
     href: '/admin/member-approvals',
     label: 'Member Approvals',
     mobileLabel: 'Approvals',
@@ -379,11 +372,52 @@ export function isPathActive(pathname: string, href: string): boolean {
   return pathname === href || (href !== '/dashboard' && href !== '/resident' && pathname.startsWith(href));
 }
 
+export function isNavItemVisibleForUser(item: AppNavItem, user: User | null | undefined): boolean {
+  if (!user) return false;
+  if (user.role === 'admin') return true;
+
+  // Dedicated departmental roles: restricted strictly to their modules
+  if (user.role === 'aics_focal') {
+    return item.href === '/aics';
+  }
+  if (user.role === 'solo_parent_focal') {
+    return item.href === '/solo-parents';
+  }
+  if (user.role === 'social_worker') {
+    return item.href === '/cases' || item.href === '/cases/dashboard';
+  }
+  if (user.role === 'responder') {
+    return item.href === '/responder' || item.href === '/evacuation' || item.href === '/alerts';
+  }
+  if (user.role === 'encoder') {
+    if (item.href === '/dashboard') return true;
+    if (item.perm) return hasPermission(item.perm as never);
+    return false;
+  }
+
+  // Fallback for any other roles: check permissions or false for dashboard
+  if (item.perm) {
+    return hasPermission(item.perm as never);
+  }
+  return false;
+}
+
+export function getVisibleNavItemsForUser(
+  items: AppNavItem[] = STAFF_NAV_ITEMS,
+  user: User | null | undefined,
+): AppNavItem[] {
+  return items.filter((item) => isNavItemVisibleForUser(item, user));
+}
+
 export function getMobileBottomNavItems(items: AppNavItem[] = STAFF_NAV_ITEMS): AppNavItem[] {
-  return items
+  const marked = items
     .filter((item) => item.showInBottomNav)
-    .sort((left, right) => (left.mobilePriority ?? Number.MAX_SAFE_INTEGER) - (right.mobilePriority ?? Number.MAX_SAFE_INTEGER))
-    .slice(0, MOBILE_BOTTOM_NAV_LIMIT);
+    .sort((left, right) => (left.mobilePriority ?? Number.MAX_SAFE_INTEGER) - (right.mobilePriority ?? Number.MAX_SAFE_INTEGER));
+
+  if (marked.length > 0) {
+    return marked.slice(0, MOBILE_BOTTOM_NAV_LIMIT);
+  }
+  return items.slice(0, MOBILE_BOTTOM_NAV_LIMIT);
 }
 
 function matchPath(items: AppNavItem[], pathname: string): AppNavItem | null {

@@ -3,10 +3,11 @@
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { ArrowUpRight, LogOut, ShieldCheck } from 'lucide-react';
-import { getCurrentUser, hasPermission, logout } from '@/lib/auth';
+import { getCurrentUser, logout } from '@/lib/auth';
 import {
   ADMIN_NAV_GROUP,
   ADMIN_NAV_ITEMS,
+  getVisibleNavItemsForUser,
   isPathActive,
   STAFF_NAV_GROUPS,
   STAFF_NAV_ITEMS,
@@ -93,10 +94,7 @@ export default function DesktopSidebar() {
   const router = useRouter();
   const user = getCurrentUser();
 
-  const visibleItems = STAFF_NAV_ITEMS.filter((item) => {
-    if (user?.role === 'admin') return true;
-    return !item.perm || hasPermission(item.perm as never);
-  });
+  const visibleItems = getVisibleNavItemsForUser(STAFF_NAV_ITEMS, user);
   const adminItems = user?.role === 'admin' ? ADMIN_NAV_ITEMS : [];
   const pendingApprovals = usePendingMemberApprovalCount();
   const pendingLocationReviews = usePendingLocationReviewCount();

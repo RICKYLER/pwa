@@ -7,6 +7,11 @@ import {
   AICS_SECTORS,
   getAicsSubCategories,
 } from '../lib/aics/aics-categories';
+import {
+  ADMIN_NAV_ITEMS,
+  getVisibleNavItemsForUser,
+  STAFF_NAV_ITEMS,
+} from '../lib/navigation';
 import type { User } from '../lib/db/schema';
 
 function makeUser(overrides: Partial<User>): User {
@@ -72,3 +77,38 @@ test('5. AICS 4 Client Categories match official MSWDO Matrix (Photos 3 & 4)', (
   assert.ok(ynspSubs.includes('Children in Conflict with the Law (9 to < 18 yrs. old)'));
   assert.ok(ynspSubs.includes('Pre-delinquent Youth'));
 });
+
+test('6. Single AICS entry in sidebar: admin sees /aics exactly once', () => {
+  const admin = makeUser({ role: 'admin' });
+  const staffVisible = getVisibleNavItemsForUser(STAFF_NAV_ITEMS, admin);
+  const allAdminItems = [...staffVisible, ...ADMIN_NAV_ITEMS];
+  const aicsOccurrences = allAdminItems.filter((item) => item.href === '/aics');
+  assert.equal(aicsOccurrences.length, 1, 'Admin should have only 1 AICS entry across the entire sidebar');
+  assert.equal(aicsOccurrences[0].label, 'AICS Crisis Desk');
+});
+
+test('7. aics_focal sees ONLY /aics in sidebar navigation', () => {
+  const aicsOfficer = makeUser({ role: 'aics_focal' });
+  const visible = getVisibleNavItemsForUser(STAFF_NAV_ITEMS, aicsOfficer);
+  assert.deepEqual(visible.map((item) => item.href), ['/aics']);
+  assert.equal(visible[0].label, 'AICS Crisis Desk');
+});
+
+test('8. solo_parent_focal sees ONLY /solo-parents in sidebar navigation', () => {
+  const soloOfficer = makeUser({ role: 'solo_parent_focal' });
+  const visible = getVisibleNavItemsForUser(STAFF_NAV_ITEMS, soloOfficer);
+  assert.deepEqual(visible.map((item) => item.href), ['/solo-parents']);
+});
+
+test('9. social_worker sees ONLY confidential VAWC/cases in sidebar navigation', () => {
+  const socialWorker = makeUser({ role: 'social_worker' });
+  const visible = getVisibleNavItemsForUser(STAFF_NAV_ITEMS, socialWorker);
+  assert.deepEqual(visible.map((item) => item.href), ['/cases/dashboard', '/cases']);
+});
+
+test('10. responder sees ONLY disaster response modules in sidebar navigation', () => {
+  const responder = makeUser({ role: 'responder' });
+  const visible = getVisibleNavItemsForUser(STAFF_NAV_ITEMS, responder);
+  assert.deepEqual(visible.map((item) => item.href), ['/responder', '/evacuation', '/alerts']);
+});
+
