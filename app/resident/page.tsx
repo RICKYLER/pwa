@@ -32,6 +32,9 @@ import {
   TentTree,
   Users,
   X,
+  HeartHandshake,
+  HandCoins,
+  History,
 } from 'lucide-react';
 import ResidentShell from '@/components/resident/ResidentShell';
 import ResidentProfileModal from '@/components/resident/ResidentProfileModal';
@@ -45,7 +48,10 @@ import { getResidents } from '@/lib/db/residents';
 import { getDisasterAlertRules } from '@/lib/db/disaster-alerts';
 import { getUserNotifications } from '@/lib/db/user-notifications';
 import { getDistributionRecordsForHousehold } from '@/lib/db/distribution';
+import { getAicsRecordsForResident } from '@/lib/db/aics';
+import { computeAicsCooldown, type AicsCooldownInfo } from '@/lib/aics/aics-cooldown';
 import type {
+  AicsRecord,
   DisasterAlertRule,
   DistributionRecord,
   DistributionStatus,
@@ -229,6 +235,7 @@ export default function ResidentPortalPage() {
   const [activeHouseholdResidents, setActiveHouseholdResidents] = useState<Resident[]>([]);
   const [flagsByResidentId, setFlagsByResidentId] = useState<Map<string, VulnerabilityFlags>>(new Map());
   const [claimedRecordsByEventId, setClaimedRecordsByEventId] = useState<Map<string, DistributionRecord>>(new Map());
+  const [aicsRecords, setAicsRecords] = useState<AicsRecord[]>([]);
   const [showRegistrationPrompt, setShowRegistrationPrompt] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -302,6 +309,13 @@ export default function ResidentPortalPage() {
           }
         }
 
+        // Fetch AICS assistance & redemption records for this resident / household
+        const aics = await getAicsRecordsForResident({
+          residentId: nextResidents[0]?.id,
+          householdId: activeHousehold?.id,
+          clientName: residentUser.name,
+        }).catch(() => []);
+
         if (!cancelled) {
           setRecords(households);
           setNotifications(inboxItems);
@@ -310,6 +324,7 @@ export default function ResidentPortalPage() {
           setActiveHouseholdResidents(nextResidents);
           setFlagsByResidentId(nextFlags);
           setClaimedRecordsByEventId(claimedMap);
+          setAicsRecords(aics);
         }
       } finally {
         if (!cancelled) {
@@ -327,7 +342,8 @@ export default function ResidentPortalPage() {
         event.detail.table !== 'disaster_alert_rules' &&
         event.detail.table !== 'residents' &&
         event.detail.table !== 'vulnerability_flags' &&
-        event.detail.table !== 'distribution_records'
+        event.detail.table !== 'distribution_records' &&
+        event.detail.table !== 'aics_records'
       ) {
         return;
       }
@@ -335,11 +351,17 @@ export default function ResidentPortalPage() {
       void loadRecords(true);
     }
 
+    function handleAicsEvent() {
+      void loadRecords(true);
+    }
+
     window.addEventListener('mswdo-data-changed', handleDataChanged);
+    window.addEventListener('mswdo:aics-records-changed', handleAicsEvent);
 
     return () => {
       cancelled = true;
       window.removeEventListener('mswdo-data-changed', handleDataChanged);
+      window.removeEventListener('mswdo:aics-records-changed', handleAicsEvent);
     };
   }, [router, user]);
 
@@ -350,6 +372,10 @@ export default function ResidentPortalPage() {
   const activeHousehold = useMemo(
     () => resolveResidentActiveApprovedHousehold(records),
     [records],
+  );
+  const aicsCooldown = useMemo(
+    () => computeAicsCooldown(aicsRecords),
+    [aicsRecords],
   );
   const shouldShowRegistrationOnboarding = !isLoading && records.length === 0 && !activeHousehold;
 
@@ -653,9 +679,22 @@ export default function ResidentPortalPage() {
                     : 'Republic of the Philippines · Municipality of Mabini · DSWD / MSWDO'}
                 </p>
               </div>
-              <div className="inline-flex items-center gap-1.5 rounded-full border border-emerald-300 bg-emerald-100/80 px-3.5 py-1 text-xs font-bold text-emerald-900 shadow-sm">
-                <CheckCircle2 className="h-4 w-4 text-emerald-700" />
-                {isCeb ? 'Opisyal nga Rehistrado (Active Household)' : 'Officially Registered (Active Household)'}
+              <div className="flex items-center gap-2 flex-wrap">
+                <div className="inline-flex items-center gap-1.5 rounded-full border border-emerald-300 bg-emerald-100/80 px-3.5 py-1 text-xs font-bold text-emerald-900 shadow-sm">
+                  <CheckCircle2 className="h-4 w-4 text-emerald-700" />
+                  {isCeb ? 'Opisyal nga Rehistrado (Active Household)' : 'Officially Registered (Active Household)'}
+                </div>
+                {aicsCooldown.isUnderCooldown ? (
+                  <div className="inline-flex items-center gap-1.5 rounded-full border border-rose-300 bg-rose-100/90 px-3.5 py-1 text-xs font-bold text-rose-900 shadow-sm">
+                    <span className="h-2 w-2 rounded-full bg-rose-600 animate-pulse" />
+                    <span>🔴 {isCeb ? `AICS: Naka-dawat na (${aicsCooldown.daysRemaining}d Cooldown)` : `AICS: Cooldown (${aicsCooldown.daysRemaining}d left)`}</span>
+                  </div>
+                ) : (
+                  <div className="inline-flex items-center gap-1.5 rounded-full border border-emerald-300 bg-emerald-100/80 px-3.5 py-1 text-xs font-bold text-emerald-900 shadow-sm">
+                    <span className="h-2 w-2 rounded-full bg-emerald-600" />
+                    <span>🟢 {isCeb ? 'AICS: Kwalipikado' : 'AICS: Eligible'}</span>
+                  </div>
+                )}
               </div>
             </div>
 
@@ -1376,6 +1415,204 @@ export default function ResidentPortalPage() {
               </p>
             </div>
           )}
+        </CivicPanel>
+      </div>
+
+      {/* 4.5 AICS CRISIS ASSISTANCE & REDEMPTION HISTORY (Kasaysayan sa Nadawat nga Hinabang ug 3-Month Cooldown) */}
+      <div className="mt-8">
+        <CivicPanel className="p-6 sm:p-8">
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="flex h-2.5 w-2.5 rounded-full bg-emerald-500" />
+                <span className="text-[11px] font-black uppercase tracking-wider text-emerald-800">
+                  {isCeb ? 'MSWDO Crisis Intervention Section' : 'MSWDO Crisis Intervention Section'}
+                </span>
+              </div>
+              <h3 className="text-xl font-black text-slate-950 mt-1 flex items-center gap-2">
+                <HeartHandshake className="h-6 w-6 text-emerald-600" />
+                {isCeb
+                  ? 'Kasaysayan sa Nadawat nga Hinabang (A.I.C.S.)'
+                  : 'Crisis Assistance & Redemption History (A.I.C.S.)'}
+              </h3>
+              <p className="text-xs text-slate-500 max-w-2xl mt-1">
+                {isCeb
+                  ? 'Subaya dinhi ang inyong mga nadawat nga financial aid, medical voucher, ug ang 3 ka buwan (90-day) eligibility countdown una makadawat pag-usab.'
+                  : 'Track your received financial aid, medical vouchers, and the 3-month (90-day) eligibility countdown before regular aid can be received again.'}
+              </p>
+            </div>
+
+            <div className="flex items-center gap-2">
+              {aicsCooldown.isUnderCooldown ? (
+                <span className="inline-flex items-center gap-1.5 rounded-full border border-rose-300 bg-rose-50 px-3.5 py-1 text-xs font-bold text-rose-800 shadow-xs">
+                  <span className="h-2 w-2 rounded-full bg-rose-600 animate-pulse" />
+                  🔴 {isCeb ? `${aicsCooldown.daysRemaining} ka Adlaw Cooldown` : `${aicsCooldown.daysRemaining}d Cooldown`}
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-300 bg-emerald-50 px-3.5 py-1 text-xs font-bold text-emerald-800 shadow-xs">
+                  <span className="h-2 w-2 rounded-full bg-emerald-600" />
+                  🟢 {isCeb ? 'Kwalipikado / Pwede Makadawat' : 'Eligible for Assistance'}
+                </span>
+              )}
+            </div>
+          </div>
+
+          {/* 3-Month Cooldown Banner Card */}
+          <div className="mt-5">
+            {aicsCooldown.isUnderCooldown ? (
+              <div className="rounded-[24px] border-2 border-rose-200/90 bg-gradient-to-br from-rose-50/80 via-white to-rose-50/40 p-5 shadow-xs">
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                  <div className="flex items-start gap-3.5">
+                    <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-rose-600 text-white shadow-md shadow-rose-900/10">
+                      <Clock3 className="h-6 w-6" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-rose-100 text-rose-800">
+                          {isCeb ? 'Ubos sa 3-Month Cooldown' : 'Under 3-Month Cooldown'}
+                        </span>
+                        <span className="text-xs font-bold text-rose-700">
+                          {aicsCooldown.daysRemaining} {isCeb ? 'ka adlaw nahabilin' : 'days remaining'}
+                        </span>
+                      </div>
+                      <h4 className="text-base font-black text-slate-950 mt-1">
+                        {isCeb ? 'Naka-dawat na og Hinabang' : 'Assistance Recently Claimed'}
+                      </h4>
+                      <p className="text-xs text-slate-600 mt-1 max-w-xl leading-relaxed">
+                        {isCeb ? aicsCooldown.explanationCeb : aicsCooldown.explanation}
+                      </p>
+                      <p className="text-[11px] text-slate-500 mt-1.5">
+                        {isCeb
+                          ? 'Subay sa regulasyon sa DSWD ug MSWDO Mabini, kinahanglan ang 90-day cooldown aron masiguro ang patas nga pag-apod-apod sa pondo sa lungsod.'
+                          : 'In compliance with DSWD and MSWDO Mabini policies, a 90-day cooldown applies to ensure equitable allocation across all resident families.'}
+                      </p>
+                    </div>
+                  </div>
+
+                  {aicsCooldown.nextEligibleDate && (
+                    <div className="sm:text-right shrink-0 rounded-2xl bg-white p-3.5 border border-rose-200 shadow-xs">
+                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
+                        {isCeb ? 'Kwalipikado Pag-usab Sa:' : 'Eligible Again On:'}
+                      </span>
+                      <span className="text-sm font-black text-rose-700 block mt-0.5">
+                        {new Date(aicsCooldown.nextEligibleDate).toLocaleDateString('en-US', {
+                          month: 'long',
+                          day: 'numeric',
+                          year: 'numeric',
+                        })}
+                      </span>
+                      <span className="text-[10px] font-semibold text-slate-500">
+                        {aicsCooldown.daysRemaining} {isCeb ? 'ka adlaw una ma-green' : 'days until green status'}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <div className="rounded-[24px] border-2 border-emerald-200/90 bg-gradient-to-br from-emerald-50/80 via-white to-teal-50/40 p-5 shadow-xs">
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                  <div className="flex items-start gap-3.5">
+                    <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-emerald-600 text-white shadow-md shadow-emerald-900/10">
+                      <CheckCircle2 className="h-6 w-6" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-emerald-100 text-emerald-800">
+                          {isCeb ? 'Walay Cooldown' : 'No Cooldown'}
+                        </span>
+                        <span className="text-xs font-bold text-emerald-700">
+                          {isCeb ? 'Kwalipikado sa Paggamit' : 'Eligible to Apply'}
+                        </span>
+                      </div>
+                      <h4 className="text-base font-black text-slate-950 mt-1">
+                        {isCeb ? 'Pwede Makadawat og Hinabang (AICS)' : 'Eligible for Crisis Assistance'}
+                      </h4>
+                      <p className="text-xs text-slate-600 mt-1 max-w-xl leading-relaxed">
+                        {isCeb
+                          ? 'Walay aktibo nga 3-month cooldown ang inyong rekord. Kung kamo adunay kalit nga emerhensya (tambal, operasyon, dialysis, chemotherapy, o kalit nga kamatayon), mahimo kamong moduol sa MSWDO Crisis Desk.'
+                          : 'Your record has no active 3-month cooldown. If you have an urgent medical crisis, dialysis, chemotherapy, or bereavement emergency, you may apply at the MSWDO Crisis Desk.'}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="sm:text-right shrink-0 rounded-2xl bg-white p-3.5 border border-emerald-200 shadow-xs">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
+                      {isCeb ? 'Status sa Profile' : 'Profile Status'}
+                    </span>
+                    <span className="text-sm font-black text-emerald-700 block mt-0.5">
+                      🟢 {isCeb ? 'Aktibo ug Kwalipikado' : 'Active & Eligible'}
+                    </span>
+                    <span className="text-[10px] text-slate-500">
+                      MSWDO Mabini Verified
+                    </span>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Vouchers & Disbursements History List */}
+          <div className="mt-6">
+            <h4 className="text-xs font-black uppercase tracking-wider text-slate-600 mb-3 flex items-center gap-1.5">
+              <History className="h-4 w-4 text-emerald-600" />
+              {isCeb ? 'Talaan sa mga Nadawat nga Hinabang / Ayuda:' : 'Disbursement & Redemption Records:'}
+            </h4>
+
+            {aicsRecords.length > 0 ? (
+              <div className="space-y-3">
+                {aicsRecords.map((item) => (
+                  <div
+                    key={item.id}
+                    className="rounded-2xl border border-slate-200 bg-white p-4.5 shadow-xs transition hover:border-emerald-300 hover:shadow-md"
+                  >
+                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                      <div>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-mono text-xs font-black text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded-lg border border-emerald-200">
+                            {item.control_number}
+                          </span>
+                          <span className="text-xs font-semibold text-slate-400">
+                            {item.intake_date}
+                          </span>
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-extrabold uppercase bg-emerald-100 text-emerald-900">
+                            <CheckCircle2 className="h-3 w-3 text-emerald-700" />
+                            {isCeb ? 'Nadawat Na (Claimed)' : 'Disbursed / Claimed'}
+                          </span>
+                        </div>
+                        <h5 className="text-sm font-black text-slate-900 mt-1.5">
+                          {item.specific_assistance}
+                        </h5>
+                        <p className="text-xs text-slate-500 mt-0.5">
+                          Category: <strong className="text-slate-700">{item.client_category.toUpperCase()}</strong> ({item.sub_category}) • Mode: {item.disbursement_type.replace('_', ' ')}
+                        </p>
+                      </div>
+
+                      <div className="sm:text-right shrink-0">
+                        <span className="text-base font-black text-emerald-800 block">
+                          ₱{Number(item.amount_approved).toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                        </span>
+                        <span className="text-[10px] text-slate-400 font-medium">
+                          {isCeb ? 'Opisyal nga Ayuda' : 'Official Grant'}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="rounded-2xl border-2 border-dashed border-slate-200 bg-slate-50/50 p-6 text-center">
+                <HeartHandshake className="mx-auto h-8 w-8 text-slate-300" />
+                <p className="mt-2 text-sm font-bold text-slate-700">
+                  {isCeb ? 'Wala pay natala nga nadawat nga AICS hinabang' : 'No AICS assistance records found'}
+                </p>
+                <p className="mt-1 text-xs text-slate-500 max-w-md mx-auto">
+                  {isCeb
+                    ? 'Kon kamo makadawat og tabang medikal, tambal, o emergency burial grant gikan sa MSWDO, mo-reflect kini dinhi kauban ang petsa ug kantidad.'
+                    : 'When you receive medical vouchers, hospital aid, or bereavement assistance from MSWDO, it will be catalogued here along with dates and amounts.'}
+                </p>
+              </div>
+            )}
+          </div>
         </CivicPanel>
       </div>
 

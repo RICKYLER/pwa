@@ -172,8 +172,8 @@ export function buildUnsupportedAddressValidationSummary(regionCode: string): Ad
     title: 'Address Validation API not supported for this region',
     message:
       normalizedRegion === 'PH'
-        ? 'Google Address Validation API does not currently list Philippines (PH) in its official coverage. For your barangay workflow, keep using autocomplete, geocoding, landmark directions, and manual pin verification.'
-        : `Google Address Validation API does not currently list ${normalizedRegion} in its official coverage.`,
+        ? 'OpenStreetMap is active for Philippine barangay addresses. For your workflow, use OpenStreetMap search, landmark directions, and StreetMap pin verification.'
+        : `Address Validation API does not currently list ${normalizedRegion} in its official coverage.`,
     regionCode: normalizedRegion,
     missingComponentTypes: [],
     unconfirmedComponentTypes: [],

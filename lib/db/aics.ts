@@ -84,6 +84,7 @@ export async function getAicsRecords(filters?: AicsQueryFilters): Promise<AicsRe
       filtered = filtered.filter((r) => {
         return (
           r.control_number.toLowerCase().includes(q) ||
+          (r.voucher_number && r.voucher_number.toLowerCase().includes(q)) ||
           r.client_name.toLowerCase().includes(q) ||
           (r.purok_sitio && r.purok_sitio.toLowerCase().includes(q)) ||
           r.sub_category.toLowerCase().includes(q) ||
@@ -295,4 +296,32 @@ export async function getAicsStats(): Promise<{
     pwdCount,
     ynspCount,
   };
+}
+
+/**
+ * Fetch all AICS records for a specific resident or household,
+ * sorted with the most recent assistance first.
+ */
+export async function getAicsRecordsForResident(options: {
+  residentId?: string | null;
+  householdId?: string | null;
+  clientName?: string | null;
+}): Promise<AicsRecord[]> {
+  try {
+    const all = await getAicsRecords();
+    const cleanResidentId = options.residentId?.trim();
+    const cleanHouseholdId = options.householdId?.trim();
+    const cleanName = options.clientName?.trim().toLowerCase();
+
+    return all.filter((r) => {
+      if (r.is_deleted) return false;
+      if (cleanResidentId && r.resident_id && r.resident_id === cleanResidentId) return true;
+      if (cleanHouseholdId && r.household_id && r.household_id === cleanHouseholdId) return true;
+      if (cleanName && r.client_name && r.client_name.trim().toLowerCase() === cleanName) return true;
+      return false;
+    });
+  } catch (error) {
+    console.error('Error fetching AICS records for resident:', error);
+    return [];
+  }
 }

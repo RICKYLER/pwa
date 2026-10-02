@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useId } from 'react';
+import React, { useState, useEffect, useId, useMemo, useRef } from 'react';
 import {
   X,
   User,
@@ -26,8 +26,13 @@ import {
   FileImage,
   RefreshCw,
   Loader2,
+  Search,
+  UserCheck,
+  Home,
+  Hash,
+  Edit3,
 } from 'lucide-react';
-import { BARANGAY_REGISTRY } from '@/lib/mabini-barangays';
+import { BARANGAY_REGISTRY, getBarangayName } from '@/lib/mabini-barangays';
 import {
   AICS_INTAKE_MODES,
   AICS_SECTORS,
@@ -42,6 +47,9 @@ import {
 } from '@/lib/aics/aics-requirements';
 import { compressDocumentPhoto, formatDocumentSize } from '@/lib/solo-parents/document-compressor';
 import { createAicsRecord, generateAicsControlNumber, getAicsRecords } from '@/lib/db/aics';
+import { getResidents } from '@/lib/db/residents';
+import { getHouseholds } from '@/lib/db/households';
+import { calculateAge } from '@/lib/db/vulnerability';
 import {
   getAicsDailyBudget,
   calculateAicsDailyBudgetSummary,
@@ -49,7 +57,10 @@ import {
   type AicsDailyBudgetSummary,
 } from '@/lib/db/aics-budget';
 import { printGeneralIntakeSheet } from '@/lib/cases/gis-printer';
+import { printPettyCashVoucher } from '@/lib/aics/voucher-printer';
+import { amountToWords } from '@/lib/aics/amount-to-words';
 import { getCurrentUser } from '@/lib/auth';
+import { computeAicsCooldown, type AicsCooldownInfo } from '@/lib/aics/aics-cooldown';
 import type {
   AicsRecord,
   AicsClientCategory,
@@ -57,6 +68,8 @@ import type {
   AicsIntakeCategory,
   AicsSector,
   CaseFamilyMember,
+  Resident,
+  Household,
 } from '@/lib/db/schema';
 
 interface NewAicsIntakeModalProps {
@@ -88,17 +101,63 @@ export default function NewAicsIntakeModal({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [validationError, setValidationError] = useState<string | null>(null);
   const [budgetSummary, setBudgetSummary] = useState<AicsDailyBudgetSummary | null>(null);
+  const [existingRecords, setExistingRecords] = useState<AicsRecord[]>([]);
+
+  // Census Residents & Households Search State
+  const [allResidents, setAllResidents] = useState<Resident[]>([]);
+  const [allHouseholds, setAllHouseholds] = useState<Household[]>([]);
+  const [isLoadingCensus, setIsLoadingCensus] = useState(false);
+  const [selectedResident, setSelectedResident] = useState<Resident | null>(null);
+  const [selectedHousehold, setSelectedHousehold] = useState<Household | null>(null);
+  const [isSearchOpen, setIsSearchOpen] = useState(false);
+  const searchDropdownRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (isOpen) {
-      void Promise.all([getAicsDailyBudget(), getAicsRecords()]).then(([budget, recs]) => {
-        setBudgetSummary(calculateAicsDailyBudgetSummary(budget, recs));
-      });
+      setIsLoadingCensus(true);
+      void Promise.all([
+        getAicsDailyBudget(),
+        getAicsRecords(),
+        getResidents({ status: 'active' }),
+        getHouseholds(),
+      ])
+        .then(([budget, recs, resList, hhList]) => {
+          setBudgetSummary(calculateAicsDailyBudgetSummary(budget, recs));
+          setExistingRecords(recs);
+          setAllResidents(resList || []);
+          setAllHouseholds(hhList || []);
+        })
+        .catch((err) => {
+          console.error('Failed to load AICS census data:', err);
+        })
+        .finally(() => {
+          setIsLoadingCensus(false);
+        });
+    } else {
+      setSelectedResident(null);
+      setSelectedHousehold(null);
+      setIsSearchOpen(false);
     }
   }, [isOpen]);
 
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (
+        searchDropdownRef.current &&
+        !searchDropdownRef.current.contains(event.target as Node)
+      ) {
+        setIsSearchOpen(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, []);
+
   // Form State - Identification & Intake
   const [controlNumber] = useState(generateAicsControlNumber());
+  const [voucherNumber, setVoucherNumber] = useState('');
   const [intakeDate, setIntakeDate] = useState(new Date().toISOString().split('T')[0]);
   const [intakeCategory, setIntakeCategory] = useState<AicsIntakeCategory>('walk_in');
   const [sectors, setSectors] = useState<AicsSector[]>([]);
@@ -109,6 +168,217 @@ export default function NewAicsIntakeModal({
   const [clientName, setClientName] = useState('');
   const [clientAge, setClientAge] = useState<string>('');
   const [clientGender, setClientGender] = useState<'Male' | 'Female'>('Female');
+
+  const householdsMap = useMemo(() => {
+    const map = new Map<string, Household>();
+    for (const hh of allHouseholds) {
+      map.set(hh.id, hh);
+    }
+    return map;
+  }, [allHouseholds]);
+
+  // Compute 90-day (3-month) cooldown for typed applicant or selected resident
+  const clientCooldown = useMemo(() => {
+    const trimmed = clientName.trim().toLowerCase();
+    if (!trimmed || existingRecords.length === 0) return null;
+    const matching = existingRecords.filter((r) => {
+      if (selectedResident && r.resident_id === selectedResident.id) return true;
+      if (selectedHousehold && r.household_id === selectedHousehold.id) return true;
+      const name = (r.client_name || '').trim().toLowerCase();
+      return name === trimmed || (trimmed.length >= 4 && (name.includes(trimmed) || trimmed.includes(name)));
+    });
+    if (matching.length === 0) return null;
+    return computeAicsCooldown(matching);
+  }, [clientName, existingRecords, selectedResident, selectedHousehold]);
+
+  interface CensusCandidate {
+    id: string;
+    resident?: Resident;
+    household?: Household;
+    fullName: string;
+    isHouseholdHead: boolean;
+    relationshipToHead: string;
+    barangayId: string;
+    barangayName: string;
+    purokSitio: string;
+    age: number | null;
+    gender: string;
+    civilStatus?: string;
+    occupation?: string;
+    cooldown: AicsCooldownInfo;
+  }
+
+  const filteredCandidates = useMemo(() => {
+    const q = clientName.trim().toLowerCase();
+    if (!q || selectedResident) return [];
+
+    const tokens = q.split(/\s+/).filter(Boolean);
+    const matched: CensusCandidate[] = [];
+
+    // 1. Search across registered active residents
+    for (const res of allResidents) {
+      const hh = res.household_id ? householdsMap.get(res.household_id) : undefined;
+      const brgyName = getBarangayName(hh?.barangay_id || (res as any).barangay_id || '');
+      const purok = (res as any).purok_sitio || hh?.purok_sitio || hh?.street_address || '';
+      const fullName = res.full_name || `${res.first_name || ''} ${res.last_name || ''}`.trim();
+      const searchText = `${fullName} ${hh?.head_name || ''} ${purok} ${brgyName}`.toLowerCase();
+
+      const matchesAllTokens = tokens.every((t) => searchText.includes(t));
+      if (matchesAllTokens) {
+        const isHead =
+          res.relationship_to_head?.toLowerCase() === 'head' ||
+          hh?.head_name?.trim().toLowerCase() === fullName.trim().toLowerCase();
+
+        const resRecords = existingRecords.filter(
+          (r) =>
+            (r.resident_id && r.resident_id === res.id) ||
+            (r.client_name && r.client_name.trim().toLowerCase() === fullName.trim().toLowerCase())
+        );
+        const cd = computeAicsCooldown(resRecords);
+        const ageVal = res.birthdate ? calculateAge(res.birthdate) : null;
+
+        matched.push({
+          id: res.id,
+          resident: res,
+          household: hh,
+          fullName,
+          isHouseholdHead: Boolean(isHead),
+          relationshipToHead: res.relationship_to_head || (isHead ? 'Head' : 'Member'),
+          barangayId: hh?.barangay_id || (res as any).barangay_id || 'poblacion',
+          barangayName: brgyName || 'Mabini',
+          purokSitio: purok,
+          age: isNaN(Number(ageVal)) ? null : ageVal,
+          gender: res.gender === 'M' ? 'Male' : 'Female',
+          civilStatus: res.civil_status,
+          occupation: res.occupation,
+          cooldown: cd,
+        });
+        if (matched.length >= 25) break;
+      }
+    }
+
+    // 2. Also search household heads from allHouseholds if not already matched
+    if (matched.length < 25) {
+      for (const hh of allHouseholds) {
+        if (!hh.head_name) continue;
+        const brgyName = getBarangayName(hh.barangay_id || '');
+        const purok = hh.purok_sitio || hh.street_address || '';
+        const searchText = `${hh.head_name} ${purok} ${brgyName}`.toLowerCase();
+        const matchesAllTokens = tokens.every((t) => searchText.includes(t));
+
+        if (matchesAllTokens) {
+          const alreadyIncluded = matched.some(
+            (m) => m.fullName.trim().toLowerCase() === hh.head_name.trim().toLowerCase()
+          );
+          if (!alreadyIncluded) {
+            const hhRecords = existingRecords.filter(
+              (r) =>
+                (r.household_id && r.household_id === hh.id) ||
+                (r.client_name && r.client_name.trim().toLowerCase() === hh.head_name.trim().toLowerCase())
+            );
+            const cd = computeAicsCooldown(hhRecords);
+            matched.push({
+              id: `hh_head_${hh.id}`,
+              household: hh,
+              fullName: hh.head_name,
+              isHouseholdHead: true,
+              relationshipToHead: 'Head',
+              barangayId: hh.barangay_id || 'poblacion',
+              barangayName: brgyName || 'Mabini',
+              purokSitio: purok,
+              age: null,
+              gender: 'Female',
+              cooldown: cd,
+            });
+            if (matched.length >= 25) break;
+          }
+        }
+      }
+    }
+
+    // Sort: household heads first, then alphabetical
+    return matched
+      .sort((a, b) => {
+        if (a.isHouseholdHead && !b.isHouseholdHead) return -1;
+        if (!a.isHouseholdHead && b.isHouseholdHead) return 1;
+        return a.fullName.localeCompare(b.fullName);
+      })
+      .slice(0, 8);
+  }, [clientName, allResidents, allHouseholds, householdsMap, existingRecords, selectedResident]);
+
+  function handleSelectCandidate(candidate: CensusCandidate) {
+    const res = candidate.resident;
+    const hh = candidate.household || (res?.household_id ? householdsMap.get(res.household_id) : undefined);
+
+    setSelectedResident(res || null);
+    setSelectedHousehold(hh || null);
+    setClientName(candidate.fullName);
+    setIsSearchOpen(false);
+
+    if (candidate.gender) {
+      setClientGender(candidate.gender as 'Male' | 'Female');
+    }
+    if (res?.birthdate) {
+      setBirthdate(res.birthdate);
+      const calcAge = calculateAge(res.birthdate);
+      if (!isNaN(calcAge)) {
+        setClientAge(String(calcAge));
+      }
+    } else if (candidate.age !== null) {
+      setClientAge(String(candidate.age));
+    }
+
+    if (candidate.barangayId) {
+      setBarangayId(candidate.barangayId);
+    }
+    if (candidate.purokSitio) {
+      setPurokSitio(candidate.purokSitio);
+    }
+    if (res?.contact_number || hh?.contact_number) {
+      setContactNumber(res?.contact_number || hh?.contact_number || '');
+    }
+    if (res?.civil_status) {
+      setCivilStatus(res.civil_status.toLowerCase());
+    }
+    if (res?.occupation) {
+      setOccupation(res.occupation);
+    }
+    if (res?.income_level) {
+      if (res.income_level === 'low') setMonthlyIncome('5000');
+      else if (res.income_level === 'middle') setMonthlyIncome('15000');
+      else if (res.income_level === 'high') setMonthlyIncome('30000');
+    }
+
+    // Auto-populate Step 3 Household Family Members if available
+    const householdId = hh?.id || res?.household_id;
+    if (householdId) {
+      const otherMembers = allResidents.filter(
+        (m) => m.household_id === householdId && m.id !== res?.id
+      );
+      if (otherMembers.length > 0) {
+        const autoFamily: CaseFamilyMember[] = otherMembers.map((m) => {
+          const age = calculateAge(m.birthdate);
+          return {
+            name: m.full_name,
+            age: isNaN(age) ? '' : String(age),
+            civil_status: (m.civil_status as any) || 'single',
+            relationship: m.relationship_to_head || 'Household Member',
+            educational_attainment: 'High School Graduate',
+            occupation: m.occupation || 'None',
+            income: '0',
+            birthday: m.birthdate || '',
+          };
+        });
+        setFamilyMembers(autoFamily);
+      }
+    }
+  }
+
+  function handleClearSelectedResident() {
+    setSelectedResident(null);
+    setSelectedHousehold(null);
+    setIsSearchOpen(true);
+  }
   const [birthdate, setBirthdate] = useState('');
   const [birthplace, setBirthplace] = useState('');
   const [barangayId, setBarangayId] = useState(currentUser?.barangay_id || 'poblacion');
@@ -126,6 +396,25 @@ export default function NewAicsIntakeModal({
   const [specificAssistance, setSpecificAssistance] = useState('Hemodialysis Treatment Assistance');
   const [amountApproved, setAmountApproved] = useState<string>('3000');
   const [disbursementType, setDisbursementType] = useState('cash');
+  const [sourceOfFund, setSourceOfFund] = useState('DSWD FUNDING');
+  const [otherSupportText, setOtherSupportText] = useState('');
+  const [customAmountInWords, setCustomAmountInWords] = useState('');
+  const [isCustomWords, setIsCustomWords] = useState(false);
+
+  const autoAmountInWords = useMemo(
+    () => amountToWords(parseFloat(amountApproved) || 0),
+    [amountApproved]
+  );
+
+  const amountInWords = isCustomWords && customAmountInWords.trim()
+    ? customAmountInWords.toUpperCase()
+    : autoAmountInWords;
+
+  function handleGenerateVoucherNo() {
+    const year = new Date().getFullYear();
+    const rand = Math.floor(1000 + Math.random() * 9000);
+    setVoucherNumber(`PCV-${year}-${rand}`);
+  }
 
   // Step 2: Requirements Checklist & File Attachments State
   const [requirementChecklist, setRequirementChecklist] = useState<Record<string, boolean>>({
@@ -314,7 +603,7 @@ export default function NewAicsIntakeModal({
     setCurrentStep(step);
   }
 
-  async function handleSave(andPrint = false) {
+  async function handleSave(printMode: 'gis' | 'voucher' | 'both' | boolean = false) {
     if (!clientName.trim()) {
       setCurrentStep(1);
       setValidationError('Please enter the client / applicant name.');
@@ -329,6 +618,8 @@ export default function NewAicsIntakeModal({
 
       const record = await createAicsRecord({
         control_number: controlNumber,
+        voucher_number: voucherNumber.trim() || controlNumber,
+        source_of_fund: sourceOfFund.trim() || 'DSWD FUNDING',
         intake_date: intakeDate,
         intake_category: intakeCategory,
         sectors,
@@ -340,6 +631,8 @@ export default function NewAicsIntakeModal({
         barangay_id: barangayId,
         purok_sitio: purokSitio.trim(),
         contact_number: contactNumber.trim(),
+        resident_id: selectedResident?.id,
+        household_id: selectedHousehold?.id || selectedResident?.household_id,
         assistance_type: assistanceType,
         specific_assistance: specificAssistance.trim() || 'AICS Financial Grant',
         amount_approved: parsedAmount,
@@ -388,7 +681,7 @@ export default function NewAicsIntakeModal({
         },
       });
 
-      if (andPrint) {
+      if (printMode === true || printMode === 'gis' || printMode === 'both') {
         printGeneralIntakeSheet({
           id: record.id,
           case_number: record.control_number,
@@ -406,6 +699,21 @@ export default function NewAicsIntakeModal({
           intake_sheet: record.intake_sheet,
           createdAt: record.createdAt,
           updatedAt: record.updatedAt,
+        });
+      }
+
+      if (printMode === 'voucher' || printMode === 'both') {
+        printPettyCashVoucher({
+          control_number: record.control_number,
+          voucher_number: record.voucher_number || record.control_number,
+          intake_date: record.intake_date,
+          client_name: record.client_name,
+          barangay_id: record.barangay_id,
+          purok_sitio: record.purok_sitio,
+          assistance_type: record.assistance_type,
+          specific_assistance: record.specific_assistance,
+          amount_approved: record.amount_approved,
+          source_of_fund: record.source_of_fund || sourceOfFund,
         });
       }
 
@@ -532,10 +840,10 @@ export default function NewAicsIntakeModal({
                 <div>
                   <h3 className="text-sm font-extrabold text-slate-900 flex items-center gap-2">
                     <User className="h-4 w-4 text-emerald-600" />
-                    Step 1: Client Intake & Assistance Request
+                    Step 1: Client Intake & Assistance Voucher
                   </h3>
                   <p className="text-[11px] text-slate-500">
-                    Enter the client&apos;s identifying details, intake category, and the assistance applied for.
+                    Sunda ang 3 ka hugna: (1) Client Information, (2) Petty Cash Voucher & Aid Amount, (3) Official MSWDO Category.
                   </p>
                 </div>
                 <span className="text-xs font-bold text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-200">
@@ -543,23 +851,27 @@ export default function NewAicsIntakeModal({
                 </span>
               </div>
 
-              {/* Mode & Date */}
-              <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200/80 space-y-3">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-[11px] font-extrabold text-slate-700 uppercase tracking-wider mb-1.5">
-                      Intake Mode (Entry Category) *
-                    </label>
-                    <div className="grid grid-cols-3 gap-2">
+              {/* -----------------------------------------------------------------
+                  PART 1: CLIENT IDENTIFYING INFORMATION & INTAKE SETUP
+                  ----------------------------------------------------------------- */}
+              <div className="p-4 bg-white rounded-2xl border border-slate-200/90 space-y-4 shadow-xs">
+                <div className="flex items-center justify-between pb-2 border-b border-slate-100 flex-wrap gap-2">
+                  <h4 className="text-xs font-extrabold text-slate-900 uppercase tracking-wider flex items-center gap-2">
+                    <span className="flex h-5 w-5 items-center justify-center rounded-full bg-emerald-700 text-white text-[10px] font-black">1</span>
+                    Client Identifying Information & Intake Mode
+                  </h4>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[11px] font-bold text-slate-500">Intake Mode:</span>
+                    <div className="inline-flex rounded-xl border border-slate-200 p-0.5 bg-slate-50">
                       {AICS_INTAKE_MODES.map((mode) => (
                         <button
                           key={mode.id}
                           type="button"
                           onClick={() => setIntakeCategory(mode.id)}
-                          className={`py-2 px-3 text-xs font-bold rounded-xl border text-center transition cursor-pointer ${
+                          className={`px-2.5 py-1 text-[10px] font-bold rounded-lg transition cursor-pointer ${
                             intakeCategory === mode.id
-                              ? 'bg-emerald-700 text-white border-emerald-800 shadow-sm'
-                              : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                              ? 'bg-emerald-700 text-white shadow-xs'
+                              : 'text-slate-600 hover:text-slate-900'
                           }`}
                         >
                           {mode.label}
@@ -567,66 +879,206 @@ export default function NewAicsIntakeModal({
                       ))}
                     </div>
                   </div>
-
-                  <div>
-                    <label className="block text-[11px] font-extrabold text-slate-700 uppercase tracking-wider mb-1.5">
-                      Date of Interview *
-                    </label>
-                    <input
-                      type="date"
-                      value={intakeDate}
-                      onChange={(e) => setIntakeDate(e.target.value)}
-                      className="w-full p-2.5 text-xs rounded-xl border border-slate-200 bg-white font-medium focus:border-emerald-500 outline-none"
-                    />
-                  </div>
                 </div>
-
-                {/* Beneficiary Sectors */}
-                <div>
-                  <label className="block text-[11px] font-extrabold text-slate-700 uppercase tracking-wider mb-1.5">
-                    Beneficiary Sectors (Select all applicable)
-                  </label>
-                  <div className="flex flex-wrap gap-1.5">
-                    {AICS_SECTORS.map((sec) => {
-                      const isSelected = sectors.includes(sec.id);
-                      return (
-                        <button
-                          key={sec.id}
-                          type="button"
-                          onClick={() => toggleSector(sec.id)}
-                          className={`px-3 py-1 rounded-full text-xs font-semibold transition cursor-pointer border ${
-                            isSelected
-                              ? 'bg-emerald-100 text-emerald-800 border-emerald-300 font-bold'
-                              : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
-                          }`}
-                        >
-                          {isSelected ? '✓ ' : '+ '}
-                          {sec.label}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              </div>
-
-              {/* Client Identifying Information */}
-              <div className="space-y-4">
-                <h4 className="text-xs font-extrabold text-slate-800 uppercase tracking-wider">
-                  Client Identifying Information
-                </h4>
 
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                   <div className="md:col-span-2">
-                    <label className="block text-[11px] font-bold text-slate-700 mb-1">
-                      Name of Applicant / Client <span className="text-rose-600 font-black">*</span>
-                    </label>
-                    <input
-                      type="text"
-                      value={clientName}
-                      onChange={(e) => setClientName(e.target.value)}
-                      placeholder="e.g. Maria Clara De Los Santos"
-                      className="w-full p-2.5 text-xs rounded-xl border border-slate-200 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 outline-none font-medium"
-                    />
+                    {selectedResident ? (
+                      <div className="flex items-center justify-between mb-1">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <label className="text-[11px] font-bold text-slate-800">
+                            Name of Applicant / Client <span className="text-rose-600 font-black">*</span>
+                          </label>
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
+                            <UserCheck className="h-3 w-3" />
+                            {selectedResident.relationship_to_head?.toLowerCase() === 'head'
+                              ? 'Registered Household Head'
+                              : 'Registered Resident'}
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={handleClearSelectedResident}
+                          className="text-[11px] font-bold text-teal-700 hover:text-teal-900 underline cursor-pointer"
+                        >
+                          Change / Re-search
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="flex items-center justify-between mb-1">
+                        <label className="text-[11px] font-bold text-slate-800 flex items-center gap-1.5">
+                          <span>Name of Applicant / Client</span>
+                          <span className="text-rose-600 font-black">*</span>
+                          <span className="text-[10px] font-normal text-slate-500">
+                            (Pangitaa sa census register o i-type)
+                          </span>
+                        </label>
+                        {isLoadingCensus && (
+                          <span className="text-[10px] text-teal-600 flex items-center gap-1 font-medium">
+                            <Loader2 className="h-3 w-3 animate-spin" /> Loading census...
+                          </span>
+                        )}
+                      </div>
+                    )}
+
+                    <div className="relative" ref={searchDropdownRef}>
+                      <div className="relative">
+                        <Search className="absolute left-3 top-3 h-4 w-4 text-slate-400 pointer-events-none" />
+                        <input
+                          type="text"
+                          value={clientName}
+                          onChange={(e) => {
+                            setClientName(e.target.value);
+                            if (selectedResident && e.target.value !== selectedResident.full_name) {
+                              setSelectedResident(null);
+                              setSelectedHousehold(null);
+                            }
+                            setIsSearchOpen(true);
+                          }}
+                          onFocus={() => {
+                            if (clientName.trim().length >= 1 && !selectedResident) {
+                              setIsSearchOpen(true);
+                            }
+                          }}
+                          placeholder="I-type ang ngalan sa aplikante o household head..."
+                          className={`w-full pl-9 pr-9 py-2.5 text-xs rounded-xl border font-medium outline-none transition ${
+                            selectedResident
+                              ? 'border-emerald-500 bg-emerald-50/30 text-slate-900 ring-1 ring-emerald-400'
+                              : 'border-slate-200 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 bg-white text-slate-900'
+                          }`}
+                        />
+                        {selectedResident ? (
+                          <div className="absolute right-3 top-2.5 flex items-center gap-1">
+                            <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+                          </div>
+                        ) : clientName.trim().length > 0 ? (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setClientName('');
+                              handleClearSelectedResident();
+                            }}
+                            className="absolute right-3 top-2.5 text-slate-400 hover:text-slate-600 cursor-pointer"
+                            aria-label="Clear client name"
+                          >
+                            <X className="h-3.5 w-3.5" />
+                          </button>
+                        ) : null}
+                      </div>
+
+                      {/* Dropdown Results from Registered Census */}
+                      {isSearchOpen && filteredCandidates.length > 0 && (
+                        <div className="absolute left-0 right-0 z-50 mt-1 max-h-72 overflow-y-auto rounded-2xl border border-emerald-200/90 bg-white p-1.5 shadow-2xl space-y-1">
+                          <div className="px-2.5 py-1 text-[10px] font-extrabold uppercase tracking-wider text-slate-500 flex items-center justify-between border-b border-slate-100">
+                            <span className="flex items-center gap-1 text-slate-700">
+                              <Users className="h-3 w-3 text-teal-600" />
+                              Mga Rehistradong Residente & Household ({filteredCandidates.length})
+                            </span>
+                            <span className="text-teal-700 font-semibold">Pilia aron ma-autofill</span>
+                          </div>
+                          {filteredCandidates.map((candidate) => (
+                            <button
+                              key={candidate.id}
+                              type="button"
+                              onClick={() => handleSelectCandidate(candidate)}
+                              className="w-full text-left p-2.5 rounded-xl hover:bg-emerald-50/80 border border-transparent hover:border-emerald-200 transition flex items-center justify-between gap-3 cursor-pointer group"
+                            >
+                              <div className="flex items-start gap-2.5 min-w-0">
+                                <div
+                                  className={`mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg ${
+                                    candidate.isHouseholdHead
+                                      ? 'bg-amber-100 text-amber-800 border border-amber-200'
+                                      : 'bg-teal-100 text-teal-800 border border-teal-200'
+                                  }`}
+                                >
+                                  {candidate.isHouseholdHead ? (
+                                    <Home className="h-3.5 w-3.5" />
+                                  ) : (
+                                    <User className="h-3.5 w-3.5" />
+                                  )}
+                                </div>
+                                <div className="min-w-0">
+                                  <div className="flex items-center gap-1.5 flex-wrap">
+                                    <span className="font-bold text-xs text-slate-900 group-hover:text-emerald-950">
+                                      {candidate.fullName}
+                                    </span>
+                                    <span
+                                      className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${
+                                        candidate.isHouseholdHead
+                                          ? 'bg-amber-100 text-amber-800'
+                                          : 'bg-slate-100 text-slate-600'
+                                      }`}
+                                    >
+                                      {candidate.isHouseholdHead
+                                        ? 'Household Head'
+                                        : `Member (${candidate.relationshipToHead})`}
+                                    </span>
+                                  </div>
+                                  <p className="text-[11px] text-slate-500 truncate mt-0.5">
+                                    📍 {candidate.purokSitio ? `${candidate.purokSitio}, ` : ''}Brgy.{' '}
+                                    {candidate.barangayName}
+                                    {candidate.age !== null ? ` • ${candidate.age} y/o` : ''} •{' '}
+                                    {candidate.gender}
+                                  </p>
+                                </div>
+                              </div>
+
+                              <div className="shrink-0 text-right">
+                                {candidate.cooldown.isUnderCooldown ? (
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 text-rose-800 border border-rose-200">
+                                    🔴 {candidate.cooldown.daysRemaining}d Cooldown
+                                  </span>
+                                ) : (
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
+                                    🟢 Pwede Makadawat
+                                  </span>
+                                )}
+                                <p className="text-[9px] text-teal-700 font-semibold mt-0.5 group-hover:underline">
+                                  Pilia & Autofill →
+                                </p>
+                              </div>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+
+                      {/* Helper when typed name has no registered match */}
+                      {isSearchOpen &&
+                        clientName.trim().length >= 2 &&
+                        filteredCandidates.length === 0 &&
+                        !selectedResident && (
+                          <div className="absolute left-0 right-0 z-50 mt-1 rounded-2xl border border-slate-200 bg-white p-3 shadow-xl text-xs text-slate-600">
+                            <p className="font-semibold text-slate-800">
+                              Wala sa rehistro sa census si &quot;{clientName}&quot;
+                            </p>
+                            <p className="text-[11px] text-slate-500 mt-1">
+                              Walay problema — pwede ra nimo ipadayon ang pag-fill out isip usa ka <strong>walk-in applicant</strong>.
+                            </p>
+                          </div>
+                        )}
+                    </div>
+                    {clientCooldown?.isUnderCooldown && (
+                      <div className="mt-2 p-3 rounded-2xl bg-rose-50 border border-rose-300 text-xs text-rose-900 space-y-1">
+                        <div className="flex items-center gap-1.5 font-bold text-rose-700">
+                          <AlertTriangle className="h-4 w-4 text-rose-600 shrink-0" />
+                          <span>Pahibalo: Naka-dawat na sa miaging 90 ka adlaw ({clientCooldown.daysRemaining}d nahabilin)</span>
+                        </div>
+                        <p className="text-[11px] leading-relaxed text-rose-800">
+                          {clientCooldown.explanationCeb}
+                        </p>
+                        <p className="text-[10px] text-rose-600 font-semibold">
+                          ⚠️ Ubos sa standard policy, 3 ka buwan (90 ka adlaw) ang cooldown una makadawat og balik. Pwede ra ipadayon kon emergency exception.
+                        </p>
+                      </div>
+                    )}
+                    {clientCooldown && !clientCooldown.isUnderCooldown && (
+                      <div className="mt-2 p-2.5 rounded-2xl bg-emerald-50 border border-emerald-300 text-xs text-emerald-900 flex items-center gap-2">
+                        <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
+                        <span className="text-[11px] font-semibold text-emerald-800">
+                          🟢 Kwalipikado: {clientCooldown.explanationCeb}
+                        </span>
+                      </div>
+                    )}
                   </div>
 
                   <div>
@@ -642,7 +1094,7 @@ export default function NewAicsIntakeModal({
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
                   <div>
                     <label className="block text-[11px] font-bold text-slate-700 mb-1">Age</label>
                     <input
@@ -661,6 +1113,16 @@ export default function NewAicsIntakeModal({
                       value={birthdate}
                       onChange={(e) => setBirthdate(e.target.value)}
                       className="w-full p-2.5 text-xs rounded-xl border border-slate-200 bg-white focus:border-emerald-500 outline-none"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-700 mb-1">Date of Interview *</label>
+                    <input
+                      type="date"
+                      value={intakeDate}
+                      onChange={(e) => setIntakeDate(e.target.value)}
+                      className="w-full p-2.5 text-xs rounded-xl border border-slate-200 bg-white font-medium focus:border-emerald-500 outline-none"
                     />
                   </div>
 
@@ -746,12 +1208,524 @@ export default function NewAicsIntakeModal({
                 </div>
               </div>
 
-              {/* AICS Client Category & Assistance Type */}
-              <div className="p-4 bg-emerald-50/50 rounded-2xl border border-emerald-200/80 space-y-4">
-                <h4 className="text-xs font-extrabold text-emerald-950 uppercase tracking-wider flex items-center gap-1.5">
-                  <HeartHandshake className="h-4 w-4 text-emerald-700" />
-                  Official MSWDO Category & Assistance Grant
-                </h4>
+              {/* -----------------------------------------------------------------
+                  PART 2: MUNICIPAL PETTY CASH VOUCHER & AID GRANT (INTERACTIVE PAPER VOUCHER)
+                  ----------------------------------------------------------------- */}
+              <div className="bg-white rounded-3xl border-2 border-slate-300 shadow-md p-4 sm:p-6 space-y-4 relative overflow-hidden">
+                {/* Desk Mode Indicator */}
+                <div className="flex flex-wrap items-center justify-between gap-2 border-b-2 border-slate-100 pb-3 bg-slate-50/70 -mx-4 sm:-mx-6 -mt-4 sm:-mt-6 px-4 sm:px-6 py-3">
+                  <div className="flex items-center gap-2.5">
+                    <span className="flex h-6 w-6 items-center justify-center rounded-full bg-blue-900 text-white text-[11px] font-black shadow-xs">
+                      2
+                    </span>
+                    <div>
+                      <h4 className="text-xs font-black text-slate-900 uppercase tracking-wider flex items-center gap-2">
+                        <FileText className="h-4 w-4 text-blue-800" />
+                        Municipal Petty Cash Voucher Encoder
+                      </h4>
+                      <p className="text-[10px] text-slate-500 font-medium">
+                        Direkta i-encode ang Voucher No., Particulars, ug kantidad gikan sa physical booklet o slip
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        printPettyCashVoucher({
+                          control_number: controlNumber,
+                          voucher_number: voucherNumber.trim() || controlNumber,
+                          intake_date: intakeDate,
+                          client_name: clientName.trim() || 'Client / Applicant',
+                          barangay_id: barangayId,
+                          purok_sitio: purokSitio,
+                          assistance_type: assistanceType,
+                          specific_assistance: specificAssistance,
+                          amount_approved: parseFloat(amountApproved) || 0,
+                          source_of_fund: sourceOfFund,
+                        });
+                      }}
+                      className="px-3 py-1.5 text-xs font-bold bg-blue-900 hover:bg-blue-800 text-white rounded-xl shadow-xs transition flex items-center gap-1.5 cursor-pointer"
+                      title="I-preview o i-print ang official Petty Cash Voucher"
+                    >
+                      <Printer className="h-3.5 w-3.5 text-blue-300" />
+                      Preview / Print Voucher
+                    </button>
+                  </div>
+                </div>
+
+                {/* PHYSICAL VOUCHER SHEET REPLICA */}
+                <div className="border-2 border-slate-700/80 rounded-2xl p-4 sm:p-5 bg-white space-y-4 shadow-sm">
+                  {/* Voucher Header (Logos, Title & Voucher No / Date) */}
+                  <div className="grid grid-cols-1 md:grid-cols-12 gap-3 items-center border-b-2 border-slate-200 pb-3">
+                    <div className="md:col-span-8 flex items-center gap-3">
+                      <div className="flex items-center gap-2 shrink-0">
+                        <img
+                          src="/davao-de-oro-logo.png"
+                          alt="Mabini Seal"
+                          className="h-11 w-11 object-contain drop-shadow-xs"
+                          onError={(e) => {
+                            (e.target as HTMLElement).style.display = 'none';
+                          }}
+                        />
+                        <img
+                          src="/mswdo-logo.png"
+                          alt="MSWDO Seal"
+                          className="h-11 w-11 object-contain drop-shadow-xs"
+                          onError={(e) => {
+                            (e.target as HTMLElement).style.display = 'none';
+                          }}
+                        />
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-[9.5px] uppercase font-bold tracking-widest text-slate-500">
+                          Republic of the Philippines
+                        </p>
+                        <h3 className="text-sm sm:text-base font-black text-slate-900 tracking-tight uppercase leading-none">
+                          Municipality of Mabini
+                        </h3>
+                        <p className="text-[10px] text-slate-600 font-medium">Province of Davao de Oro</p>
+                        <p className="text-[9.5px] font-black text-emerald-800 uppercase tracking-tight">
+                          Municipal Social Welfare and Development Office (MSWDO)
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Voucher No. & Date Block */}
+                    <div className="md:col-span-4 flex flex-col items-start md:items-end gap-1.5">
+                      <div className="bg-blue-900 text-white font-black text-[11px] tracking-wider px-3 py-1 rounded-sm uppercase shadow-xs">
+                        Petty Cash Voucher
+                      </div>
+
+                      <div className="w-full flex items-center justify-between md:justify-end gap-1.5 text-xs">
+                        <span className="font-bold text-slate-700 shrink-0 text-[11px]">Voucher No.:</span>
+                        <div className="flex items-center gap-1 w-44">
+                          <input
+                            type="text"
+                            value={voucherNumber}
+                            onChange={(e) => setVoucherNumber(e.target.value)}
+                            placeholder={controlNumber}
+                            className="w-full px-2 py-0.5 text-xs font-mono font-bold text-blue-950 border-b-2 border-slate-600 focus:border-blue-700 bg-blue-50/50 outline-none transition rounded-t"
+                            title="I-type ang numero gikan sa booklet slip (o ibilin nga blangko para sa auto-fill)"
+                          />
+                          <button
+                            type="button"
+                            onClick={handleGenerateVoucherNo}
+                            className="px-1.5 py-0.5 text-[9px] font-bold bg-slate-200 hover:bg-slate-300 text-slate-800 rounded transition cursor-pointer shrink-0"
+                            title="Generate PCV tracking number"
+                          >
+                            Auto
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="w-full flex items-center justify-between md:justify-end gap-1.5 text-xs">
+                        <span className="font-bold text-slate-700 shrink-0 text-[11px]">Date:</span>
+                        <input
+                          type="date"
+                          value={intakeDate}
+                          onChange={(e) => setIntakeDate(e.target.value)}
+                          className="w-44 px-2 py-0.5 text-xs font-semibold text-slate-800 border-b-2 border-slate-600 focus:border-blue-700 bg-blue-50/50 outline-none transition rounded-t"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Source of Fund, Payee & Address */}
+                  <div className="space-y-2.5 pt-1">
+                    <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+                      <div className="flex items-center gap-2 bg-yellow-200/90 border-2 border-yellow-400 px-3 py-1.5 rounded-lg shadow-2xs">
+                        <HeartHandshake className="h-4 w-4 text-amber-900 shrink-0" />
+                        <span className="text-[10px] font-black text-amber-950 uppercase tracking-wider">
+                          Source of Fund:
+                        </span>
+                        <select
+                          value={sourceOfFund}
+                          onChange={(e) => setSourceOfFund(e.target.value)}
+                          className="bg-yellow-300 text-amber-950 font-black text-xs px-2 py-0.5 rounded border border-yellow-500 focus:outline-none cursor-pointer"
+                        >
+                          <option value="DSWD FUNDING">DSWD FUNDING</option>
+                          <option value="LGU MABINI GENERAL FUND">LGU MABINI GENERAL FUND</option>
+                          <option value="CALAMITY / QUICK RESPONSE">CALAMITY / QUICK RESPONSE</option>
+                          <option value="TRUST FUND">TRUST FUND</option>
+                        </select>
+                      </div>
+
+                      <div className="text-[10px] text-slate-500 font-medium">
+                        (Palihug kumpirmaha ang pondo nga gigikanan sa tabang)
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-12 gap-3 text-xs">
+                      <div className="sm:col-span-6 flex items-baseline gap-2">
+                        <span className="font-bold text-slate-700 shrink-0 text-[11px]">Payee / Recipient:</span>
+                        <input
+                          type="text"
+                          value={clientName}
+                          onChange={(e) => setClientName(e.target.value)}
+                          placeholder="Pangalan sa nakadawat o aplikante"
+                          className="w-full px-2 py-1 font-black text-slate-900 border-b-2 border-slate-600 bg-transparent focus:border-blue-700 outline-none text-xs"
+                        />
+                      </div>
+
+                      <div className="sm:col-span-6 flex items-baseline gap-2">
+                        <span className="font-bold text-slate-700 shrink-0 text-[11px]">Address:</span>
+                        <input
+                          type="text"
+                          value={purokSitio ? `${purokSitio}, ${getBarangayName(barangayId)}, Mabini` : `${getBarangayName(barangayId)}, Mabini`}
+                          onChange={(e) => setPurokSitio(e.target.value)}
+                          placeholder="Purok / Barangay, Mabini"
+                          className="w-full px-2 py-1 font-semibold text-slate-800 border-b-2 border-slate-600 bg-transparent focus:border-blue-700 outline-none text-xs"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* PURPOSE / PARTICULARS (Exact 5 Pill checkboxes from physical voucher) */}
+                  <div className="pt-2">
+                    <div className="bg-blue-900 text-white px-3 py-1.5 rounded-t-lg flex items-center justify-between">
+                      <span className="text-[11px] font-black uppercase tracking-wider">
+                        Purpose / Particulars (Please check):
+                      </span>
+                      <span className="text-[10px] text-blue-200">
+                        {assistanceType === 'other' ? 'Other Support Selected' : 'Aid Category Selected'}
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-5 gap-2 p-2.5 border-2 border-t-0 border-blue-900/30 rounded-b-lg bg-slate-50/50">
+                      {/* 1. Medical Assistance */}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setAssistanceType('medical');
+                          if (specificAssistance.toLowerCase().includes('support') || specificAssistance.toLowerCase().includes('funeral')) {
+                            setSpecificAssistance('Medical / Treatment Assistance');
+                          }
+                        }}
+                        className={`p-2 rounded-xl border text-left flex items-center gap-2 transition cursor-pointer ${
+                          assistanceType === 'medical'
+                            ? 'bg-blue-100/90 border-blue-600 text-blue-950 font-bold shadow-xs'
+                            : 'bg-white border-slate-200 text-slate-700 hover:bg-blue-50/60'
+                        }`}
+                      >
+                        <span className="text-base">➕</span>
+                        <div className="min-w-0">
+                          <p className="text-[11px] font-black leading-tight">Medical Assistance</p>
+                          <span className={`text-[9px] font-mono ${assistanceType === 'medical' ? 'text-blue-700 font-bold' : 'text-slate-400'}`}>
+                            {assistanceType === 'medical' ? '☑ CHECKED' : '☐ Select'}
+                          </span>
+                        </div>
+                      </button>
+
+                      {/* 2. Burial Assistance */}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setAssistanceType('burial');
+                          setSpecificAssistance('Funeral & Burial Assistance');
+                        }}
+                        className={`p-2 rounded-xl border text-left flex items-center gap-2 transition cursor-pointer ${
+                          assistanceType === 'burial'
+                            ? 'bg-emerald-100/90 border-emerald-600 text-emerald-950 font-bold shadow-xs'
+                            : 'bg-white border-slate-200 text-slate-700 hover:bg-emerald-50/60'
+                        }`}
+                      >
+                        <span className="text-base">🌿</span>
+                        <div className="min-w-0">
+                          <p className="text-[11px] font-black leading-tight">Burial Assistance</p>
+                          <span className={`text-[9px] font-mono ${assistanceType === 'burial' ? 'text-emerald-700 font-bold' : 'text-slate-400'}`}>
+                            {assistanceType === 'burial' ? '☑ CHECKED' : '☐ Select'}
+                          </span>
+                        </div>
+                      </button>
+
+                      {/* 3. Transportation Assistance */}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setAssistanceType('food_transportation');
+                          setSpecificAssistance('Transportation Fare / Stranded Assistance');
+                        }}
+                        className={`p-2 rounded-xl border text-left flex items-center gap-2 transition cursor-pointer ${
+                          assistanceType === 'food_transportation'
+                            ? 'bg-amber-100/90 border-amber-600 text-amber-950 font-bold shadow-xs'
+                            : 'bg-white border-slate-200 text-slate-700 hover:bg-amber-50/60'
+                        }`}
+                      >
+                        <span className="text-base">🚌</span>
+                        <div className="min-w-0">
+                          <p className="text-[11px] font-black leading-tight">Transportation</p>
+                          <span className={`text-[9px] font-mono ${assistanceType === 'food_transportation' ? 'text-amber-700 font-bold' : 'text-slate-400'}`}>
+                            {assistanceType === 'food_transportation' ? '☑ CHECKED' : '☐ Select'}
+                          </span>
+                        </div>
+                      </button>
+
+                      {/* 4. Educational Assistance */}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setAssistanceType('educational');
+                          setSpecificAssistance('School Supplies / Tuition Aid');
+                        }}
+                        className={`p-2 rounded-xl border text-left flex items-center gap-2 transition cursor-pointer ${
+                          assistanceType === 'educational'
+                            ? 'bg-purple-100/90 border-purple-600 text-purple-950 font-bold shadow-xs'
+                            : 'bg-white border-slate-200 text-slate-700 hover:bg-purple-50/60'
+                        }`}
+                      >
+                        <span className="text-base">🎓</span>
+                        <div className="min-w-0">
+                          <p className="text-[11px] font-black leading-tight">Educational</p>
+                          <span className={`text-[9px] font-mono ${assistanceType === 'educational' ? 'text-purple-700 font-bold' : 'text-slate-400'}`}>
+                            {assistanceType === 'educational' ? '☑ CHECKED' : '☐ Select'}
+                          </span>
+                        </div>
+                      </button>
+
+                      {/* 5. Other Support (specify) */}
+                      <div
+                        onClick={() => {
+                          setAssistanceType('other');
+                        }}
+                        className={`p-2 rounded-xl border flex flex-col justify-between transition cursor-pointer ${
+                          assistanceType === 'other'
+                            ? 'bg-rose-100/90 border-rose-600 text-rose-950 font-bold shadow-xs'
+                            : 'bg-white border-slate-200 text-slate-700 hover:bg-rose-50/60'
+                        }`}
+                      >
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-base">👥</span>
+                          <span className="text-[11px] font-black leading-tight">Other Support:</span>
+                        </div>
+                        <input
+                          type="text"
+                          value={otherSupportText}
+                          onFocus={() => setAssistanceType('other')}
+                          onChange={(e) => {
+                            setOtherSupportText(e.target.value);
+                            setAssistanceType('other');
+                            if (e.target.value.trim()) {
+                              setSpecificAssistance(e.target.value.trim());
+                            }
+                          }}
+                          placeholder="specify purpose..."
+                          className="mt-1 w-full text-[10px] px-1.5 py-0.5 border-b border-slate-400 bg-white/70 focus:border-rose-600 outline-none rounded"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Specific Purpose Line */}
+                  <div className="flex items-center gap-2 text-xs">
+                    <span className="font-bold text-slate-700 shrink-0 text-[11px]">
+                      Specific Purpose / Details:
+                    </span>
+                    <input
+                      type="text"
+                      value={specificAssistance}
+                      onChange={(e) => setSpecificAssistance(e.target.value)}
+                      placeholder="e.g. Hemodialysis treatment, Laboratory diagnostic assistance"
+                      className="w-full px-2 py-1 font-bold text-slate-800 border-b-2 border-slate-400 bg-blue-50/30 focus:border-blue-700 outline-none text-xs"
+                    />
+                  </div>
+
+                  {/* VOUCHER AMOUNT TABLE (Matches physical voucher layout) */}
+                  <div className="border-2 border-slate-800 rounded-lg overflow-hidden">
+                    <div className="grid grid-cols-12 bg-slate-800 text-white text-[10.5px] font-black uppercase tracking-wider py-1.5 px-3">
+                      <div className="col-span-8 flex items-center justify-between">
+                        <span>Amount in Words</span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIsCustomWords(!isCustomWords);
+                            if (!customAmountInWords) {
+                              setCustomAmountInWords(autoAmountInWords);
+                            }
+                          }}
+                          className="text-[9px] font-semibold text-blue-300 hover:text-white flex items-center gap-1 cursor-pointer bg-slate-700/80 px-1.5 py-0.5 rounded"
+                          title="I-override o i-edit ang spelling sa kantidad"
+                        >
+                          <Edit3 className="h-3 w-3" />
+                          {isCustomWords ? 'Gamita ang Auto Words' : 'I-type Manual'}
+                        </button>
+                      </div>
+                      <div className="col-span-4 text-right">
+                        <span>Amount (₱)</span>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-12 divide-x-2 divide-slate-800 bg-white">
+                      {/* Left: Amount in Words */}
+                      <div className="col-span-8 p-3 flex flex-col justify-center">
+                        {isCustomWords ? (
+                          <textarea
+                            rows={2}
+                            value={customAmountInWords}
+                            onChange={(e) => setCustomAmountInWords(e.target.value)}
+                            placeholder="I-TYPE ANG WORDS SA KANTIDAD..."
+                            className="w-full p-2 text-xs font-black tracking-wide text-slate-900 border border-blue-400 rounded uppercase outline-none focus:ring-1 focus:ring-blue-600 font-mono"
+                          />
+                        ) : (
+                          <div>
+                            <p className="text-xs sm:text-sm font-black text-slate-900 tracking-wide font-mono leading-snug">
+                              {amountInWords}
+                            </p>
+                            <span className="text-[9.5px] text-slate-400 font-medium">
+                              (Auto-generated gikan sa gi-encode nga kantidad)
+                            </span>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Right: Amount in Figures Input */}
+                      <div className="col-span-4 p-3 bg-emerald-50/40 flex flex-col justify-center">
+                        <div className="flex items-center gap-1">
+                          <span className="text-sm font-black text-emerald-950">₱</span>
+                          <input
+                            type="number"
+                            value={amountApproved}
+                            onChange={(e) => setAmountApproved(e.target.value)}
+                            placeholder="0"
+                            className="w-full text-right text-base sm:text-lg font-black font-mono text-emerald-900 bg-white border-2 border-emerald-500 rounded-lg px-2 py-1 outline-none focus:ring-2 focus:ring-emerald-600 shadow-2xs"
+                          />
+                        </div>
+                        <span className="text-[9.5px] text-right text-emerald-700 font-bold mt-1">
+                          Approved Assistance Grant
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Total Amount Bottom Row */}
+                    <div className="grid grid-cols-12 divide-x-2 divide-slate-800 border-t-2 border-slate-800 bg-slate-100/90 text-xs font-black">
+                      <div className="col-span-8 px-3 py-1.5 text-right uppercase tracking-wider text-slate-800 flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <span className="text-[10px] text-slate-500 font-bold uppercase">Disbursement Mode:</span>
+                          <select
+                            value={disbursementType}
+                            onChange={(e) => setDisbursementType(e.target.value)}
+                            className="bg-white border border-slate-300 rounded px-2 py-0.5 text-[11px] font-bold text-slate-800 cursor-pointer"
+                          >
+                            <option value="cash">Cash Pay-out (Municipal Treasury)</option>
+                            <option value="guarantee_letter">Guarantee Letter (GL)</option>
+                            <option value="cheque">Cheque Voucher</option>
+                            <option value="food_pack">Food / In-Kind Goods</option>
+                          </select>
+                        </div>
+                        <span className="text-xs font-black text-slate-900">Total Amount:</span>
+                      </div>
+                      <div className="col-span-4 px-3 py-1.5 text-right font-mono text-sm text-emerald-900 font-black">
+                        ₱{(parseFloat(amountApproved) || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Certification statement */}
+                  <div className="text-center pt-1 text-[10.5px] text-slate-600 italic">
+                    &quot;I hereby certify that the above expenses are necessary, valid and proper for official use and in accordance with existing rules and regulations.&quot;
+                  </div>
+
+                  {/* 4 Official Signatory Boxes matching paper voucher */}
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center text-xs pt-1">
+                    <div className="p-2 rounded-xl border border-slate-300 bg-slate-50/50">
+                      <span className="text-[9px] font-extrabold text-slate-500 uppercase block">Prepared by:</span>
+                      <p className="font-black text-slate-900 text-[11px] mt-2">VIRGENCITA M. CHU, RSW, MPA</p>
+                      <p className="text-[9.5px] text-slate-600 font-medium">MSWDO</p>
+                    </div>
+
+                    <div className="p-2 rounded-xl border border-slate-300 bg-slate-50/50">
+                      <span className="text-[9px] font-extrabold text-slate-500 uppercase block">Paid by:</span>
+                      <p className="font-black text-slate-900 text-[11px] mt-2">FLORITA B. BATIAO</p>
+                      <p className="text-[9.5px] text-slate-600 font-medium">AO IV</p>
+                    </div>
+
+                    <div className="p-2 rounded-xl border border-slate-300 bg-slate-50/50">
+                      <span className="text-[9px] font-extrabold text-slate-500 uppercase block">Approved by:</span>
+                      <p className="font-black text-slate-900 text-[11px] mt-2">EMERSON L. LUEGO</p>
+                      <p className="text-[9.5px] text-slate-600 font-medium">Municipal Mayor</p>
+                    </div>
+
+                    <div className="p-2 rounded-xl border border-slate-300 bg-slate-50/50">
+                      <span className="text-[9px] font-extrabold text-slate-500 uppercase block">Received by (Client):</span>
+                      <p className="font-black text-slate-900 text-[11px] mt-2 truncate">
+                        {clientName.trim() || '____________________'}
+                      </p>
+                      <p className="text-[9px] text-slate-500 italic">(Signature Over Printed Name)</p>
+                    </div>
+                  </div>
+
+                  {/* Voucher Footer Banner */}
+                  <div className="flex items-center justify-between text-[10px] text-slate-500 border-t border-slate-200 pt-2 font-medium">
+                    <span>📍 Mabini, Davao de Oro • LGU Mabini</span>
+                    <span className="italic font-semibold text-slate-700">Malasakit • Pagkakaisa • Kaunlaran</span>
+                  </div>
+                </div>
+
+                {/* Real-Time Daily Budget Feedback */}
+                {budgetSummary && budgetSummary.hasBudgetSet && (
+                  <div className="space-y-1 bg-blue-50/60 p-3 rounded-2xl border border-blue-200">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-slate-600 font-semibold">Today's Remaining MSWDO Allocation:</span>
+                      <span
+                        className={`font-black font-mono ${
+                          budgetSummary.remainingAmount > 0 ? 'text-emerald-700' : 'text-rose-600'
+                        }`}
+                      >
+                        {formatAicsCurrency(budgetSummary.remainingAmount)}
+                      </span>
+                    </div>
+
+                    {parseFloat(amountApproved || '0') > 0 && (
+                      <div className="text-xs flex items-center justify-between border-t border-blue-100 pt-1.5">
+                        <span className="text-slate-600">Balance after this voucher is released:</span>
+                        <span
+                          className={`font-black font-mono ${
+                            budgetSummary.remainingAmount - parseFloat(amountApproved || '0') >= 0
+                              ? 'text-teal-700'
+                              : 'text-amber-700'
+                          }`}
+                        >
+                          {formatAicsCurrency(
+                            budgetSummary.remainingAmount - parseFloat(amountApproved || '0')
+                          )}
+                        </span>
+                      </div>
+                    )}
+
+                    {parseFloat(amountApproved || '0') > budgetSummary.remainingAmount && (
+                      <div className="p-2.5 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-900 leading-tight flex items-start gap-1.5 mt-1">
+                        <AlertCircle className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
+                        <span>
+                          <strong>Soft Cap Warning:</strong> Nilapas sa pondo karon nga{' '}
+                          {formatAicsCurrency(budgetSummary.remainingAmount)} og{' '}
+                          {formatAicsCurrency(
+                            parseFloat(amountApproved || '0') - budgetSummary.remainingAmount
+                          )}
+                          . Pwede gihapon i-proceed kon duna nay pag-tugot sa MSWDO supervisor.
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* -----------------------------------------------------------------
+                  PART 3: OFFICIAL MSWDO CATEGORY & TARGET CLIENT GROUP (3RD AS REQUESTED!)
+                  ----------------------------------------------------------------- */}
+              <div className="p-4 bg-emerald-50/50 rounded-2xl border border-emerald-200/80 space-y-4 shadow-xs">
+                <div className="flex items-center justify-between pb-2 border-b border-emerald-200/60 flex-wrap gap-2">
+                  <h4 className="text-xs font-extrabold text-emerald-950 uppercase tracking-wider flex items-center gap-2">
+                    <span className="flex h-6 w-6 items-center justify-center rounded-full bg-emerald-700 text-white text-[11px] font-black shadow-xs">
+                      3
+                    </span>
+                    <HeartHandshake className="h-4 w-4 text-emerald-700" />
+                    Official MSWDO Category & Target Client Group
+                  </h4>
+                  <span className="text-[10px] font-bold text-emerald-800 bg-emerald-100 px-2.5 py-0.5 rounded-full border border-emerald-200">
+                    MSWDO Standard Matrix
+                  </span>
+                </div>
 
                 {/* 4 Client Categories Matrix */}
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
@@ -778,6 +1752,7 @@ export default function NewAicsIntakeModal({
                   })}
                 </div>
 
+                {/* Specific Sub-Category & Beneficiary Sectors */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
                     <label className="block text-[11px] font-bold text-slate-800 mb-1">
@@ -798,104 +1773,28 @@ export default function NewAicsIntakeModal({
 
                   <div>
                     <label className="block text-[11px] font-bold text-slate-800 mb-1">
-                      Assistance Type (Aid Category) *
+                      Beneficiary Sectors (Cross-Cutting Sectors)
                     </label>
-                    <select
-                      value={assistanceType}
-                      onChange={(e) => setAssistanceType(e.target.value as AicsAssistanceType)}
-                      className="w-full p-2.5 text-xs rounded-xl border border-slate-200 bg-white font-bold text-slate-800 focus:border-emerald-500 outline-none"
-                    >
-                      {AICS_ASSISTANCE_TYPES.map((type) => (
-                        <option key={type.id} value={type.id}>
-                          {type.label}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                  <div>
-                    <label className="block text-[11px] font-bold text-slate-800 mb-1">Specific Assistance / Purpose *</label>
-                    <input
-                      type="text"
-                      value={specificAssistance}
-                      onChange={(e) => setSpecificAssistance(e.target.value)}
-                      placeholder="e.g. Hospitalization Bill, Funeral Grant"
-                      className="w-full p-2.5 text-xs rounded-xl border border-slate-200 bg-white focus:border-emerald-500 outline-none"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-[11px] font-bold text-slate-800 mb-1">Approved Grant Amount (₱) *</label>
-                    <input
-                      type="number"
-                      value={amountApproved}
-                      onChange={(e) => setAmountApproved(e.target.value)}
-                      placeholder="3000"
-                      className="w-full p-2.5 text-xs rounded-xl border border-slate-200 bg-white font-black text-emerald-800 focus:border-emerald-500 outline-none font-mono"
-                    />
-
-                    {/* Real-Time Daily Budget Feedback */}
-                    {budgetSummary && budgetSummary.hasBudgetSet && (
-                      <div className="mt-1.5 space-y-1 bg-slate-50 p-2 rounded-xl border border-slate-200">
-                        <div className="flex items-center justify-between text-[10.5px]">
-                          <span className="text-slate-500 font-semibold">Today's Remaining:</span>
-                          <span
-                            className={`font-black ${
-                              budgetSummary.remainingAmount > 0 ? 'text-emerald-700' : 'text-rose-600'
+                    <div className="flex flex-wrap gap-1.5 pt-0.5">
+                      {AICS_SECTORS.map((sec) => {
+                        const isSelected = sectors.includes(sec.id);
+                        return (
+                          <button
+                            key={sec.id}
+                            type="button"
+                            onClick={() => toggleSector(sec.id)}
+                            className={`px-2.5 py-1 rounded-full text-[11px] font-semibold transition cursor-pointer border ${
+                              isSelected
+                                ? 'bg-emerald-100 text-emerald-800 border-emerald-300 font-bold'
+                                : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
                             }`}
                           >
-                            {formatAicsCurrency(budgetSummary.remainingAmount)}
-                          </span>
-                        </div>
-
-                        {parseFloat(amountApproved || '0') > 0 && (
-                          <div className="text-[10px] flex items-center justify-between border-t border-slate-200/60 pt-0.5">
-                            <span className="text-slate-500">Balance after this release:</span>
-                            <span
-                              className={`font-bold ${
-                                budgetSummary.remainingAmount - parseFloat(amountApproved || '0') >= 0
-                                  ? 'text-teal-700 font-black'
-                                  : 'text-amber-700 font-black'
-                              }`}
-                            >
-                              {formatAicsCurrency(
-                                budgetSummary.remainingAmount - parseFloat(amountApproved || '0')
-                              )}
-                            </span>
-                          </div>
-                        )}
-
-                        {parseFloat(amountApproved || '0') > budgetSummary.remainingAmount && (
-                          <div className="p-2 rounded-lg bg-amber-50 border border-amber-200 text-[10.5px] text-amber-900 leading-tight flex items-start gap-1.5 mt-1">
-                            <AlertCircle className="h-3.5 w-3.5 text-amber-600 shrink-0 mt-0.5" />
-                            <span>
-                              <strong>Soft Cap Warning:</strong> Exceeds today's remaining allocation of{' '}
-                              {formatAicsCurrency(budgetSummary.remainingAmount)} by{' '}
-                              {formatAicsCurrency(
-                                parseFloat(amountApproved || '0') - budgetSummary.remainingAmount
-                              )}
-                              . This intake may proceed with supervisor notation.
-                            </span>
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
-
-                  <div>
-                    <label className="block text-[11px] font-bold text-slate-800 mb-1">Disbursement Mode</label>
-                    <select
-                      value={disbursementType}
-                      onChange={(e) => setDisbursementType(e.target.value)}
-                      className="w-full p-2.5 text-xs rounded-xl border border-slate-200 bg-white font-medium focus:border-emerald-500 outline-none"
-                    >
-                      <option value="cash">Cash Pay-out (Municipal Treasury)</option>
-                      <option value="guarantee_letter">Guarantee Letter (GL)</option>
-                      <option value="cheque">Cheque Voucher</option>
-                      <option value="food_pack">Food / In-Kind Goods</option>
-                    </select>
+                            {isSelected ? '✓ ' : '+ '}
+                            {sec.label}
+                          </button>
+                        );
+                      })}
+                    </div>
                   </div>
                 </div>
               </div>
@@ -1514,6 +2413,17 @@ export default function NewAicsIntakeModal({
                   <div className="pt-2 border-t border-slate-200 text-[11px] text-slate-500">
                     Category: <strong>{AICS_CLIENT_CATEGORIES[clientCategory]?.name}</strong> ({subCategory})
                   </div>
+                  {clientCooldown?.isUnderCooldown && (
+                    <div className="mt-2 p-2.5 rounded-xl bg-rose-100/80 border border-rose-300 text-xs text-rose-900 space-y-0.5">
+                      <div className="font-bold flex items-center gap-1 text-rose-800">
+                        <AlertTriangle className="h-3.5 w-3.5 text-rose-600" />
+                        <span>3-Month Cooldown Active: {clientCooldown.daysRemaining}d left</span>
+                      </div>
+                      <p className="text-[10px] text-rose-700">
+                        Naka-dawat niadtong {clientCooldown.lastDisbursedDate ? new Date(clientCooldown.lastDisbursedDate).toLocaleDateString() : 'recent'}. Processing as emergency exception.
+                      </p>
+                    </div>
+                  )}
                 </div>
 
                 {/* Aid & Voucher Card */}
@@ -1531,12 +2441,34 @@ export default function NewAicsIntakeModal({
                     </button>
                   </div>
 
+                  <div className="grid grid-cols-2 gap-2 text-xs">
+                    <div>
+                      <span className="text-[10px] font-bold text-emerald-800 uppercase tracking-wider block">
+                        Voucher No.
+                      </span>
+                      <p className="text-xs font-mono font-black text-slate-900">
+                        {voucherNumber.trim() || controlNumber}
+                      </p>
+                    </div>
+                    <div>
+                      <span className="text-[10px] font-bold text-emerald-800 uppercase tracking-wider block">
+                        Source of Fund
+                      </span>
+                      <p className="text-xs font-bold text-amber-800 bg-amber-100/80 px-1.5 py-0.5 rounded inline-block">
+                        {sourceOfFund}
+                      </p>
+                    </div>
+                  </div>
+
                   <div>
                     <span className="text-[10px] font-bold text-emerald-800 uppercase tracking-wider">
                       Specific Purpose
                     </span>
                     <p className="text-sm font-black text-emerald-950">
                       {specificAssistance || 'AICS Financial Grant'}
+                    </p>
+                    <p className="text-[10px] font-bold text-slate-600 uppercase font-mono mt-0.5">
+                      Words: {amountInWords}
                     </p>
                   </div>
 
@@ -1700,8 +2632,20 @@ export default function NewAicsIntakeModal({
                 <button
                   type="button"
                   disabled={isSubmitting}
-                  onClick={() => handleSave(true)}
+                  onClick={() => handleSave('voucher')}
+                  className="px-4 py-2.5 text-xs font-bold bg-blue-900 text-white hover:bg-blue-800 rounded-xl transition cursor-pointer flex items-center gap-1.5 shadow-sm disabled:opacity-50"
+                  title="Save record and print Municipal Petty Cash Voucher"
+                >
+                  <FileText className="h-3.5 w-3.5 text-blue-300" />
+                  Save & Print Voucher
+                </button>
+
+                <button
+                  type="button"
+                  disabled={isSubmitting}
+                  onClick={() => handleSave('gis')}
                   className="px-4 py-2.5 text-xs font-bold bg-slate-900 text-white hover:bg-slate-800 rounded-xl transition cursor-pointer flex items-center gap-1.5 shadow-sm disabled:opacity-50"
+                  title="Save record and print General Intake Sheet (GIS)"
                 >
                   <Printer className="h-3.5 w-3.5 text-emerald-400" />
                   Save & Print GIS

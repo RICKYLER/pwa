@@ -1904,6 +1904,8 @@ with check (
 create table if not exists public.aics_records (
   id text primary key default ('aics_' || floor(extract(epoch from now()) * 1000)::text || '_' || substr(md5(random()::text), 1, 7)),
   control_number text not null unique,
+  voucher_number text,
+  source_of_fund text not null default 'DSWD FUNDING',
   intake_date date not null default current_date,
   intake_category text not null check (
     intake_category in ('walk_in', 'referred', 'rescued')
@@ -1937,6 +1939,7 @@ create table if not exists public.aics_records (
   status text not null default 'pending' check (
     status in ('pending', 'assessed', 'approved', 'disbursed', 'liquidated')
   ),
+  disbursed_at timestamptz,
   intake_sheet jsonb not null default '{}'::jsonb,
   assigned_worker_id text,
   assigned_worker_name text not null default 'MSWDO AICS Officer',
@@ -1960,6 +1963,7 @@ create index if not exists idx_aics_records_barangay_id on public.aics_records (
 create index if not exists idx_aics_records_client_category on public.aics_records (client_category);
 create index if not exists idx_aics_records_assistance_type on public.aics_records (assistance_type);
 create index if not exists idx_aics_records_status on public.aics_records (status);
+create index if not exists idx_aics_records_disbursed_at on public.aics_records (disbursed_at desc);
 create index if not exists idx_aics_records_intake_date on public.aics_records (intake_date desc);
 create index if not exists idx_aics_records_is_deleted on public.aics_records (is_deleted);
 

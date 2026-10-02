@@ -3,13 +3,13 @@
 import { FormEvent, useEffect, useRef, useState } from 'react';
 import type { DisasterRiskLevel, HazardType, Household, PWDType, PurokRiskProfile } from '@/lib/db/schema';
 import type { AddressValidationSummary } from '@/lib/address-validation';
-import { Autocomplete } from '@react-google-maps/api';
 import {
   AlertTriangle,
   Building2,
   CheckCircle2,
   Home,
   Loader2,
+  MapPin,
   MapPinned,
   Plus,
   Search,
@@ -20,7 +20,7 @@ import {
 import { PurokFloodProfileCard } from '@/components/PurokFloodProfileCard';
 import { PurokSelectField } from '@/components/forms/PurokSelectField';
 import { LocationPicker } from '@/components/LocationPicker';
-import { useGoogleMaps } from '@/components/GoogleMapsProvider';
+import { osmSearchLocation, type OsmResolvedLocation } from '@/lib/osm-geocoding';
 import { getCurrentUser } from '@/lib/auth';
 import { getLocationMasterList } from '@/lib/db/location-master';
 import { getPurokRiskProfile } from '@/lib/db/purok-risk-profiles';
@@ -242,9 +242,13 @@ function formatRelationshipLabel(value: string): string {
 }
 
 export function HouseholdForm({ initialData, onSubmit, isLoading = false }: HouseholdFormProps) {
-  const { isLoaded: mapsReady } = useGoogleMaps();
   const currentUser = getCurrentUser();
-  const addressAutocompleteRef = useRef<google.maps.places.Autocomplete | null>(null);
+  // OpenStreetMap suggestions & search state
+  const [osmSuggestions, setOsmSuggestions] = useState<OsmResolvedLocation[]>([]);
+  const [isLoadingOsmSuggestions, setIsLoadingOsmSuggestions] = useState(false);
+  const [showOsmSuggestions, setShowOsmSuggestions] = useState(false);
+  const osmDebounceRef = useRef<NodeJS.Timeout | null>(null);
+  const suggestionsBoxRef = useRef<HTMLDivElement | null>(null);
   const initialHeadNameParts = splitFullName(initialData?.head_name || '');
   const [headNameParts, setHeadNameParts] = useState<NameParts>(initialHeadNameParts);
   const [formData, setFormData] = useState({
@@ -440,44 +444,80 @@ export function HouseholdForm({ initialData, onSubmit, isLoading = false }: Hous
     setAddressValidation(null);
   }, [addressValidation, addressValidationSignature, lastValidatedAddress]);
 
-  function handleAddressAutocomplete() {
-    const place = addressAutocompleteRef.current?.getPlace();
-    if (!place) return;
+  // OpenStreetMap Suggestion Search
+  function triggerOsmSearch(term: string) {
+    if (osmDebounceRef.current) clearTimeout(osmDebounceRef.current);
+    osmDebounceRef.current = setTimeout(async () => {
+      const trimmed = term.trim();
+      if (!trimmed || trimmed.length < 2) return;
+      setIsLoadingOsmSuggestions(true);
+      try {
+        const query = `${trimmed}, ${formData.purok_sitio ? formData.purok_sitio + ', ' : ''}${formData.barangay_name || ''}, Mabini`;
+        const res = await fetch(
+          `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&countrycodes=ph&limit=5&addressdetails=1`,
+          { headers: { Accept: 'application/json' } }
+        );
+        if (!res.ok) return;
+        const data = await res.json();
+        if (Array.isArray(data) && data.length > 0) {
+          const suggestions: OsmResolvedLocation[] = data.map((item: any) => ({
+            lat: parseFloat(item.lat),
+            lng: parseFloat(item.lon),
+            formattedAddress: item.display_name,
+            streetAddress: item.address?.road || item.address?.house_number,
+            purokSitio: item.address?.neighbourhood || item.address?.suburb,
+            barangayName: item.address?.village,
+            municipality: item.address?.town || item.address?.city || item.address?.municipality,
+            quality: item.address?.road ? 'street' : 'neighborhood',
+          }));
+          setOsmSuggestions(suggestions);
+          setShowOsmSuggestions(true);
+        } else {
+          setOsmSuggestions([]);
+        }
+      } catch (err) {
+        console.warn('OSM suggestion search failed:', err);
+      } finally {
+        setIsLoadingOsmSuggestions(false);
+      }
+    }, 350);
+  }
 
-    const pin = getPlacePinDetails(place);
-    const nextStreetAddress = pin?.streetAddress || formData.street_address;
-
+  function handleSelectOsmSuggestion(suggestion: OsmResolvedLocation) {
     setLocationError('');
     setLocationSuccess('');
     setManualPinRequired(false);
     setManualPinConfirmed(false);
-    setMatchedAddress(pin?.formattedAddress || place.formatted_address || place.name || '');
+    setShowOsmSuggestions(false);
+
+    const nextStreet = suggestion.streetAddress || suggestion.formattedAddress.split(',')[0] || formData.street_address;
+
+    setMatchedAddress(suggestion.formattedAddress);
     setFormData((prev) => ({
       ...prev,
-      street_address: nextStreetAddress,
-      barangay_name: masterListLocked ? prev.barangay_name : pin?.barangayName || prev.barangay_name,
+      street_address: nextStreet,
+      barangay_name: masterListLocked ? prev.barangay_name : suggestion.barangayName || prev.barangay_name,
       municipality: MABINI_MUNICIPALITY,
-      purok_sitio: pin?.purokSitio || prev.purok_sitio,
-      gps_lat: pin?.lat ?? prev.gps_lat,
-      gps_long: pin?.lng ?? prev.gps_long,
-      location_source: pin ? 'address_search' : prev.location_source,
-      location_confidence: pin ? 'medium' : prev.location_confidence,
+      purok_sitio: suggestion.purokSitio || prev.purok_sitio,
+      gps_lat: suggestion.lat,
+      gps_long: suggestion.lng,
+      location_source: 'address_search',
+      location_confidence: suggestion.quality === 'street' ? 'high' : 'medium',
       location_verified: false,
       location_verified_at: undefined,
       location_verified_by: undefined,
     }));
 
-    if (pin) {
-      const nextLookup = buildHouseholdGeocodingAddress({
-        ...formData,
-        street_address: nextStreetAddress,
-        barangay_name: pin.barangayName || formData.barangay_name,
-        municipality: pin.municipality || formData.municipality,
-        purok_sitio: pin.purokSitio || formData.purok_sitio,
-      });
-      setPinSource('address_search');
-      setLastPinnedAddress(nextLookup);
-    }
+    const nextLookup = buildHouseholdGeocodingAddress({
+      ...formData,
+      street_address: nextStreet,
+      barangay_name: suggestion.barangayName || formData.barangay_name,
+      municipality: MABINI_MUNICIPALITY,
+      purok_sitio: suggestion.purokSitio || formData.purok_sitio,
+    });
+    setPinSource('address_search');
+    setLastPinnedAddress(nextLookup);
+    setLocationSuccess(`Location pinned on OpenStreetMap: ${suggestion.formattedAddress}`);
   }
 
   async function resolveAddressToPin() {
@@ -494,31 +534,36 @@ export function HouseholdForm({ initialData, onSubmit, isLoading = false }: Hous
       return null;
     }
 
-    if (!mapsReady) {
-      setLocationError('Google Maps is still loading. Please wait a moment, then try again.');
-      return null;
-    }
-
     setIsResolvingAddress(true);
     try {
-      const geocoded = await searchLocation(formData.street_address, {
-        context: {
+      // 1. Search full query via OpenStreetMap Nominatim
+      const fullQuery = `${formData.street_address}, ${formData.purok_sitio}, ${formData.barangay_name}, ${formData.municipality}`;
+      let geocoded = await osmSearchLocation(fullQuery, {
+        municipality: formData.municipality,
+        barangayName: formData.barangay_name,
+      });
+
+      // 2. If not found, fall back to searching purok and barangay in Mabini
+      if (!geocoded) {
+        const fallbackQuery = `${formData.purok_sitio}, ${formData.barangay_name}, ${formData.municipality}`;
+        geocoded = await osmSearchLocation(fallbackQuery, {
           municipality: formData.municipality,
           barangayName: formData.barangay_name,
-          purokSitio: formData.purok_sitio,
-        },
-        bounds: buildDefaultSearchBounds(),
-        locationBias:
-          formData.gps_lat !== undefined && formData.gps_long !== undefined
-            ? { lat: formData.gps_lat, lng: formData.gps_long }
-            : DEFAULT_BARANGAY_CENTER,
-        radiusMeters: 20000,
-        region: 'ph',
-      });
+        });
+      }
+
+      // 3. If still not found, search barangay in Mabini
+      if (!geocoded) {
+        const brgyQuery = `${formData.barangay_name}, Mabini, Davao de Oro`;
+        geocoded = await osmSearchLocation(brgyQuery, {
+          municipality: formData.municipality,
+          barangayName: formData.barangay_name,
+        });
+      }
 
       if (!geocoded) {
         setManualPinRequired(true);
-        setLocationError('Google could not locate this address. Manual pin is now required before you can save this household.');
+        setLocationError('Could not pinpoint this exact street on OpenStreetMap. Please click or drag the pin on the StreetMap below.');
         return null;
       }
 
@@ -531,7 +576,7 @@ export function HouseholdForm({ initialData, onSubmit, isLoading = false }: Hous
         gps_lat: geocoded.lat,
         gps_long: geocoded.lng,
         location_source: 'address_search',
-        location_confidence: 'medium',
+        location_confidence: geocoded.quality === 'street' ? 'high' : 'medium',
         location_verified: false,
         location_verified_at: undefined,
         location_verified_by: undefined,
@@ -541,9 +586,13 @@ export function HouseholdForm({ initialData, onSubmit, isLoading = false }: Hous
       setPinSource('address_search');
       setLastPinnedAddress(addressLookup);
       setMatchedAddress(geocoded.formattedAddress);
-      setLocationSuccess('Address located successfully. The household pin is ready to save.');
+      setLocationSuccess('Address located on OpenStreetMap. The household pin is ready.');
 
       return geocoded;
+    } catch (err) {
+      console.error('OSM resolve error:', err);
+      setLocationError('Could not reach OpenStreetMap. You can drop a pin manually on the map.');
+      return null;
     } finally {
       setIsResolvingAddress(false);
     }
@@ -641,7 +690,7 @@ export function HouseholdForm({ initialData, onSubmit, isLoading = false }: Hous
       payload.municipality = MABINI_MUNICIPALITY;
 
       if (manualPinRequired && (payload.gps_lat === undefined || payload.gps_long === undefined)) {
-        throw new Error('Manual pin required: Google could not locate the address. Please drop a pin on the map before saving.');
+        throw new Error('Manual pin required: Please drop a pin on the StreetMap before saving.');
       }
 
       if (requiresManualVerification && !manualPinConfirmed) {
@@ -819,6 +868,10 @@ export function HouseholdForm({ initialData, onSubmit, isLoading = false }: Hous
                   </p>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
+                  <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300 px-2.5 py-1 text-[11px] font-bold">
+                    <MapPin className="h-3.5 w-3.5 text-emerald-600" />
+                    StreetMap (OpenStreetMap)
+                  </span>
                   <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2.5 py-1 text-[11px] font-medium text-primary">
                     <MapPinned className="h-3.5 w-3.5" />
                     Map-ready format
@@ -909,51 +962,92 @@ export function HouseholdForm({ initialData, onSubmit, isLoading = false }: Hous
                   />
                 </div>
 
-                <div>
-                  <label className="mb-2 block text-sm font-medium text-foreground">
-                    House No. / Street / Landmark *
-                  </label>
-                  {mapsReady ? (
-                    <Autocomplete
-                      onLoad={(autocomplete) => {
-                        addressAutocompleteRef.current = autocomplete;
-                      }}
-                      onPlaceChanged={handleAddressAutocomplete}
-                      options={{
-                        bounds: buildDefaultSearchBounds(),
-                        componentRestrictions: { country: 'ph' },
-                        fields: ['address_components', 'formatted_address', 'geometry', 'name', 'place_id'],
-                      }}
-                    >
-                      <input
-                        type="text"
-                        required
-                        value={formData.street_address}
-                        onChange={(e) => {
-                          setMatchedAddress('');
-                          setFormData((prev) => ({ ...prev, street_address: e.target.value }));
-                        }}
-                        className="w-full rounded-md border border-input bg-background px-3 py-2 text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
-                        placeholder="e.g., Purok 4, near chapel, House 12"
-                        disabled={isLoading}
-                      />
-                    </Autocomplete>
-                  ) : (
+                <div className="relative">
+                  <div className="flex items-center justify-between mb-2">
+                    <label className="block text-sm font-medium text-foreground">
+                      House No. / Street / Landmark *
+                    </label>
+                    <span className="text-[11px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200 flex items-center gap-1">
+                      <MapPin className="h-3 w-3 text-emerald-600" />
+                      OpenStreetMap
+                    </span>
+                  </div>
+
+                  <div className="relative">
                     <input
                       type="text"
                       required
                       value={formData.street_address}
                       onChange={(e) => {
+                        const val = e.target.value;
                         setMatchedAddress('');
-                        setFormData((prev) => ({ ...prev, street_address: e.target.value }));
+                        setFormData((prev) => ({ ...prev, street_address: val }));
+                        if (val.trim().length >= 2) {
+                          triggerOsmSearch(val);
+                        } else {
+                          setOsmSuggestions([]);
+                          setShowOsmSuggestions(false);
+                        }
                       }}
-                      className="w-full rounded-md border border-input bg-background px-3 py-2 text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
-                      placeholder="e.g., House 12, near chapel"
+                      onFocus={() => {
+                        if (osmSuggestions.length > 0) setShowOsmSuggestions(true);
+                      }}
+                      className="w-full rounded-md border border-input bg-background px-3 py-2 text-foreground focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                      placeholder="e.g., Purok 4, near chapel, House 12"
                       disabled={isLoading}
                     />
+
+                    {isLoadingOsmSuggestions && (
+                      <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                        <Loader2 className="h-4 w-4 animate-spin text-emerald-600" />
+                      </div>
+                    )}
+                  </div>
+
+                  {/* OpenStreetMap Suggestions Dropdown */}
+                  {showOsmSuggestions && osmSuggestions.length > 0 && (
+                    <div
+                      ref={suggestionsBoxRef}
+                      className="absolute z-50 left-0 right-0 mt-1 max-h-60 overflow-y-auto rounded-xl border border-slate-200 bg-white shadow-xl dark:border-slate-800 dark:bg-slate-900"
+                    >
+                      <div className="px-3 py-1.5 bg-slate-50 border-b border-slate-100 flex items-center justify-between text-[11px] text-slate-500 font-medium dark:bg-slate-800/50 dark:border-slate-700">
+                        <span className="flex items-center gap-1">
+                          <MapPin className="h-3 w-3 text-emerald-600" />
+                          OpenStreetMap Suggestions
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setShowOsmSuggestions(false)}
+                          className="hover:text-slate-800 dark:hover:text-slate-200 font-bold"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                      <div className="py-1">
+                        {osmSuggestions.map((item, idx) => (
+                          <button
+                            key={idx}
+                            type="button"
+                            onClick={() => handleSelectOsmSuggestion(item)}
+                            className="w-full text-left px-3 py-2 text-xs hover:bg-emerald-50/70 dark:hover:bg-emerald-950/30 flex items-start gap-2 border-b border-slate-50 last:border-0 transition"
+                          >
+                            <MapPin className="h-4 w-4 text-emerald-600 shrink-0 mt-0.5" />
+                            <div className="min-w-0">
+                              <p className="font-semibold text-slate-800 dark:text-slate-200 truncate">
+                                {item.streetAddress || item.displayName || item.formattedAddress}
+                              </p>
+                              <p className="text-[11px] text-slate-500 truncate">
+                                {item.formattedAddress}
+                              </p>
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
                   )}
+
                   <p className="mt-1 text-xs text-muted-foreground">
-                    Add a house number or landmark, then choose a Google suggestion if one appears.
+                    Add a house number or landmark. You can choose an OpenStreetMap suggestion or click on the StreetMap below to drop a pin.
                   </p>
                 </div>
 
@@ -1277,7 +1371,7 @@ export function HouseholdForm({ initialData, onSubmit, isLoading = false }: Hous
                   Manual pin required
                 </div>
                 <p className="mt-1">
-                  Google could not locate the typed address. Drop a pin on the map and the form will update the address fields from that location when available.
+                  Could not pinpoint this exact address on OpenStreetMap. Drop a pin on the StreetMap below and the form will update the address fields from that location.
                 </p>
               </div>
             )}
@@ -1285,7 +1379,7 @@ export function HouseholdForm({ initialData, onSubmit, isLoading = false }: Hous
               <div className="mb-3 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
                 <div className="flex items-center gap-1.5 font-medium">
                   <CheckCircle2 className="h-3.5 w-3.5" />
-                  Google matched this nearby location
+                  OpenStreetMap matched this nearby location
                 </div>
                 <p className="mt-1">{matchedAddress}</p>
               </div>
@@ -1302,7 +1396,7 @@ export function HouseholdForm({ initialData, onSubmit, isLoading = false }: Hous
                 ) : (
                   <Search className="h-3.5 w-3.5" />
                 )}
-                {isResolvingAddress ? 'Pinning Address...' : 'Pin From Address'}
+                {isResolvingAddress ? 'Pinning Address...' : 'Pin From Address (OpenStreetMap)'}
               </button>
               {(formData.gps_lat !== undefined && formData.gps_long !== undefined) && (
                 <span className="text-xs text-emerald-700">
@@ -1311,7 +1405,7 @@ export function HouseholdForm({ initialData, onSubmit, isLoading = false }: Hous
               )}
               <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
                 <Sparkles className="h-3.5 w-3.5" />
-                Autocomplete plus map pin gives the best result
+                StreetMap plus pin gives the best result
               </span>
             </div>
             <LocationPicker
@@ -1342,7 +1436,7 @@ export function HouseholdForm({ initialData, onSubmit, isLoading = false }: Hous
                   setPinSource(null);
                   setLastPinnedAddress('');
                   if (manualPinRequired) {
-                    setLocationError('Manual pin is required because Google could not locate the address. Please drop a pin on the map.');
+                    setLocationError('Manual pin is required. Please drop a pin on the StreetMap.');
                   }
                   return;
                 }
@@ -1373,7 +1467,7 @@ export function HouseholdForm({ initialData, onSubmit, isLoading = false }: Hous
                 setPinSource('manual_pin');
                 setLocationSuccess(
                   details
-                    ? 'Manual pin saved. The form updated the address fields from the pinned location where Google provided details.'
+                    ? 'Manual pin saved. The form updated the address fields from the pinned location on OpenStreetMap.'
                     : 'Manual pin saved. You can now submit this household.',
                 );
               }}

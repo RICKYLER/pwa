@@ -23,13 +23,6 @@ const API_KEY = (
 );
 
 export async function POST(request: Request) {
-  if (!API_KEY) {
-    return NextResponse.json(
-      { error: 'Google Address Validation API key is not configured.' },
-      { status: 500 },
-    );
-  }
-
   let body: RequestBody;
 
   try {
@@ -53,11 +46,13 @@ export async function POST(request: Request) {
     );
   }
 
-  try {
-    if (regionCode === 'PH') {
-      return NextResponse.json(buildUnsupportedAddressValidationSummary(regionCode));
-    }
+  // PH is not covered by Google Address Validation, or API key is not active (using OpenStreetMap).
+  // Safely return coverage check summary so client UI never breaks.
+  if (regionCode === 'PH' || !API_KEY) {
+    return NextResponse.json(buildUnsupportedAddressValidationSummary(regionCode));
+  }
 
+  try {
     const result = await validateAddressWithGoogle(
       {
         regionCode,

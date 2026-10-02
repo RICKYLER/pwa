@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   X,
   Printer,
@@ -20,10 +20,14 @@ import {
   Maximize2,
   Paperclip,
   ShieldCheck,
+  Clock,
+  AlertTriangle,
 } from 'lucide-react';
 import { printGeneralIntakeSheet } from '@/lib/cases/gis-printer';
+import { printPettyCashVoucher } from '@/lib/aics/voucher-printer';
 import { getBarangayName } from '@/lib/mabini-barangays';
 import { AICS_CLIENT_CATEGORIES } from '@/lib/aics/aics-categories';
+import { computeAicsCooldown } from '@/lib/aics/aics-cooldown';
 import {
   getAicsRequirementTemplates,
   type AicsRequirementTemplate,
@@ -75,6 +79,22 @@ export default function AicsDetailModal({
       intake_sheet: currentRecord.intake_sheet,
       createdAt: currentRecord.createdAt,
       updatedAt: currentRecord.updatedAt,
+    });
+  }
+
+  function handlePrintVoucher() {
+    if (!currentRecord) return;
+    printPettyCashVoucher({
+      control_number: currentRecord.control_number,
+      voucher_number: currentRecord.voucher_number || currentRecord.control_number,
+      intake_date: currentRecord.intake_date,
+      client_name: currentRecord.client_name,
+      barangay_id: currentRecord.barangay_id,
+      purok_sitio: currentRecord.purok_sitio,
+      assistance_type: currentRecord.assistance_type,
+      specific_assistance: currentRecord.specific_assistance,
+      amount_approved: currentRecord.amount_approved,
+      source_of_fund: currentRecord.source_of_fund || 'DSWD FUNDING',
     });
   }
 
@@ -144,9 +164,13 @@ export default function AicsDetailModal({
     if (!currentRecord || newStatus === currentRecord.status) return;
     setIsUpdating(true);
     try {
-      const updated = await updateAicsRecord(currentRecord.id, {
+      const updates: Partial<AicsRecord> = {
         status: newStatus,
-      });
+      };
+      if (newStatus === 'disbursed' && !currentRecord.disbursed_at) {
+        updates.disbursed_at = new Date().toISOString();
+      }
+      const updated = await updateAicsRecord(currentRecord.id, updates);
       setCurrentRecord(updated);
       onUpdate?.(updated);
     } catch (err) {
@@ -155,6 +179,12 @@ export default function AicsDetailModal({
       setIsUpdating(false);
     }
   }
+
+  // 90-day cooldown tracker
+  const cooldownInfo = useMemo(() => {
+    if (!currentRecord) return null;
+    return computeAicsCooldown([currentRecord]);
+  }, [currentRecord]);
 
   // Download / View in new tab
   function handleDownload(doc: AicsRequirementDocument) {
@@ -179,7 +209,9 @@ export default function AicsDetailModal({
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <span className="text-xs text-slate-300 font-mono font-bold">{currentRecord.control_number}</span>
+                <span className="text-xs text-slate-300 font-mono font-bold">
+                  {currentRecord.voucher_number ? `Voucher: ${currentRecord.voucher_number}` : currentRecord.control_number}
+                </span>
                 <span className="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase bg-emerald-500/25 text-emerald-200 border border-emerald-400/30">
                   {currentRecord.intake_category.replace('_', ' ')}
                 </span>
@@ -208,8 +240,16 @@ export default function AicsDetailModal({
 
           <div className="flex items-center gap-2">
             <button
+              onClick={handlePrintVoucher}
+              className="px-3.5 py-1.5 rounded-xl bg-blue-500/25 hover:bg-blue-500/35 text-white font-bold text-xs flex items-center gap-1.5 transition cursor-pointer border border-blue-400/40 shadow-xs"
+              title="Print Municipal Petty Cash Voucher"
+            >
+              <FileText className="h-3.5 w-3.5 text-blue-300" /> Print Voucher
+            </button>
+            <button
               onClick={handlePrint}
               className="px-3.5 py-1.5 rounded-xl bg-white/10 hover:bg-white/20 text-white font-bold text-xs flex items-center gap-1.5 transition cursor-pointer border border-white/20 shadow-xs"
+              title="Print General Intake Sheet (GIS)"
             >
               <Printer className="h-3.5 w-3.5 text-emerald-300" /> Print GIS
             </button>
@@ -261,6 +301,60 @@ export default function AicsDetailModal({
               <p className="text-[10px] text-slate-500">Mabini MSWDO</p>
             </div>
           </div>
+
+          {/* 3-Month Cooldown & Disbursement Status Banner */}
+          {cooldownInfo && (
+            <div
+              className={`p-4 rounded-2xl border text-xs flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 ${
+                cooldownInfo.isUnderCooldown
+                  ? 'bg-rose-50 border-rose-200 text-rose-900'
+                  : currentRecord.status === 'disbursed' || currentRecord.status === 'liquidated'
+                  ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
+                  : 'bg-slate-50 border-slate-200 text-slate-700'
+              }`}
+            >
+              <div className="space-y-0.5">
+                <div className="flex items-center gap-2 font-bold">
+                  {cooldownInfo.isUnderCooldown ? (
+                    <>
+                      <span className="flex h-2.5 w-2.5 rounded-full bg-rose-500 animate-pulse" />
+                      <span className="text-rose-700 font-extrabold uppercase tracking-wide">
+                        🔴 3-Month Cooldown Active: {cooldownInfo.daysRemaining} days left
+                      </span>
+                    </>
+                  ) : currentRecord.status === 'disbursed' || currentRecord.status === 'liquidated' ? (
+                    <>
+                      <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+                      <span className="text-emerald-800 font-extrabold uppercase tracking-wide">
+                        🟢 Cooldown Completed (Eligible for new claim)
+                      </span>
+                    </>
+                  ) : (
+                    <>
+                      <Clock className="h-4 w-4 text-slate-500" />
+                      <span className="text-slate-700 font-extrabold uppercase tracking-wide">
+                        AICS Disbursement Policy (3-Month Cooldown)
+                      </span>
+                    </>
+                  )}
+                </div>
+                <p className="text-[11px] opacity-90">
+                  {cooldownInfo.explanationCeb || cooldownInfo.explanation}
+                </p>
+              </div>
+
+              {currentRecord.disbursed_at && (
+                <div className="text-right shrink-0">
+                  <span className="text-[10px] text-slate-400 block font-bold uppercase tracking-wider">
+                    Disbursed Timestamp
+                  </span>
+                  <span className="font-mono text-[11px] font-bold">
+                    {new Date(currentRecord.disbursed_at).toLocaleString()}
+                  </span>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Demographic & Location Info */}
           <div className="p-4 rounded-2xl border border-slate-200 bg-white space-y-3 shadow-xs">

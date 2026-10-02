@@ -515,6 +515,9 @@ export interface CaseExpenses {
   electricity?: number;
   education?: number;
   transportation?: number;
+  house_rent?: number;
+  medical?: number;
+  other?: number;
   total?: number;
 }
 
@@ -607,6 +610,7 @@ export interface CaseRecord {
   barangay_id: string;
   purok_sitio?: string;
   perpetrator_name?: string;
+  perpetrator_age?: number;
   perpetrator_relationship?: string;
   perpetrator_address?: string;
   status: CaseStatus;
@@ -616,8 +620,11 @@ export interface CaseRecord {
   assigned_worker_name?: string;
   resident_id?: string;
   household_id?: string;
-  source: 'excel_import' | 'manual_intake';
+  source?: 'excel_import' | 'manual_intake';
   intake_sheet?: GeneralIntakeSheetData;
+  display_offense?: string;
+  bpo_tracker_display?: string;
+  display_status?: string;
   is_deleted?: boolean;
   deleted_at?: string;
   deleted_by?: string;
@@ -762,6 +769,8 @@ export type AicsStatus = 'pending' | 'assessed' | 'approved' | 'disbursed' | 'li
 export interface AicsRecord {
   id: string;
   control_number: string;
+  voucher_number?: string;
+  source_of_fund?: string;
   intake_date: string;
   intake_category: AicsIntakeCategory;
   sectors: AicsSector[];
@@ -780,6 +789,7 @@ export interface AicsRecord {
   amount_approved: number;
   disbursement_type: 'cash' | 'guarantee_letter' | 'food_pack' | 'cheque' | string;
   status: AicsStatus;
+  disbursed_at?: string;
   intake_sheet?: GeneralIntakeSheetData;
   assigned_worker_id?: string;
   assigned_worker_name?: string;

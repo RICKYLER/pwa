@@ -16,11 +16,15 @@ import {
   Calendar,
   Sparkles,
   RefreshCw,
+  AlertTriangle,
+  Clock,
+  ShieldAlert,
 } from 'lucide-react';
 import { getAicsRecords, getAicsStats, deleteAicsRecord } from '@/lib/db/aics';
 import { printGeneralIntakeSheet } from '@/lib/cases/gis-printer';
 import { getBarangayName, BARANGAY_REGISTRY } from '@/lib/mabini-barangays';
 import { AICS_CLIENT_CATEGORIES, getAicsCategoryLabel } from '@/lib/aics/aics-categories';
+import { computeAicsCooldown, type AicsCooldownInfo } from '@/lib/aics/aics-cooldown';
 import NewAicsIntakeModal from '@/components/aics/NewAicsIntakeModal';
 import AicsDetailModal from '@/components/aics/AicsDetailModal';
 import {
@@ -45,6 +49,7 @@ export default function AicsDesktop() {
   const [selectedMode, setSelectedMode] = useState<string>('all');
   const [selectedBarangay, setSelectedBarangay] = useState<string>('all');
   const [selectedAssistanceType, setSelectedAssistanceType] = useState<string>('all');
+  const [selectedCooldownFilter, setSelectedCooldownFilter] = useState<'all' | 'cooldown' | 'eligible'>('all');
 
   // Modals
   const [isNewModalOpen, setIsNewModalOpen] = useState(false);
@@ -164,9 +169,37 @@ export default function AicsDesktop() {
     };
   }, []);
 
+  // Compute 3-Month (90-day) Cooldown Map for all clients
+  const clientCooldownMap = useMemo(() => {
+    const map = new Map<string, AicsCooldownInfo>();
+    const grouped = new Map<string, AicsRecord[]>();
+
+    for (const r of records) {
+      const key = (r.resident_id || r.client_name || '').trim().toLowerCase();
+      if (!key) continue;
+      const list = grouped.get(key) || [];
+      list.push(r);
+      grouped.set(key, list);
+    }
+
+    for (const [key, list] of grouped.entries()) {
+      map.set(key, computeAicsCooldown(list));
+    }
+    return map;
+  }, [records]);
+
   // Filtered Records
   const filteredRecords = useMemo(() => {
     return records.filter((r) => {
+      // Cooldown Status Filter
+      if (selectedCooldownFilter !== 'all') {
+        const clientKey = (r.resident_id || r.client_name || '').trim().toLowerCase();
+        const cd = clientCooldownMap.get(clientKey);
+        const isUnderCd = Boolean(cd?.isUnderCooldown);
+        if (selectedCooldownFilter === 'cooldown' && !isUnderCd) return false;
+        if (selectedCooldownFilter === 'eligible' && isUnderCd) return false;
+      }
+
       // Category tab
       if (selectedCategoryTab !== 'all' && r.client_category !== selectedCategoryTab) {
         return false;
@@ -192,17 +225,18 @@ export default function AicsDesktop() {
         const q = searchQuery.trim().toLowerCase();
         const matchesName = r.client_name.toLowerCase().includes(q);
         const matchesCtrl = r.control_number.toLowerCase().includes(q);
+        const matchesVoucher = Boolean(r.voucher_number && r.voucher_number.toLowerCase().includes(q));
         const matchesSub = r.sub_category.toLowerCase().includes(q);
         const matchesAid = r.specific_assistance.toLowerCase().includes(q);
         const matchesBrgy = getBarangayName(r.barangay_id).toLowerCase().includes(q);
-        if (!matchesName && !matchesCtrl && !matchesSub && !matchesAid && !matchesBrgy) {
+        if (!matchesName && !matchesCtrl && !matchesVoucher && !matchesSub && !matchesAid && !matchesBrgy) {
           return false;
         }
       }
 
       return true;
     });
-  }, [records, selectedCategoryTab, selectedMode, selectedBarangay, selectedAssistanceType, searchQuery]);
+  }, [records, selectedCooldownFilter, clientCooldownMap, selectedCategoryTab, selectedMode, selectedBarangay, selectedAssistanceType, searchQuery]);
 
   // Aggregate stats
   const stats = useMemo(() => {
@@ -212,6 +246,8 @@ export default function AicsDesktop() {
     let seniorCount = 0;
     let pwdCount = 0;
     let ynspCount = 0;
+    let cooldownCount = 0;
+    let eligibleCount = 0;
 
     for (const r of records) {
       totalDisbursed += Number(r.amount_approved) || 0;
@@ -225,6 +261,12 @@ export default function AicsDesktop() {
       else if (r.client_category === 'ynsp') ynspCount++;
     }
 
+    // Count clients in cooldown vs eligible
+    for (const cd of clientCooldownMap.values()) {
+      if (cd.isUnderCooldown) cooldownCount++;
+      else eligibleCount++;
+    }
+
     return {
       totalClients: records.length,
       totalDisbursed,
@@ -233,8 +275,10 @@ export default function AicsDesktop() {
       seniorCount,
       pwdCount,
       ynspCount,
+      cooldownCount,
+      eligibleCount,
     };
-  }, [records]);
+  }, [records, clientCooldownMap]);
 
   // Daily budget summary
   const budgetSummary = useMemo(() => {
@@ -418,6 +462,23 @@ export default function AicsDesktop() {
           </div>
 
           <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
+            {/* Cooldown Status Filter */}
+            <select
+              value={selectedCooldownFilter}
+              onChange={(e) => setSelectedCooldownFilter(e.target.value as any)}
+              className={`py-2 px-3 text-xs rounded-xl border font-bold outline-none cursor-pointer transition ${
+                selectedCooldownFilter === 'cooldown'
+                  ? 'bg-rose-50 border-rose-300 text-rose-800'
+                  : selectedCooldownFilter === 'eligible'
+                  ? 'bg-emerald-50 border-emerald-300 text-emerald-800'
+                  : 'border-slate-200 bg-slate-50 text-slate-700'
+              }`}
+            >
+              <option value="all">All Cooldown Statuses</option>
+              <option value="cooldown">🔴 3-Mo Cooldown ({stats.cooldownCount})</option>
+              <option value="eligible">🟢 Eligible ({stats.eligibleCount})</option>
+            </select>
+
             {/* Mode Filter */}
             <select
               value={selectedMode}
@@ -502,11 +563,16 @@ export default function AicsDesktop() {
                       className="hover:bg-slate-50/70 transition cursor-pointer group"
                       onClick={() => setSelectedRecordForDetail(r)}
                     >
-                      {/* Control # & Date */}
+                      {/* Control # / Voucher # & Date */}
                       <td className="py-3 px-4">
                         <span className="font-mono font-bold text-slate-900 block group-hover:text-emerald-700 transition">
-                          {r.control_number}
+                          {r.voucher_number || r.control_number}
                         </span>
+                        {r.voucher_number && r.voucher_number !== r.control_number && (
+                          <span className="text-[9.5px] font-mono text-slate-400 block">
+                            Ctrl: {r.control_number}
+                          </span>
+                        )}
                         <div className="flex items-center gap-1.5 mt-0.5">
                           <span className="text-[10px] text-slate-400 font-medium">{r.intake_date}</span>
                           <span className="px-1.5 py-0.2 rounded-full text-[9px] font-extrabold uppercase bg-slate-100 text-slate-600">
@@ -517,10 +583,54 @@ export default function AicsDesktop() {
 
                       {/* Client */}
                       <td className="py-3 px-4">
-                        <span className="font-black text-slate-900 block">{r.client_name}</span>
-                        <span className="text-[11px] text-slate-500">
-                          {r.client_age} yrs • {r.client_gender}
-                        </span>
+                        {(() => {
+                          const clientKey = (r.resident_id || r.client_name || '').trim().toLowerCase();
+                          const cooldown = clientCooldownMap.get(clientKey);
+                          const isUnderCooldown = Boolean(cooldown?.isUnderCooldown);
+
+                          return (
+                            <div>
+                              <div className="flex items-center gap-1.5">
+                                <span
+                                  className={`font-black text-xs block transition ${
+                                    isUnderCooldown
+                                      ? 'text-rose-600'
+                                      : 'text-slate-900 group-hover:text-emerald-700'
+                                  }`}
+                                >
+                                  {r.client_name}
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+                                <span className="text-[11px] text-slate-500">
+                                  {r.client_age} yrs • {r.client_gender}
+                                </span>
+                                {isUnderCooldown ? (
+                                  <span
+                                    className="inline-flex items-center gap-1 px-1.5 py-0.2 rounded-full text-[9px] font-black uppercase tracking-wide bg-rose-50 text-rose-700 border border-rose-200"
+                                    title={cooldown?.explanationCeb || cooldown?.explanation}
+                                  >
+                                    <span className="h-1.5 w-1.5 rounded-full bg-rose-600 animate-pulse" />
+                                    🔴 {cooldown?.daysRemaining}d Cooldown
+                                  </span>
+                                ) : (
+                                  <span
+                                    className="inline-flex items-center gap-1 px-1.5 py-0.2 rounded-full text-[9px] font-black uppercase tracking-wide bg-emerald-50 text-emerald-700 border border-emerald-200"
+                                    title={cooldown?.explanationCeb || cooldown?.explanation}
+                                  >
+                                    <span className="h-1.5 w-1.5 rounded-full bg-emerald-600" />
+                                    🟢 Eligible
+                                  </span>
+                                )}
+                              </div>
+                              {isUnderCooldown && cooldown?.nextEligibleDate && (
+                                <span className="text-[10px] text-rose-500/90 font-medium block mt-0.5 truncate max-w-[180px]">
+                                  Eligible: {cooldown.nextEligibleDate}
+                                </span>
+                              )}
+                            </div>
+                          );
+                        })()}
                       </td>
 
                       {/* Location */}

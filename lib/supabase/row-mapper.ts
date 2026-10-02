@@ -269,6 +269,9 @@ export function mapSupabaseRow(table: SupabaseBootstrapTable, row: Record<string
       const isDeleted = Boolean(base.is_deleted);
       const deletedAt = typeof base.deleted_at === 'string' ? base.deleted_at : undefined;
       const deletedBy = typeof base.deleted_by === 'string' ? base.deleted_by : undefined;
+      const disbursedAt = typeof base.disbursed_at === 'string' ? base.disbursed_at : undefined;
+      const residentId = typeof base.resident_id === 'string' ? base.resident_id : undefined;
+      const householdId = typeof base.household_id === 'string' ? base.household_id : undefined;
 
       return {
         ...base,
@@ -276,6 +279,9 @@ export function mapSupabaseRow(table: SupabaseBootstrapTable, row: Record<string
         sectors: Array.isArray(base.sectors) ? base.sectors : [],
         amount_approved: Number(base.amount_approved) || 0,
         client_age: Number(base.client_age) || 0,
+        resident_id: residentId,
+        household_id: householdId,
+        disbursed_at: disbursedAt,
         intake_sheet: intakeSheet,
         is_deleted: isDeleted,
         deleted_at: deletedAt,

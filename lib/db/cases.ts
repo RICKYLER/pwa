@@ -31,6 +31,87 @@ export interface CaseQueryFilters {
 }
 
 /**
+ * Fetch and sync the latest cases directly from Supabase,
+ * updating IndexedDB cache and notifying reactive listeners.
+ */
+export async function syncCasesFromSupabase(): Promise<CaseRecord[]> {
+  if (typeof window === 'undefined') return [];
+  try {
+    const res = await fetch('/api/cases?includeDeleted=true', {
+      cache: 'no-store',
+      headers: { Accept: 'application/json' },
+    });
+    if (!res.ok) {
+      console.warn(`[syncCasesFromSupabase] Supabase responded with status ${res.status}`);
+      return await getCases();
+    }
+    const data = await res.json();
+    const remoteCases: CaseRecord[] = Array.isArray(data.cases) ? data.cases : [];
+
+    if (remoteCases.length > 0) {
+      const existingCases = await db.getAll<CaseRecord>(STORE_NAMES.cases);
+      // Remove mock seed cases if real Supabase data is present
+      for (const ex of existingCases) {
+        if (
+          (ex.id.startsWith('c-seed-') || ex.id.startsWith('case-2026-')) &&
+          !remoteCases.some((r) => r.id === ex.id)
+        ) {
+          await db.delete(STORE_NAMES.cases, ex.id);
+        }
+      }
+
+      for (const c of remoteCases) {
+        await db.put(STORE_NAMES.cases, c);
+      }
+    }
+
+    notifyCasesChanged();
+    return await getCases();
+  } catch (err) {
+    console.warn('[syncCasesFromSupabase] Sync failed, keeping offline cache:', err);
+    return await getCases();
+  }
+}
+
+async function syncCaseMutation(
+  type: 'save' | 'delete',
+  payload: Record<string, unknown>,
+  fallbackAction: string,
+): Promise<boolean> {
+  if (typeof window === 'undefined') return false;
+  try {
+    if (type === 'save') {
+      const res = await fetch('/api/cases', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (res.ok) return true;
+    } else {
+      const res = await fetch('/api/cases', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (res.ok) return true;
+    }
+  } catch (err) {
+    console.warn(`Direct /api/cases ${type} error:`, err);
+  }
+
+  try {
+    await runServerMutation({
+      action: fallbackAction,
+      ...payload,
+    });
+    return true;
+  } catch (err) {
+    console.warn(`Fallback mutation ${fallbackAction} failed:`, err);
+    return false;
+  }
+}
+
+/**
  * Fetch cases from IndexedDB with optional instant search query & filters.
  * Query matches against case_number, victim_name, perpetrator_name, and summary.
  */
@@ -40,9 +121,14 @@ export async function getCases(filters?: CaseQueryFilters): Promise<CaseRecord[]
 
     if (allCases.length === 0 && typeof window !== 'undefined') {
       try {
-        const { bootstrapPathnameData } = await import('@/lib/supabase/route-bootstrap');
-        await bootstrapPathnameData('/cases', false);
-        allCases = await db.getAll<CaseRecord>(STORE_NAMES.cases);
+        const synced = await syncCasesFromSupabase();
+        if (synced && synced.length > 0) {
+          allCases = synced;
+        } else {
+          const { bootstrapPathnameData } = await import('@/lib/supabase/route-bootstrap');
+          await bootstrapPathnameData('/cases', false);
+          allCases = await db.getAll<CaseRecord>(STORE_NAMES.cases);
+        }
       } catch (err) {
         console.warn('Failed to auto-bootstrap cases from Supabase:', err);
       }
@@ -167,17 +253,10 @@ export async function createCase(
 
   await db.put(STORE_NAMES.cases, newCase);
 
-  if (typeof window !== 'undefined') {
-    try {
-      await runServerMutation({
-        action: 'create_case',
-        payload: { caseRecord: newCase },
-      });
-      newCase.syncStatus = 'synced';
-      await db.put(STORE_NAMES.cases, newCase);
-    } catch (err) {
-      console.warn('Failed to sync case to Supabase immediately (offline-queued):', err);
-    }
+  const synced = await syncCaseMutation('save', { caseRecord: newCase }, 'create_case');
+  if (synced) {
+    newCase.syncStatus = 'synced';
+    await db.put(STORE_NAMES.cases, newCase);
   }
 
   notifyCasesChanged();
@@ -205,17 +284,10 @@ export async function updateCase(
 
   await db.put(STORE_NAMES.cases, updated);
 
-  if (typeof window !== 'undefined') {
-    try {
-      await runServerMutation({
-        action: 'update_case',
-        payload: { caseRecord: updated },
-      });
-      updated.syncStatus = 'synced';
-      await db.put(STORE_NAMES.cases, updated);
-    } catch (err) {
-      console.warn('Failed to sync case update to Supabase immediately:', err);
-    }
+  const synced = await syncCaseMutation('save', { caseRecord: updated }, 'update_case');
+  if (synced) {
+    updated.syncStatus = 'synced';
+    await db.put(STORE_NAMES.cases, updated);
   }
 
   notifyCasesChanged();
@@ -239,17 +311,15 @@ export async function moveCaseToTrash(id: string, deletedBy?: string): Promise<C
   }
 
   const nowIso = new Date().toISOString();
-  const updatedSheet: GeneralIntakeSheetData | undefined = existing.intake_sheet
-    ? {
-        ...existing.intake_sheet,
-        _trash: {
-          is_deleted: true,
-          deleted_at: nowIso,
-          deleted_by: deletedBy || 'MSWDO Staff',
-          previous_status: existing.status,
-        },
-      }
-    : undefined;
+  const updatedSheet = {
+    ...(existing.intake_sheet || {}),
+    _trash: {
+      is_deleted: true,
+      deleted_at: nowIso,
+      deleted_by: deletedBy || 'MSWDO Staff',
+      previous_status: existing.status,
+    },
+  } as GeneralIntakeSheetData;
 
   const updated: CaseRecord = {
     ...existing,
@@ -263,17 +333,10 @@ export async function moveCaseToTrash(id: string, deletedBy?: string): Promise<C
 
   await db.put(STORE_NAMES.cases, updated);
 
-  if (typeof window !== 'undefined') {
-    try {
-      await runServerMutation({
-        action: 'update_case',
-        payload: { caseRecord: updated },
-      });
-      updated.syncStatus = 'synced';
-      await db.put(STORE_NAMES.cases, updated);
-    } catch (err) {
-      console.warn('Failed to sync case trash to Supabase immediately:', err);
-    }
+  const synced = await syncCaseMutation('delete', { id, mode: 'trash' }, 'update_case');
+  if (synced) {
+    updated.syncStatus = 'synced';
+    await db.put(STORE_NAMES.cases, updated);
   }
 
   notifyCasesChanged();
@@ -308,17 +371,10 @@ export async function restoreCaseFromTrash(id: string): Promise<CaseRecord> {
 
   await db.put(STORE_NAMES.cases, updated);
 
-  if (typeof window !== 'undefined') {
-    try {
-      await runServerMutation({
-        action: 'update_case',
-        payload: { caseRecord: updated },
-      });
-      updated.syncStatus = 'synced';
-      await db.put(STORE_NAMES.cases, updated);
-    } catch (err) {
-      console.warn('Failed to sync case restoration to Supabase immediately:', err);
-    }
+  const synced = await syncCaseMutation('save', { caseRecord: updated }, 'update_case');
+  if (synced) {
+    updated.syncStatus = 'synced';
+    await db.put(STORE_NAMES.cases, updated);
   }
 
   notifyCasesChanged();
@@ -329,26 +385,13 @@ export async function restoreCaseFromTrash(id: string): Promise<CaseRecord> {
  * Permanently purge a case and its related notes and attachments
  */
 export async function permanentlyDeleteCase(id: string): Promise<void> {
-  // 1. Attempt server-side permanent deletion
-  if (typeof window !== 'undefined') {
-    try {
-      await runServerMutation({
-        action: 'delete_case_permanently',
-        caseId: id,
-      });
-    } catch (serverErr) {
-      console.warn('Server permanent deletion failed or offline, proceeding with local purge:', serverErr);
-    }
-  }
+  await syncCaseMutation('delete', { id, mode: 'permanent' }, 'delete_case_permanently');
 
-  // 2. Local database purge
   await db.delete(STORE_NAMES.cases, id);
 
-  // Clean up notes
   const notes = await getCaseNotes(id);
   await Promise.all(notes.map((n) => db.deleteSilently(STORE_NAMES.case_notes, n.id)));
 
-  // Clean up attachments
   const attachments = await getCaseAttachments(id);
   await Promise.all(attachments.map((a) => db.deleteSilently(STORE_NAMES.case_attachments, a.id)));
 

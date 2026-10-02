@@ -152,7 +152,7 @@ function addSecurityHeaders(response: NextResponse): NextResponse {
 // Proxy (Next.js 16+ convention, replaces middleware)
 // ---------------------------------------------------------------------------
 
-export function proxy(request: NextRequest) {
+export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   maybeCleanupRateLimitStore();
@@ -220,7 +220,7 @@ export function proxy(request: NextRequest) {
     },
   });
 
-  return response;
+  return addSecurityHeaders(response);
 }
 
 // ---------------------------------------------------------------------------
@@ -235,6 +235,7 @@ export const config = {
      *   - favicon.ico
      *   - public assets (icons, images, sw.js, manifest.json)
      */
+
     '/((?!_next/static|_next/image|favicon.ico|icons/|images/|sw.js|manifest.json).*)',
   ],
 };

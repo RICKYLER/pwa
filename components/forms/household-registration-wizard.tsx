@@ -24,7 +24,6 @@ import {
 import { LocationPicker } from '@/components/LocationPicker';
 import type { MemberDraft } from '@/components/forms/household-form';
 import { joinNameParts, splitFullName } from '@/lib/name-parts';
-import { useGoogleMaps } from '@/components/GoogleMapsProvider';
 import {
   useResidentLanguage,
   getCivilStatusTranslation,
@@ -346,7 +345,6 @@ export function HouseholdRegistrationWizard({
   onSubmit,
 }: RegistrationWizardProps) {
   const router = useRouter();
-  const { isLoaded: mapsReady } = useGoogleMaps();
   const { t, lang } = useResidentLanguage();
 
   const stepLabels = useMemo(() => [
@@ -530,11 +528,6 @@ export function HouseholdRegistrationWizard({
 
     if (!navigator.geolocation) {
       setError('This browser does not support geolocation.');
-      return;
-    }
-
-    if (!mapsReady) {
-      setError('Google Maps is still loading. Please wait a moment and try again.');
       return;
     }
 

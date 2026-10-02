@@ -27,6 +27,8 @@ test('admin users subscribe to admin-scoped realtime topics', () => {
     'role:admin:distribution',
     'role:admin:incidents',
     'role:admin:audit',
+    'role:admin:cases',
+    'role:social_worker:cases',
     'user:user-default:notifications',
   ]);
 });

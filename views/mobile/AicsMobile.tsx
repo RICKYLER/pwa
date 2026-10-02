@@ -27,6 +27,7 @@ import AicsDailyBudgetHero from '@/components/aics/AicsDailyBudgetHero';
 import AicsDailyBudgetModal from '@/components/aics/AicsDailyBudgetModal';
 import { getSupabaseBrowserClient } from '@/lib/supabase/client';
 import { bootstrapSupabaseTables } from '@/lib/supabase/bootstrap';
+import { computeAicsCooldown, type AicsCooldownInfo } from '@/lib/aics/aics-cooldown';
 import type { AicsRecord } from '@/lib/db/schema';
 
 export default function AicsMobile() {
@@ -152,6 +153,23 @@ export default function AicsMobile() {
     };
   }, []);
 
+  // Compute 3-Month Cooldown Map for mobile cards
+  const clientCooldownMap = useMemo(() => {
+    const map = new Map<string, AicsCooldownInfo>();
+    const grouped = new Map<string, AicsRecord[]>();
+    for (const r of records) {
+      const key = (r.resident_id || r.client_name || '').trim().toLowerCase();
+      if (!key) continue;
+      const list = grouped.get(key) || [];
+      list.push(r);
+      grouped.set(key, list);
+    }
+    for (const [key, list] of grouped.entries()) {
+      map.set(key, computeAicsCooldown(list));
+    }
+    return map;
+  }, [records]);
+
   const filteredRecords = useMemo(() => {
     return records.filter((r) => {
       if (selectedCategoryTab !== 'all' && r.client_category !== selectedCategoryTab) {
@@ -161,8 +179,9 @@ export default function AicsMobile() {
         const q = searchQuery.trim().toLowerCase();
         const matchesName = r.client_name.toLowerCase().includes(q);
         const matchesCtrl = r.control_number.toLowerCase().includes(q);
+        const matchesVoucher = Boolean(r.voucher_number && r.voucher_number.toLowerCase().includes(q));
         const matchesSub = r.sub_category.toLowerCase().includes(q);
-        if (!matchesName && !matchesCtrl && !matchesSub) return false;
+        if (!matchesName && !matchesCtrl && !matchesVoucher && !matchesSub) return false;
       }
       return true;
     });
@@ -294,18 +313,41 @@ export default function AicsMobile() {
               r.sub_category.toLowerCase().includes('dialysis') ||
               r.sub_category.toLowerCase().includes('cancer');
 
+            const clientKey = (r.resident_id || r.client_name || '').trim().toLowerCase();
+            const cooldown = clientCooldownMap.get(clientKey);
+            const isUnderCooldown = Boolean(cooldown?.isUnderCooldown);
+
             return (
               <div
                 key={r.id}
                 onClick={() => setSelectedRecordForDetail(r)}
-                className="p-3.5 bg-white rounded-2xl border border-slate-200 shadow-xs space-y-2 active:bg-slate-50 transition cursor-pointer"
+                className={`p-3.5 bg-white rounded-2xl border shadow-xs space-y-2 active:bg-slate-50 transition cursor-pointer ${
+                  isUnderCooldown ? 'border-rose-200/90' : 'border-slate-200'
+                }`}
               >
                 <div className="flex items-start justify-between gap-2">
                   <div>
-                    <span className="text-[10px] font-mono font-bold text-slate-400">
-                      {r.control_number} • {r.intake_date}
-                    </span>
-                    <h3 className="text-sm font-black text-slate-900 leading-tight">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className="text-[10px] font-mono font-bold text-slate-400">
+                        {r.voucher_number || r.control_number} • {r.intake_date}
+                      </span>
+                      {isUnderCooldown ? (
+                        <span className="inline-flex items-center gap-1 px-1.5 py-0.2 rounded-full text-[9px] font-black uppercase bg-rose-50 text-rose-700 border border-rose-200">
+                          <span className="h-1.5 w-1.5 rounded-full bg-rose-600 animate-pulse" />
+                          🔴 {cooldown?.daysRemaining}d Cooldown
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 px-1.5 py-0.2 rounded-full text-[9px] font-black uppercase bg-emerald-50 text-emerald-700 border border-emerald-200">
+                          <span className="h-1.5 w-1.5 rounded-full bg-emerald-600" />
+                          🟢 Eligible
+                        </span>
+                      )}
+                    </div>
+                    <h3
+                      className={`text-sm font-black leading-tight mt-0.5 ${
+                        isUnderCooldown ? 'text-rose-600' : 'text-slate-900'
+                      }`}
+                    >
                       {r.client_name}
                     </h3>
                     <p className="text-[11px] text-slate-500">

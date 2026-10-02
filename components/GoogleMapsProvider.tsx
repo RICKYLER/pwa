@@ -23,24 +23,26 @@ export function useGoogleMaps() {
     return useContext(GoogleMapsContext);
 }
 
-export default function GoogleMapsProvider({ children }: { children: ReactNode }) {
+function ActiveGoogleMapsLoader({ children, apiKey }: { children: ReactNode; apiKey: string }) {
     const { isLoaded } = useJsApiLoader({
-        googleMapsApiKey: process.env.NEXT_PUBLIC_GOOGLE_MAPS_KEY ?? '',
+        googleMapsApiKey: apiKey,
         libraries: LIBRARIES,
     });
 
     // Once the Maps SDK is ready, attach App Check so every API request
     // is automatically accompanied by a Firebase attestation token.
     useEffect(() => {
-        if (!isLoaded) return;
+        if (!isLoaded || typeof window === 'undefined' || !window.google?.maps) return;
         try {
             // `google.maps.Settings` is only available after the SDK loads.
             // Cast to `any` because `fetchAppCheckToken` is a newer property
             // not yet in the @types/google.maps type definitions.
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const settings = google.maps.Settings.getInstance() as any;
-            settings.fetchAppCheckToken = () =>
-                getAppCheckToken().then(result => result ?? { token: '' });
+            const settings = (google.maps as any).Settings?.getInstance?.();
+            if (settings) {
+                settings.fetchAppCheckToken = () =>
+                    getAppCheckToken().then(result => result ?? { token: '' });
+            }
         } catch (err) {
             // Non-fatal — maps will still work, just without App Check enforcement
             console.warn('Could not attach App Check to Maps:', err);
@@ -52,4 +54,20 @@ export default function GoogleMapsProvider({ children }: { children: ReactNode }
             {children}
         </GoogleMapsContext.Provider>
     );
+}
+
+export default function GoogleMapsProvider({ children }: { children: ReactNode }) {
+    const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_KEY?.trim();
+
+    // If no Google Maps key is set or active, do NOT load the script tag at all.
+    // This completely prevents Google's "This page can't load Google Maps correctly" popup.
+    if (!apiKey || apiKey === 'dummy' || apiKey === 'undefined') {
+        return (
+            <GoogleMapsContext.Provider value={{ isLoaded: false }}>
+                {children}
+            </GoogleMapsContext.Provider>
+        );
+    }
+
+    return <ActiveGoogleMapsLoader apiKey={apiKey}>{children}</ActiveGoogleMapsLoader>;
 }

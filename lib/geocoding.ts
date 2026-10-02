@@ -1,6 +1,7 @@
 import type { Household } from '@/lib/db/schema';
 import { MABINI_MAP_BOUNDS } from '@/lib/mabini';
 import { DEFAULT_BARANGAY_CENTER } from '@/lib/map-pins';
+import { osmReverseGeocode, osmSearchLocation } from '@/lib/osm-geocoding';
 
 export interface GeocodedLocation {
   lat: number;
@@ -571,8 +572,27 @@ export async function searchLocation(
     region?: string;
   },
 ): Promise<ResolvedLocation | null> {
-  if (typeof window === 'undefined' || !window.google?.maps) {
+  if (typeof window === 'undefined') {
     return null;
+  }
+
+  // OpenStreetMap / StreetMap fallback when Google Maps is not available
+  if (!window.google?.maps) {
+    const osm = await osmSearchLocation(query, {
+      municipality: options?.context?.municipality,
+      barangayName: options?.context?.barangayName,
+    });
+    if (!osm) return null;
+    return {
+      lat: osm.lat,
+      lng: osm.lng,
+      formattedAddress: osm.formattedAddress,
+      streetAddress: osm.streetAddress,
+      purokSitio: osm.purokSitio,
+      barangayName: osm.barangayName,
+      municipality: osm.municipality,
+      displayName: osm.streetAddress || osm.formattedAddress,
+    };
   }
 
   const locationBias = options?.locationBias ?? DEFAULT_BARANGAY_CENTER;
@@ -720,8 +740,31 @@ export async function resolveLocationFromCoordinates(
   lat: number,
   lng: number,
 ): Promise<ResolvedLocation | null> {
-  if (typeof window === 'undefined' || !window.google?.maps) {
+  if (typeof window === 'undefined') {
     return null;
+  }
+
+  // OpenStreetMap / StreetMap fallback when Google Maps is not available
+  if (!window.google?.maps) {
+    const osm = await osmReverseGeocode(lat, lng);
+    if (!osm) {
+      return {
+        lat,
+        lng,
+        formattedAddress: `${lat.toFixed(5)}, ${lng.toFixed(5)}`,
+        displayName: 'Pinned Location',
+      };
+    }
+    return {
+      lat: osm.lat,
+      lng: osm.lng,
+      formattedAddress: osm.formattedAddress,
+      streetAddress: osm.streetAddress,
+      purokSitio: osm.purokSitio,
+      barangayName: osm.barangayName,
+      municipality: osm.municipality,
+      displayName: osm.streetAddress || osm.formattedAddress,
+    };
   }
 
   const geocoderResults = await new Promise<google.maps.GeocoderResult[] | null>((resolve) => {

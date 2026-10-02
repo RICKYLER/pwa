@@ -591,6 +591,8 @@ async function mapQueueItemToSupabaseRow(item: SyncQueueItem, syncActorId: strin
       return {
         id: toRequiredString(data.id, 'aics_record.id'),
         control_number: toRequiredString(data.control_number, 'aics_record.control_number'),
+        voucher_number: toOptionalString(data.voucher_number),
+        source_of_fund: toOptionalString(data.source_of_fund) ?? 'DSWD FUNDING',
         intake_date: toDateOnly(data.intake_date) ?? new Date().toISOString().slice(0, 10),
         intake_category: toRequiredString(data.intake_category, 'aics_record.intake_category'),
         sectors: Array.isArray(data.sectors) ? normalizeJsonValue(data.sectors) : [],
@@ -609,6 +611,7 @@ async function mapQueueItemToSupabaseRow(item: SyncQueueItem, syncActorId: strin
         amount_approved: toOptionalNumber(data.amount_approved) ?? 0,
         disbursement_type: toOptionalString(data.disbursement_type) ?? 'cash',
         status: toRequiredString(data.status, 'aics_record.status'),
+        disbursed_at: toTimestamp(data.disbursed_at),
         intake_sheet: data.intake_sheet && typeof data.intake_sheet === 'object'
           ? normalizeJsonValue(data.intake_sheet)
           : {},

@@ -41,12 +41,15 @@ import { resolveResidentActiveApprovedHousehold } from '@/lib/resident-household
 import SoloParentIdCardModal from '@/components/solo-parents/SoloParentIdCardModal';
 import { getSoloParentByResidentId } from '@/lib/db/solo-parents';
 import { useResidentLanguage, getCivilStatusTranslation } from '@/lib/i18n/resident-language';
+import { getAicsRecordsForResident } from '@/lib/db/aics';
+import { computeAicsCooldown, type AicsCooldownInfo } from '@/lib/aics/aics-cooldown';
 import type {
   Household,
   PurokRiskProfile,
   Resident,
   VulnerabilityFlags,
   SoloParentRecord,
+  AicsRecord,
 } from '@/lib/db/schema';
 
 interface ResidentProfileModalProps {
@@ -93,6 +96,24 @@ export default function ResidentProfileModal({
   const [isDownloading, setIsDownloading] = useState(false);
   const [soloParentRecord, setSoloParentRecord] = useState<SoloParentRecord | null>(null);
   const [showSoloParentCard, setShowSoloParentCard] = useState(false);
+  const [aicsRecords, setAicsRecords] = useState<AicsRecord[]>([]);
+
+  useEffect(() => {
+    if (!open) return;
+    const user = currentUser || getCurrentUser();
+    getAicsRecordsForResident({
+      residentId: resident?.id,
+      householdId: household?.id,
+      clientName: user?.name,
+    })
+      .then((records) => setAicsRecords(records))
+      .catch(() => setAicsRecords([]));
+  }, [open, resident?.id, household?.id, currentUser]);
+
+  const aicsCooldown = useMemo(
+    () => computeAicsCooldown(aicsRecords),
+    [aicsRecords],
+  );
 
   async function handleOpenSoloParentCard() {
     if (!resident) return;
@@ -529,6 +550,17 @@ export default function ResidentProfileModal({
                       {isCeb ? 'Low Income Household' : 'Low Income Household'}
                     </span>
                   ) : null}
+                  {aicsCooldown.isUnderCooldown ? (
+                    <span className="inline-flex items-center gap-1 rounded-full bg-rose-600 px-3 py-1 text-xs font-black text-white shadow-sm">
+                      <span className="h-2 w-2 rounded-full bg-white animate-pulse" />
+                      🔴 AICS: {aicsCooldown.daysRemaining}d Cooldown
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1 rounded-full bg-emerald-600 px-3 py-1 text-xs font-black text-white shadow-sm">
+                      <CheckCircle2 className="h-3 w-3" />
+                      🟢 AICS: {isCeb ? 'Kwalipikado' : 'Eligible'}
+                    </span>
+                  )}
                   <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700">
                     MSWDO Verified
                   </span>
@@ -640,6 +672,69 @@ export default function ResidentProfileModal({
                     </div>
                   </dl>
                 </div>
+              </div>
+
+              {/* AICS Financial & Medical Assistance Cooldown Status Card */}
+              <div
+                className={`rounded-2xl border p-4 space-y-2.5 ${
+                  aicsCooldown.isUnderCooldown
+                    ? 'border-rose-200 bg-rose-50/70'
+                    : 'border-emerald-200 bg-emerald-50/50'
+                }`}
+              >
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <HeartHandshake
+                      className={`h-4 w-4 ${
+                        aicsCooldown.isUnderCooldown ? 'text-rose-600' : 'text-emerald-600'
+                      }`}
+                    />
+                    <h4
+                      className={`text-xs font-black uppercase tracking-wider ${
+                        aicsCooldown.isUnderCooldown ? 'text-rose-900' : 'text-emerald-900'
+                      }`}
+                    >
+                      {isCeb ? 'A.I.C.S. Hinabang & 3-Month Status' : 'A.I.C.S. Assistance & 3-Month Status'}
+                    </h4>
+                  </div>
+                  {aicsCooldown.isUnderCooldown ? (
+                    <span className="inline-flex items-center gap-1 rounded-full bg-rose-100 border border-rose-300 px-2.5 py-0.5 text-[10px] font-black text-rose-800">
+                      <span className="h-1.5 w-1.5 rounded-full bg-rose-600 animate-pulse" />
+                      🔴 {isCeb ? `${aicsCooldown.daysRemaining}d Cooldown` : `${aicsCooldown.daysRemaining}d Left`}
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 border border-emerald-300 px-2.5 py-0.5 text-[10px] font-black text-emerald-800">
+                      <span className="h-1.5 w-1.5 rounded-full bg-emerald-600" />
+                      🟢 {isCeb ? 'Kwalipikado (Eligible)' : 'Eligible'}
+                    </span>
+                  )}
+                </div>
+
+                <p className="text-xs text-slate-700 leading-relaxed">
+                  {isCeb ? aicsCooldown.explanationCeb : aicsCooldown.explanation}
+                </p>
+
+                {aicsRecords.length > 0 && (
+                  <div className="space-y-1.5 pt-2 border-t border-slate-200/60">
+                    <span className="text-[10px] font-bold uppercase text-slate-500 block">
+                      {isCeb ? 'Mga Nadawat nga Hinabang / Vouchers:' : 'Received Vouchers:'}
+                    </span>
+                    {aicsRecords.slice(0, 3).map((item) => (
+                      <div
+                        key={item.id}
+                        className="flex items-center justify-between text-xs py-1.5 px-3 rounded-xl bg-white border border-slate-200/80 shadow-2xs"
+                      >
+                        <div>
+                          <span className="font-bold text-slate-900">{item.specific_assistance}</span>
+                          <span className="text-[10px] text-slate-400 ml-1.5 font-mono">{item.control_number}</span>
+                        </div>
+                        <span className="font-black text-emerald-800">
+                          ₱{Number(item.amount_approved).toLocaleString()}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
 
               {/* Instructions banner: Dual QR clarity */}

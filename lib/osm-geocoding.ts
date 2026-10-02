@@ -12,6 +12,7 @@ export interface OsmResolvedLocation {
   barangayName?: string;
   municipality?: string;
   quality: 'street' | 'neighborhood' | 'city';
+  displayName?: string;
 }
 
 interface NominatimAddress {
@@ -154,7 +155,7 @@ export async function osmSearchLocation(
     const parsedLat = parseFloat(best.lat);
     const parsedLng = parseFloat(best.lon);
     const quality = parseNominatimQuality(best.address);
-    const formattedAddress = formatOsmAddress(best);
+    const formattedAddress = formatOsmAddress(best); 4
 
     return {
       lat: parsedLat,

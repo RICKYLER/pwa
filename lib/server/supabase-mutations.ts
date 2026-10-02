@@ -3403,6 +3403,12 @@ export async function saveAicsRecordOnServer(
     control_number: typeof rawRecord.control_number === 'string' && rawRecord.control_number.trim()
       ? rawRecord.control_number.trim()
       : `AICS-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`,
+    voucher_number: typeof rawRecord.voucher_number === 'string' && rawRecord.voucher_number.trim()
+      ? rawRecord.voucher_number.trim()
+      : null,
+    source_of_fund: typeof rawRecord.source_of_fund === 'string' && rawRecord.source_of_fund.trim()
+      ? rawRecord.source_of_fund.trim()
+      : 'DSWD FUNDING',
     intake_date: typeof rawRecord.intake_date === 'string' && rawRecord.intake_date.trim()
       ? rawRecord.intake_date.trim()
       : now.slice(0, 10),
@@ -3423,6 +3429,7 @@ export async function saveAicsRecordOnServer(
     amount_approved: Number(rawRecord.amount_approved) || 0,
     disbursement_type: typeof rawRecord.disbursement_type === 'string' ? rawRecord.disbursement_type : 'cash',
     status: typeof rawRecord.status === 'string' ? rawRecord.status : 'pending',
+    disbursed_at: typeof rawRecord.disbursed_at === 'string' ? rawRecord.disbursed_at : null,
     intake_sheet: rawRecord.intake_sheet && typeof rawRecord.intake_sheet === 'object' ? rawRecord.intake_sheet : {},
     assigned_worker_id: typeof rawRecord.assigned_worker_id === 'string' ? rawRecord.assigned_worker_id : user.id,
     assigned_worker_name: typeof rawRecord.assigned_worker_name === 'string' ? rawRecord.assigned_worker_name : user.name,
